@@ -1,0 +1,14 @@
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-*,
+  modernize-*,
+  cppcoreguidelines-avoid-magic-numbers,
+  cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-type-reinterpret-cast,
+  clang-analyzer-*
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|includes|external/basic_agent/src|external/basic_agent/include)/'
+FormatStyle: file
