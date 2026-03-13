@@ -4,6 +4,8 @@
 
 #include "MainFrame.h"
 #include "VisualizationFrame.h"
+#include "GragDiagnosticsPanel.h"
+#include "ExecutiveStateStrip.h"
 #include "file_handler.h"
 
 #include <json.hpp>
@@ -22,6 +24,8 @@
 #include "FileDropTarget.h"
 #include "ChatSessionDataViewModel.h"
 #include "ChatMessagePanel.h"
+
+#include <wx/clipbrd.h>
 
 using json = nlohmann::json;
 using namespace Thoth; // Bring ChatSession and ChatMessage into scope
@@ -219,31 +223,36 @@ void MainFrame::RefreshChatList() {
 }
 
 void MainFrame::RefreshRagPanel() {
-    auto setSlot = [this](wxStaticText* slot, const std::string& path, int index) {
-        if (!slot) return;
+    auto setSlot = [this](wxStaticText* slot, wxButton* btn, const std::string& path, int index) {
+        if (!slot || !btn) return;
         if (path.empty()) {
             slot->SetLabel(wxString::Format("Empty Slot %d", index));
+            btn->Hide();
         } else {
             wxFileName fn(path);
             slot->SetLabel(fn.GetFullName());
+            btn->Show();
         }
     };
 
     if (m_activeSessionIndex < 0 || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
-        setSlot(m_ragFileSlot1, "", 1);
-        setSlot(m_ragFileSlot2, "", 2);
-        setSlot(m_ragFileSlot3, "", 3);
-        setSlot(m_ragFileSlot4, "", 4);
+        setSlot(m_ragFileSlot1, m_ragDeleteBtn1, "", 1);
+        setSlot(m_ragFileSlot2, m_ragDeleteBtn2, "", 2);
+        setSlot(m_ragFileSlot3, m_ragDeleteBtn3, "", 3);
+        setSlot(m_ragFileSlot4, m_ragDeleteBtn4, "", 4);
+        Layout();
         return;
     }
 
     const auto& session = m_sessions[m_activeSessionIndex];
     const auto& files = session.ragFilePaths;
 
-    setSlot(m_ragFileSlot1, files.size() > 0 ? files[0] : "", 1);
-    setSlot(m_ragFileSlot2, files.size() > 1 ? files[1] : "", 2);
-    setSlot(m_ragFileSlot3, files.size() > 2 ? files[2] : "", 3);
-    setSlot(m_ragFileSlot4, files.size() > 3 ? files[3] : "", 4);
+    setSlot(m_ragFileSlot1, m_ragDeleteBtn1, files.size() > 0 ? files[0] : "", 1);
+    setSlot(m_ragFileSlot2, m_ragDeleteBtn2, files.size() > 1 ? files[1] : "", 2);
+    setSlot(m_ragFileSlot3, m_ragDeleteBtn3, files.size() > 2 ? files[2] : "", 3);
+    setSlot(m_ragFileSlot4, m_ragDeleteBtn4, files.size() > 3 ? files[3] : "", 4);
+    
+    Layout();
 }
 
 void MainFrame::RenderSession(std::size_t sessionIndex) {
@@ -258,7 +267,7 @@ void MainFrame::RenderSession(std::size_t sessionIndex) {
     for (const auto& message : session.messages) {
         bool isUser = (message.role == "user");
         ChatMessagePanel* bubble = new ChatMessagePanel(m_chatContainer, wxString::FromUTF8(message.content), isUser);
-        m_chatSizer->Add(bubble, 0, wxEXPAND | wxALL, 5);
+        m_chatSizer->Add(bubble, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 5);
     }
 
     m_chatContainer->Layout();
@@ -315,25 +324,20 @@ MainFrame::MainFrame()
     agent = std::make_unique<AgentInterface>();
 
     agent->onResponse = [this](const std::string& reply, const std::string& requestId) {
-        std::cerr << "[MainFrame] onResponse callback triggered for request: " << requestId << "\n";
         wxTheApp->CallAfter([this, reply, requestId]() {
-            std::cerr << "[MainFrame] CallAfter executing for request: " << requestId << "\n";
             const auto requestIt = m_requestToSession.find(requestId);
             if (requestIt == m_requestToSession.end()) {
-                std::cerr << "[MainFrame][Error] RequestId not found in map: " << requestId << "\n";
                 return;
             }
 
             const std::string targetSessionId = requestIt->second;
             m_requestToSession.erase(requestIt);
-            std::cerr << "[MainFrame] Request mapped to session: " << targetSessionId << "\n";
 
             auto sessionIt = std::find_if(m_sessions.begin(), m_sessions.end(),
                 [&targetSessionId](const Thoth::ChatSession& session) {
                     return session.id == targetSessionId;
                 });
             if (sessionIt == m_sessions.end()) {
-                std::cerr << "[MainFrame][Error] Target session not found: " << targetSessionId << "\n";
                 return;
             }
 
@@ -344,18 +348,48 @@ MainFrame::MainFrame()
             m_typingIndicator->Hide();
             this->Layout();
 
-            RefreshChatList(); // Note: This sorts m_sessions and updates m_activeSessionIndex
+            RefreshChatList();
 
             // Only render if we are still looking at the session that got the reply
             if (m_sessionId == targetSessionId) {
-                 std::cerr << "[MainFrame] Re-rendering active session: " << targetSessionId << "\n";
                  RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
-            } else {
-                 std::cerr << "[MainFrame] Reply was for background session " << targetSessionId 
-                           << " (Current active is " << m_sessionId << ")\n";
             }
 
             SetStatusText("Response received");
+        });
+    };
+
+    // --- Wire Observability events (Phase 2) ---
+    agent->onEvent = [this](const ControllerEvent& ev) {
+        wxTheApp->CallAfter([this, event = ev]() {
+            if (event.type == EventType::RETRIEVAL_DIAGNOSTICS) {
+                if (this->m_gragPanel) {
+                    this->m_gragPanel->UpdateDiagnostics(event.metadata);
+                }
+            } else if (event.type == EventType::PLAN_CREATED || event.type == EventType::PLAN_REVISED) {
+                if (event.metadata.contains("plan")) {
+                    if (this->m_stateStrip) this->m_stateStrip->ResetPlan(event.metadata["plan"]);
+                    if (this->m_goalText && event.metadata["plan"].contains("goal")) {
+                        this->m_goalText->SetLabel(wxString::FromUTF8(event.metadata["plan"]["goal"]));
+                        this->m_goalBanner->Show();
+                        this->Layout();
+                    }
+                }
+            } else if (event.type == EventType::STEP_STARTED) {
+                if (this->m_stateStrip) {
+                    this->m_stateStrip->UpdateStepStatus(event.step_id, StepStatus::RUNNING);
+                }
+            } else if (event.type == EventType::STEP_COMPLETED) {
+                if (this->m_stateStrip) {
+                    this->m_stateStrip->UpdateStepStatus(event.step_id, StepStatus::SUCCESS);
+                }
+            } else if (event.type == EventType::STEP_FAILED) {
+                if (this->m_stateStrip) {
+                    this->m_stateStrip->UpdateStepStatus(event.step_id, StepStatus::FAILED);
+                }
+            } else if (event.type == EventType::PLAN_COMPLETED || event.type == EventType::PLAN_FAILED || event.type == EventType::PLAN_ABORTED) {
+                // Keep banner visible but maybe update status
+            }
         });
     };
 
@@ -381,16 +415,42 @@ MainFrame::MainFrame()
 
     m_newChatButton = new wxButton(leftPanel, wxID_ANY, "New Chat");
     m_deleteChatButton = new wxButton(leftPanel, wxID_ANY, "Delete Chat");
+    m_copyChatButton = new wxButton(leftPanel, wxID_ANY, "Copy Chat");
 
     leftSizer->Add(sidebarLabel, 0, wxALL, 8);
     leftSizer->Add(m_chatList, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
     leftSizer->Add(m_newChatButton, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
     leftSizer->Add(m_deleteChatButton, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+    leftSizer->Add(m_copyChatButton, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
     leftPanel->SetSizer(leftSizer);
 
     // --- Center Main Chat Area ---
     wxPanel* centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
     wxBoxSizer* centerSizer = new wxBoxSizer(wxVERTICAL);
+
+    // Active Goal Banner (Step 2.4)
+    m_goalBanner = new wxPanel(centerPanel, wxID_ANY);
+    m_goalBanner->SetBackgroundColour(wxColour(232, 245, 233)); // Light green
+    wxBoxSizer* bannerSizer = new wxBoxSizer(wxHORIZONTAL);
+    
+    m_goalText = new wxStaticText(m_goalBanner, wxID_ANY, "No Active Goal");
+    m_goalText->SetFont(m_goalText->GetFont().Bold());
+    
+    m_clearGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "Clear", wxDefaultPosition, wxSize(60, 24));
+    m_reviseGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "Revise", wxDefaultPosition, wxSize(60, 24));
+    
+    bannerSizer->Add(new wxStaticText(m_goalBanner, wxID_ANY, "ACTIVE GOAL: "), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 10);
+    bannerSizer->Add(m_goalText, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 10);
+    bannerSizer->Add(m_reviseGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+    bannerSizer->Add(m_clearGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
+    m_goalBanner->SetSizer(bannerSizer);
+    m_goalBanner->Hide(); // Hidden by default
+
+    centerSizer->Add(m_goalBanner, 0, wxEXPAND | wxALL, 5);
+
+    // Executive State Visualizer (Step 2.3)
+    m_stateStrip = new Thoth::ExecutiveStateStrip(centerPanel);
+    centerSizer->Add(m_stateStrip, 0, wxEXPAND | wxALL, 5);
 
     m_chatContainer = new wxScrolledWindow(centerPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
     m_chatContainer->SetScrollRate(0, 20);
@@ -435,24 +495,44 @@ MainFrame::MainFrame()
     bottomSizer->AddGrowableRow(0, 1);
     bottomSizer->AddGrowableRow(1, 1);
 
-    m_ragFileSlot1 = new wxStaticText(bottomPanel, wxID_ANY, "Empty Slot 1");
-    m_ragFileSlot2 = new wxStaticText(bottomPanel, wxID_ANY, "Empty Slot 2");
-    m_ragFileSlot3 = new wxStaticText(bottomPanel, wxID_ANY, "Empty Slot 3");
-    m_ragFileSlot4 = new wxStaticText(bottomPanel, wxID_ANY, "Empty Slot 4");
+    auto createSlotSizer = [this, bottomPanel](wxStaticText*& slot, wxButton*& btn, int index) {
+        wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
+        slot = new wxStaticText(bottomPanel, wxID_ANY, wxString::Format("Empty Slot %d", index));
+        btn = new wxButton(bottomPanel, wxID_ANY, "X", wxDefaultPosition, wxSize(32, 32));
+        btn->SetToolTip("Remove file");
+        
+        wxFont font = slot->GetFont();
+        font.MakeSmaller();
+        slot->SetFont(font);
+        
+        sizer->Add(slot, 1, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+        sizer->Add(btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+        
+        btn->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) {
+            if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) return;
+            auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
+            if (static_cast<size_t>(index - 1) < session.ragFilePaths.size()) {
+                session.ragFilePaths.erase(session.ragFilePaths.begin() + (index - 1));
+                SaveChatSessions();
+                RefreshRagPanel();
+                if (agent) {
+                    agent->setRagFiles(session.ragFilePaths);
+                }
+            }
+        });
+        
+        return sizer;
+    };
 
-    wxFont font = m_ragFileSlot1->GetFont();
-    font.MakeSmaller();
-    m_ragFileSlot1->SetFont(font);
-    m_ragFileSlot2->SetFont(font);
-    m_ragFileSlot3->SetFont(font);
-    m_ragFileSlot4->SetFont(font);
+    bottomSizer->Add(createSlotSizer(m_ragFileSlot1, m_ragDeleteBtn1, 1), 1, wxEXPAND);
+    bottomSizer->Add(createSlotSizer(m_ragFileSlot2, m_ragDeleteBtn2, 2), 1, wxEXPAND);
+    bottomSizer->Add(createSlotSizer(m_ragFileSlot3, m_ragDeleteBtn3, 3), 1, wxEXPAND);
+    bottomSizer->Add(createSlotSizer(m_ragFileSlot4, m_ragDeleteBtn4, 4), 1, wxEXPAND);
 
-    bottomSizer->Add(m_ragFileSlot1, 1, wxEXPAND | wxALL, 5);
-    bottomSizer->Add(m_ragFileSlot2, 1, wxEXPAND | wxALL, 5);
-    bottomSizer->Add(m_ragFileSlot3, 1, wxEXPAND | wxALL, 5);
-    bottomSizer->Add(m_ragFileSlot4, 1, wxEXPAND | wxALL, 5);
     bottomPanel->SetSizer(bottomSizer);
 
+    // --- Right Observability Panel (Step 2.2) ---
+    m_gragPanel = new GragDiagnosticsPanel(this);
 
     // Add panes to the AUI manager
     m_auiManager.AddPane(leftPanel, wxAuiPaneInfo()
@@ -477,6 +557,16 @@ MainFrame::MainFrame()
         .CloseButton(true)
         .PinButton(true));
 
+    m_auiManager.AddPane(m_gragPanel, wxAuiPaneInfo()
+        .Right()
+        .Layer(1)
+        .Position(0)
+        .MinSize(250, -1)
+        .BestSize(300, -1)
+        .Caption("GRAG Diagnostics")
+        .CloseButton(true)
+        .MaximizeButton(true));
+
     bottomPanel->SetDropTarget(new FileDropTarget(this));
 
     // Commit the layout
@@ -496,6 +586,14 @@ MainFrame::MainFrame()
     m_chatList->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED, &MainFrame::OnChatSelected, this);
     m_newChatButton->Bind(wxEVT_BUTTON, &MainFrame::OnNewChat, this);
     m_deleteChatButton->Bind(wxEVT_BUTTON, &MainFrame::OnDeleteChat, this);
+    m_copyChatButton->Bind(wxEVT_BUTTON, &MainFrame::OnCopyChat, this);
+
+    // Goal Banner bindings
+    m_clearGoalBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        m_goalBanner->Hide();
+        m_goalText->SetLabel("No Active Goal");
+        this->Layout();
+    });
 
     CreateStatusBar(1);
 
@@ -513,6 +611,26 @@ MainFrame::~MainFrame() {
     m_auiManager.UnInit();
     if (agent) {
         agent->onResponse = nullptr;
+        agent->onEvent = nullptr;
+    }
+}
+
+void MainFrame::OnCopyChat(wxCommandEvent& WXUNUSED(evt)) {
+    if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) {
+        return;
+    }
+
+    const Thoth::ChatSession& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
+    wxString fullChat;
+    for (const auto& msg : session.messages) {
+        fullChat << (msg.role == "user" ? "USER: " : "AGENT: ") 
+                 << wxString::FromUTF8(msg.content) << "\n\n";
+    }
+
+    if (wxTheClipboard->Open()) {
+        wxTheClipboard->SetData(new wxTextDataObject(fullChat));
+        wxTheClipboard->Close();
+        SetStatusText("Full chat copied to clipboard.");
     }
 }
 
@@ -702,5 +820,3 @@ bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
 
     return false;
 }
-
-

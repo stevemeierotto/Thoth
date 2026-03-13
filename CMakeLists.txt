@@ -55,6 +55,8 @@ set(SOURCES
     src/AgentInterface.cpp
     src/VisualizationFrame.cpp
     src/ChatMessagePanel.cpp
+    src/GragDiagnosticsPanel.cpp
+    src/ExecutiveStateStrip.cpp
 )
 
 # --- Add the external basic_agent project ---

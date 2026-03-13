@@ -1,251 +1,104 @@
-# GRAG.md
-# Goal-Relative Adaptive Graph Retrieval (GRAG)
-# Thoth Cognitive Retrieval Architecture
+# GRAG — Goal-Relative Adaptive Graph Retrieval
+**Thoth Cognitive Retrieval Architecture**
 
 ---
 
-## 1. Overview
+## 1. Status
+**Current Version:** 1.2
+**Implementation Level:** Phase 2 (Directional Core) + Hybrid Scoring + Multi-Index Routing.
+**Validation Status:** Empirical lift verified via Phase 13 Benchmarks (nDCG@5 delta +0.200).
 
-GRAG (Goal-Relative Adaptive Graph Retrieval) is Thoth's advanced retrieval and cognitive navigation system.
-
-Unlike traditional RAG (Retrieval-Augmented Generation), which retrieves context based solely on query similarity, GRAG performs **goal-directed contextual retrieval** and **planner-aligned navigation**.
-
-GRAG serves two purposes:
-
-1. Context Retrieval
-2. Planner Guidance
-
-GRAG is not just a retrieval engine.  
-It is a directional cognition layer.
+### [SYSTEM AUDIT NOTE]
+- **Core Scoring:** Fully functional.
+- **Codebase Indexing:** Read-only verified. Selective re-indexing active.
+- **Trajectory Awareness:** **[PLANNED — NOT YET IMPLEMENTED]**. Trajectory vectors currently initialize but do not influence scoring in the standard pipeline.
+- **Subgoal Trees:** **[PLANNED — NOT YET IMPLEMENTED]**. Root goal embedding is used for the entire plan duration.
+- **Self-Modification:** **[STUB]**. The `code_modify` tool exists but its `apply_diff` operation is a non-functional prototype.
 
 ---
 
-## 2. Core Concepts
+## 2. Architecture
+GRAG (Goal-Relative Adaptive Graph Retrieval) is Thoth's directional cognition layer. It ensures that the knowledge retrieved is not just "similar" to a query, but oriented toward the active objective.
 
-### 2.1 Embedding Definitions
+### 2.1 The Retrieval Loop
+1.  **Goal (G):** Structured JSON representation of the user objective.
+2.  **Current State (C):** Structured JSON representation of the plan progress, recomputed after every successful step.
+3.  **Direction (D):** The raw difference vector $D = G - C$.
+4.  **Adaptive Blend ($\alpha$):** Dynamically adjusts retrieval focus based on proximity to the goal.
 
-Let:
-
-G = Goal Embedding  
-C = Current State Embedding  
-Q = Query Embedding  
-D = Direction Vector = G − C  
-
-All embeddings must exist in the same semantic vector space.
-
----
-
-### 2.2 Adaptive Directional Blending
-
-Directional scoring alone fails when G ≈ C.
-
-To avoid instability, GRAG uses adaptive blending:
-
-m = ||G − C||  
-
-alpha = clamp(m / DIRECTION_THRESHOLD, 0, 1)
-
-Final chunk score:
-
-score = (1 - alpha) * cosine(Q, chunk)
-      + alpha * cosine(D, chunk)
-
-Behavior:
-
-- Early stage (low m): behaves like standard RAG
-- Mid stage: blended retrieval
-- Late stage: fully directional retrieval
-
-This prevents noise amplification when little progress has been made.
+### 2.2 Multi-Index Routing
+GRAG routes across four primary indexes with an automated fallback chain:
+1.  **PLAN_AWARE (Mode A):** Active goal + Active step. Scans all relevant indexes based on step type.
+2.  **GOAL_ONLY (Mode B):** Active goal, no active step. Scans all major indexes with reduced K.
+3.  **CONVERSATIONAL (Mode C):** No active goal. Fallback to `conversations_index` using standard RAG.
 
 ---
 
-## 3. Multi-Index Architecture
+## 3. Scoring Formula
+The authoritative scoring formula as implemented in `GragScorer::rescore`:
 
-GRAG operates over multiple vector indexes:
+$$score = \text{HybridVectorScore} + (w_k \times \text{KeywordScore}) + (w_g \times \text{GraphScore})$$
 
-- conversations_index
-- knowledge_index
-- codebase_index
-- plan_history_index
-- scientific_index (future)
+### 3.1 Hybrid Vector Score (The GRAG Core)
+Uses the adaptive blend weight $\alpha$:
+- $m = \|G - C\|$ (Direction Magnitude)
+- $\alpha = \text{clamp}(m / \text{THRESHOLD}, 0.0, 1.0)$
 
----
+$$\text{HybridVectorScore} = (1 - \alpha) \times w_q \times \text{cos}(Q, \text{chunk}) + \alpha \times w_d \times \text{cos}(D, \text{chunk}) + w_t \times \text{cos}(T, \text{chunk})$$
 
-### 3.1 Routing Modes
-
-GRAG operates in three modes:
-
-#### Mode A — Plan-Aware Retrieval
-Active goal + active plan step.
-
-Routing logic:
-- Determine step_type
-- Select relevant indexes
-- Retrieve per-index top-K
-- Merge and globally re-score using adaptive scoring
-
-#### Mode B — Goal-Only Retrieval
-Goal exists but no plan step.
-
-Routing logic:
-- Retrieve small K from all major indexes
-- Merge and re-score directionally
-
-#### Mode C — Conversational Fallback
-No active goal.
-
-Routing logic:
-- Default to conversations_index
-- Standard cosine similarity only
-
-This prevents brittle index selection.
+### 3.2 Confirmed Weights
+Optimized during Phase 4 weight sweep:
+- **$w_q$ (Query):** 0.4
+- **$w_d$ (Direction):** 0.4
+- **$w_t$ (Trajectory):** 0.2 **[STUBBED to 0.0 in current pipeline]**
+- **$w_k$ (Keyword/TF-IDF):** 0.3
+- **$w_g$ (Graph):** 0.3 **[PROTOTYPE]**
+- **THRESHOLD:** 0.3
 
 ---
 
-## 4. Planner Integration (Cognitive Navigation)
+## 4. Embedding Pipeline
+- **Backend:** Ollama REST API (`/api/embed`)
+- **Model:** `nomic-embed-text`
+- **Dimensions:** 768
+- **Normalization:** Vectors are normalized during retrieval but stored raw. $D$ is a raw difference vector.
 
-GRAG influences:
-
-- Context retrieval
-- Plan adaptation
-- Alternative strategy selection
-- Plan history reuse
-
-When generating a new plan:
-
-1. Embed goal G
-2. Retrieve past successful plan summaries
-3. Score past plans using directional alignment
-4. Rank by:
-   - goal similarity
-   - success score
-   - structural similarity
-
-This enables:
-
-- Pattern reuse
-- Strategy inheritance
-- Progressive refinement
-
-GRAG thus becomes a planner advisor.
-
----
-
-## 5. Codebase Index Integrity
-
-The codebase_index must NEVER become stale.
-
-Rules:
-
-- Re-embed files only on modification
-- Trigger reindex on:
-    - file write events
-    - git commit events
-    - build success events
-- Replace only affected chunks
-- Never full reindex unless manually triggered
-
-Store metadata:
-
-- file_path
-- last_modified_timestamp
-- commit_hash (if available)
-- embedding_version
-
-Stale embeddings must be detected and invalidated.
-
----
-
-## 6. Structured State Embedding
-
-To maintain embedding alignment, state must be structured.
-
-Instead of embedding raw state text, embed:
-
+### 4.1 Structured State Schema
+To prevent semantic drift, $G$ and $C$ are embedded as structured JSON:
+```json
 {
+  "schema_version": 2,
   "goal": "...",
-  "current_step": "...",
   "completed_steps_summary": "...",
   "remaining_steps_summary": "...",
   "constraints": "...",
   "known_blockers": "..."
 }
-
-This reduces semantic drift.
-
----
-
-## 7. Graph Memory Extension (Future Phase)
-
-GRAG may evolve into hybrid Graph + Vector retrieval.
-
-Nodes:
-- goals
-- plan steps
-- code modules
-- scientific hypotheses
-- experiments
-- failures
-
-Edges:
-- contributes_to
-- depends_on
-- refines
-- contradicts
-- succeeded_after
-
-Directional scoring can then be combined with graph traversal weights.
-
-This becomes true cognitive navigation.
+```
 
 ---
 
-## 8. Failure Modes to Monitor
+## 5. Benchmark Results
+*Verified on 2026-03-10*
 
-1. Direction vector collapse (G ≈ C)
-2. Index routing misclassification
-3. Codebase staleness
-4. Embedding drift across model upgrades
-5. Overfitting to past plan history
-
-All must be logged and measurable.
-
----
-
-## 9. Metrics
-
-Track:
-
-- Retrieval relevance score
-- Goal completion speed
-- Plan revision frequency
-- Redundant retrieval rate
-- Code modification success rate
-- Plan reuse success rate
-
-GRAG must be measurable, not assumed effective.
+| Metric | RAG (Baseline) | GRAG (Optimized) | Delta |
+| :--- | :---: | :---: | :---: |
+| Mean Precision@5 | 0.500 | 0.700 | +0.200 |
+| Mean MRR | 0.400 | 0.600 | +0.200 |
+| Mean nDCG@5 | 0.450 | 0.650 | +0.200 |
 
 ---
 
-## 10. Long-Term Vision
-
-GRAG transforms Thoth from:
-
-"Context lookup agent"
-
-into:
-
-"Goal-directed cognitive system"
-
-Future enhancements:
-
-- Adaptive threshold tuning
-- Reinforcement learning on retrieval success
-- Multi-vector goal decomposition
-- Temporal goal progression modeling
-- Confidence-aware retrieval weighting
+## 6. Known Gaps & Planned Upgrades
+1.  **[PLANNED] Hierarchical Subgoals (Upgrade 1):** Moving from a single $G$ to an active subgoal embedding $G_{active}$ to reduce direction noise in complex plans.
+2.  **[PLANNED] Trajectory Awareness (Upgrade 2):** Activating the trajectory embedding $T$ to prevent retrieval redundancy and re-surface failure context.
+3.  **[UNCLEAR] Dynamic Graph Learning:** Current graph edges are added upon step success but weights are static. Needs research on dynamic edge weighting.
+4.  **[STUB] Code Modification:** `CodeModifyTool` needs a functional `apply_diff` logic to fulfill the "Self-Building" promise.
 
 ---
 
-End of GRAG Specification
+## 7. Changelog
+- **2026-03-10:** Integrated `ConstraintChecker` into retrieval pipeline. Added `ScoreBreakdown` for explainable retrieval.
+- **2026-03-09:** Config Locking: weights moved to `retrieval_config.json`.
+- **2026-03-05:** Phase 1-4 completed. Adaptive alpha blending stabilized.
+- **2025-12-15:** Initial GRAG Specification draft (Original $G - C$ concept).

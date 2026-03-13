@@ -1,2 +1,33 @@
+# Thoth Git Ignore
+
+# Build outputs
 build/
+bin/
+lib/
+
+# Agent Workspace (Runtime data, DBs, Indices)
 agent_workspace/
+
+# Environment and Secrets
+.env
+.env.*
+secrets.json
+
+# Backup files
+*.bak
+*.tmp
+*~
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Submodule build artifacts
+external/basic_agent/build/
+external/basic_agent/agent_workspace/

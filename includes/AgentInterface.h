@@ -24,6 +24,7 @@ public:
     void setRagFiles(const std::vector<std::string>& filePaths);
 
     std::function<void(const std::string&, const std::string&)> onResponse;
+    std::function<void(const ControllerEvent&)> onEvent;
 private:
     void shutdownWorkers();
 

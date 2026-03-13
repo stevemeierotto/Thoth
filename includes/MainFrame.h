@@ -21,6 +21,9 @@
 #include "ChatSessionDataViewModel.h"
 #include "ChatSessionTypes.h" // Contains ChatMessage and ChatSession structs
 
+class GragDiagnosticsPanel;
+namespace Thoth { class ExecutiveStateStrip; }
+
 class MainFrame : public wxFrame {
 public:
     MainFrame();
@@ -37,8 +40,17 @@ private:
     wxDataViewCtrl* m_chatList = nullptr;
     wxButton* m_newChatButton = nullptr;
     wxButton* m_deleteChatButton = nullptr;
+    wxButton* m_copyChatButton = nullptr;
     wxScrolledWindow* m_chatContainer = nullptr;
     wxBoxSizer* m_chatSizer = nullptr;
+    GragDiagnosticsPanel* m_gragPanel = nullptr;
+    Thoth::ExecutiveStateStrip* m_stateStrip = nullptr;
+    
+    wxPanel*      m_goalBanner = nullptr;
+    wxStaticText* m_goalText = nullptr;
+    wxButton*     m_clearGoalBtn = nullptr;
+    wxButton*     m_reviseGoalBtn = nullptr;
+
     wxTextCtrl* m_inputCtrl = nullptr;
     wxButton* m_sendButton = nullptr;
     wxButton* m_traceButton = nullptr;
@@ -49,6 +61,11 @@ private:
     wxStaticText* m_ragFileSlot2 = nullptr;
     wxStaticText* m_ragFileSlot3 = nullptr;
     wxStaticText* m_ragFileSlot4 = nullptr;
+
+    wxButton* m_ragDeleteBtn1 = nullptr;
+    wxButton* m_ragDeleteBtn2 = nullptr;
+    wxButton* m_ragDeleteBtn3 = nullptr;
+    wxButton* m_ragDeleteBtn4 = nullptr;
 
     // Data model for the chat list
     wxObjectDataPtr<ChatSessionDataViewModel> m_chatListModel;
@@ -81,4 +98,5 @@ private:
     void OnChatSelected(wxDataViewEvent& evt);
     void OnNewChat(wxCommandEvent& evt);
     void OnDeleteChat(wxCommandEvent& evt);
+    void OnCopyChat(wxCommandEvent& evt);
 };

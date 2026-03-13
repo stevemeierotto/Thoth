@@ -40,6 +40,228 @@ The application remains fully responsive during long-running AI operations.
     3.  Upon completion, the `onResponse` callback uses `wxTheApp->CallAfter` to safely update the UI from the main thread.
 *   **Benefit:** The UI remains fully responsive. Status bar updates provide visual feedback that processing is underway.
 
+# UI Improvements — Addendum
+# Added: 2026-03-03
+# Append this section to ui_improvements.md
+
+---
+
+## 5. GRAG Diagnostics Panel
+
+### Motivation
+
+The GRAG system logs retrieval diagnostics to `grag_benchmark.jsonl` on every
+query. This data is only useful if visible. A diagnostics panel surfaces it
+in real time so the developer can observe whether GRAG is activating, how
+strongly it is steering retrieval, and whether retrieved chunks are improving.
+
+### Recommended Widget
+
+A dockable `wxAuiManager` pane, positioned below or beside the chat panel.
+Collapsible so it does not clutter normal use. Visible by default only when
+a goal is active.
+
+### Contents
+
+**Retrieval Mode Indicator**
+
+A small status badge showing the current scoring type:
+- Grey pill: `RAG` — no goal active, standard cosine scoring
+- Blue pill: `GRAG BLENDED` — goal active, mixed scoring
+- Green pill: `GRAG` — fully directional, alpha near 1.0
+
+This updates after every query response.
+
+**Alpha Gauge**
+
+A horizontal progress bar, 0.0 to 1.0, labeled "Directional Strength".
+- 0.0 = pure RAG behavior
+- 1.0 = fully goal-directed
+
+Color gradient: grey at 0 → blue at 0.5 → green at 1.0. Gives instant
+visual sense of how strongly GRAG is steering without reading numbers.
+
+**Direction Magnitude**
+
+A single numeric readout labeled "Goal Distance". This is `||G - C||` — how
+far the current state is from the goal embedding. Helps the user understand
+whether progress is being made across a session. Should decrease over time
+as a goal is pursued successfully.
+
+**Retrieved Chunk Score List**
+
+A small `wxListCtrl` showing the top-K chunks returned by the last retrieval:
+- Chunk preview (first 60 characters)
+- Final score (after GRAG re-ranking)
+- Source file name
+
+Clicking a chunk row expands it inline or opens a detail popup showing the
+full chunk text and both its RAG score and GRAG score side by side. This is
+the core comparison tool for evaluating whether GRAG is improving retrieval.
+
+**Per-Query History Sparkline**
+
+A simple line graph (last 20 queries) showing alpha over time. Built with
+`wxGraphicsContext`, same pattern as the chat bubble rendering. Lets the
+developer see at a glance whether goal-directedness is increasing, stable,
+or erratic across a session.
+
+### Implementation Notes
+
+- Panel reads from `GragDiagnostics` struct populated by `GragScorer::rescore()`
+- Data reaches the UI via the existing `onResponse` callback pattern —
+  extend the response payload to include a `diagnostics` field
+- Do not read `grag_benchmark.jsonl` at runtime — use the in-memory
+  `GragDiagnostics` struct passed through the pipeline
+- Panel must remain functional with diagnostics showing `scoring_type: "rag"`
+  when no goal is active — do not hide the panel entirely, show the grey RAG
+  badge so the user knows GRAG is standing by
+
+---
+
+## 6. Active Goal Display
+
+### Motivation
+
+GRAG activates when a goal embedding is present. The user needs to always
+know whether a goal is active, what it is, and be able to clear it.
+
+### Recommended Widget
+
+A slim banner bar between the session list and the chat display. Hidden when
+no goal is active. When a goal is set:
+
+- Shows goal text (truncated to one line with tooltip for full text)
+- Shows goal status badge: `ACTIVE`, `COMPLETED`, `ABORTED`
+- A small [×] button to clear the goal (returns to plain RAG mode)
+- A small [✎] button to revise the goal text
+
+Background color shifts subtly (light blue tint) when a goal is active so
+the user always has peripheral awareness of GRAG mode.
+
+### Implementation Notes
+
+- Goal state comes from `ExecutiveController::get_current_plan()`
+- Banner subscribes to `ControllerEvent` callbacks —
+  `PLAN_CREATED`, `PLAN_COMPLETED`, `PLAN_ABORTED` drive show/hide/status
+- Clearing the goal must call a method that resets goal and current
+  embeddings to empty vectors, which AUTO mode will interpret as RAG fallback
+
+---
+
+## 7. ExecutiveController State Visualizer
+
+### Motivation
+
+`ExecutiveController` is a state machine with explicit states:
+`IDLE`, `PLANNING`, `EXECUTING_STEP`, `OBSERVING_RESULT`, `REVISING_PLAN`,
+`SCIENTIFIC_MODE`, `COMPLETED`, `ABORTED`, `FAILED`.
+
+These transitions are currently only visible in `decision_trace.jsonl`.
+Surfacing them in the UI makes the agent transparent and debuggable.
+
+### Recommended Widget
+
+A horizontal step-progress strip across the top of the chat area, similar
+to a stepper component. Each `PlanStep` in the current plan is shown as a
+node in the strip:
+
+- Grey circle: PENDING
+- Pulsing blue circle: RUNNING (animated)
+- Green circle with checkmark: SUCCESS
+- Red circle with ×: FAILED
+- Orange circle: RETRYING
+
+Clicking any node opens a detail popup showing:
+- Step description
+- Step type (TOOL / RETRIEVAL / LLM / NODE)
+- Input payload
+- Result payload
+- Timing (execution_time_ms)
+- Retry count
+
+This is the n8n-style visual harness described in `NODE.md`. It does not
+need to be interactive in v1 — read-only observation is sufficient and
+valuable. Interactive node editing comes later.
+
+### Implementation Notes
+
+- Subscribes to `ControllerEvent` via `set_event_callback()` on
+  `ExecutiveController` — specifically `STEP_STARTED`, `STEP_COMPLETED`,
+  `STEP_FAILED`, `STEP_RETRYING`, `PLAN_REVISED`
+- Events carry `step_id` and `plan_id` — use these to update the correct
+  node in the strip without a full redraw
+- Strip resets and redraws when `PLAN_CREATED` fires
+- Strip must be scrollable horizontally for plans with many steps
+- Render with `wxGraphicsContext` for consistent anti-aliasing
+
+---
+
+## 8. RAG File Slot Enhancements
+
+### Motivation
+
+Testing GRAG accuracy requires controlled RAG file loading — starting with
+one file and incrementally adding up to four. The current file slot UI
+should surface enough information to make this testing workflow smooth.
+
+### Recommended Additions
+
+**Per-Slot Chunk Count**
+
+After a file is indexed, show the number of chunks it produced beside the
+filename label. Gives the user immediate feedback on whether the file was
+large enough to be useful and helps explain retrieval behavior.
+
+**Per-Slot Index Status Badge**
+
+- Grey: empty slot
+- Yellow spinner: indexing in progress
+- Green: indexed and ready
+- Red: indexing failed (with tooltip showing error)
+
+**Slot Enable/Disable Toggle**
+
+A small checkbox per slot that temporarily excludes that file from retrieval
+without removing it from the slot. Essential for controlled GRAG testing —
+lets the user isolate which files are contributing to a retrieval result
+without re-dropping files.
+
+**Active Retrieval Highlight**
+
+When the GRAG diagnostics panel shows the retrieved chunk list, highlight
+which RAG file slot each chunk came from using a color-coded left border
+that matches a color indicator on the slot label. Visual correlation between
+source and result.
+
+### Implementation Notes
+
+- Chunk count comes from `IndexManager` after indexing completes — expose
+  a `getChunkCount(file_path)` method if not already available
+- Slot enable/disable must propagate to `IndexManager` before each query —
+  disabled slots are excluded from the retrieval candidate set
+- Color coding per slot: use a fixed palette of four distinct colors,
+  assigned in slot order (slot 1 = blue, slot 2 = green, slot 3 = orange,
+  slot 4 = purple)
+
+---
+
+## Cross-Cutting Implementation Note
+
+All new panels and widgets must follow the existing patterns:
+
+- Dockable via `wxAuiManager`
+- Data reaches UI through callbacks and response payloads, never by reading
+  log files at runtime
+- All UI updates posted via `wxTheApp->CallAfter` from background threads
+- Custom drawing uses `wxGraphicsContext` for HiDPI consistency
+- No direct access to `GragScorer`, `ExecutiveController`, or any core
+  agent class from GUI code — always bridged through `AgentInterface`
+
+---
+
+End of Addendum
+
 ---
 
 ## Strategic UI Recommendations & Bridging with the Backend Roadmap

@@ -14,6 +14,11 @@ using json = nlohmann::json;
 AgentInterface::AgentInterface() {
     try {
         plugin = std::make_unique<BasicAgentPlugin>();
+        
+        plugin->onEvent = [this](const ControllerEvent& ev) {
+            if (this->onEvent) this->onEvent(ev);
+        };
+
         std::cerr << "[AgentInterface] BasicAgentPlugin initialized successfully.\n";
         StructuredLogger::instance().log(
             LogLevel::Info,

@@ -1,299 +1,556 @@
-# Thoth Improvements (Active)
+# Thoth Improvements Roadmap
 
-Last reset: 2026-03-01
-
-Finished work has been archived in `docs/completed_improvements_log.md`.
-
-## Current Focus
-
-- Add new improvements below as we decide what to build next.
-
-## Active Improvement Queue
-
-1. [M1 - Core Integration] Integrate `ToolRegistry::instance()` into `command_processor.cpp` for runtime tool execution.
-2. [M1 - Core Integration] Expose `getAvailableTools()` in prompt-building flow so tool metadata can be injected into model prompts.
-3. [M2 - Observability] Add tool invocation trace logging (`tool_name`, `input_schema`, `result_status`, latency) to decision/ops logs.
-4. [M3 - Validation] Add registry integration tests (tool lookup, malformed JSON input, missing tool error, malformed tool output).
-
-## Notes
-
-- Keep this file limited to active and upcoming items only.
-- Move completed items into `docs/completed_improvements_log.md`.
-
-## AI Agent Roadmap Addendum (2026-03-01)
-
-### Scope Context
-
-- Current architecture uses a hybrid memory model:
-	- Episodic memory in JSON stores: \`memory.json\`, \`chat_sessions.json\`, \`decision_trace.jsonl\`
-	- Semantic memory via summaries + RAG retrieval
-	- Working memory assembled per request
-	- Vector index in \`rag_index.bin\` with pluggable similarity metrics
-	- **Cognitive Retrieval**: See \`GRAG.md\` for full architectural specification. All retrieval-related enhancements must align with GRAG definitions.
-- Current runtime constraints:
-	- Small Qwen model selected due to current hardware limits
-	- Hardware upgrade planned later
+**Version:** 2.0
+**Status:** Authoritative — Single Source of Truth for All Upcoming Work
 
 ---
 
-### 1) Migrate Episodic Memory from JSON to SQLite
+## Rules for This Document
 
-**Problem statement**
-- `memory.json` and `chat_sessions.json` will degrade in read/write performance and reliability as conversation/session volume increases.
-- JSON file mutation is fragile under concurrent writes and makes partial updates expensive.
-
-**Recommended solution**
-- Migrate episodic memory persistence to SQLite while preserving current data model semantics.
-- Keep `decision_trace.jsonl` as append-only operational trace (or migrate later if needed), while moving mutable conversation/session records into normalized SQLite tables.
-
-**Priority level**
-- High
-
-**Implementation notes**
-- Add schema (example): `sessions`, `messages`, `summaries`, `memory_meta`.
-- Implement repository/DAO abstraction so storage backend is swappable.
-- Create one-time migration tool from existing JSON files to SQLite.
-- Add write transactions and indexes (`session_id`, `created_at_ms`, `updated_at_ms`).
-- Add compatibility mode fallback for legacy JSON read during migration window.
+1. Completed work must be moved to `docs/completed_improvements_log.md`.
+2. Architecture specifications live in: `PLAN.md`, `GRAG.md`, `NODE.md`, `cognate.md`.
+3. Implementation status lives in: `grag_summery.md`, `completed_improvements_log.md`, `architectural_facts.md`. Before implementing any work that touches GRAG or ExecutiveController, read both the relevant spec AND the relevant status file. Status takes precedence on what already exists — do not re-implement or regress completed work.
+4. Roadmap items must not contradict architecture documents.
+5. This roadmap progresses: core infrastructure → observability → capabilities → memory → research.
+6. **Gemini must pause for confirmation between every step and every phase.**
 
 ---
 
-### 2) Plan Vector Store Scalability Path
+## How to Use This Document (For Gemini)
 
-**Problem statement**
-- Flat `rag_index.bin` is simple and fast at small scale but will degrade as chunk counts approach or exceed ~100k.
-- Rebuild, search latency, and maintenance overhead increase with dataset size.
+You are implementing the Thoth improvement roadmap.
 
-**Recommended solution**
-- Define a staged migration plan to a scalable vector backend (evaluate LanceDB and ChromaDB first).
-- Keep current interface stable so backend can be switched with minimal changes.
+Before making any changes:
+- Read `AGENTS.md` in full.
+- Read the architecture document referenced in the phase you are implementing.
+- Confirm all naming conventions: `snake_case` filenames, `PascalCase` class names.
+- New source files → `external/basic_agent/src/`
+- New headers → `external/basic_agent/include/`
+- Do NOT touch GUI files.
+- Do NOT add new external dependencies unless explicitly stated.
+- Add all new `.cpp` files to `external/basic_agent/CMakeLists.txt`.
 
-**Priority level**
-- Medium
+**At every step:**
+- Output only what the step requests.
+- Explain reasoning clearly.
+- Keep implementation minimal and testable.
+- **Wait for explicit confirmation before proceeding to the next step.**
 
-**Implementation notes**
-- Introduce `VectorStore` backend interface contract tests.
-- Add benchmark gates: ingest throughput, p50/p95 retrieval latency, memory usage, persistence behavior.
-- Run side-by-side evaluation on representative corpora before cutover.
-- Support dual-write or export/import tooling to reduce migration risk.
-
----
-
-### 3) Implement Memory Pruning and Archiving
-
-**Problem statement**
-- Retaining all episodic turns indefinitely increases storage growth, retrieval noise, and prompt assembly overhead.
-- Long-running sessions need lifecycle controls to preserve relevance.
-
-**Recommended solution**
-- Add policy-driven pruning and archival pipeline that summarizes older turns and removes low-value raw history from hot storage.
-- Keep searchable archives and summary continuity to preserve long-term context.
-
-**Priority level**
-- High
-
-**Implementation notes**
-- Define retention tiers: hot (recent raw turns), warm (compressed summaries), cold (archived raw logs).
-- Add scheduled compaction job per session or size threshold.
-- Preserve key facts/tasks/decisions before pruning raw turns.
-- Add audit metadata (`archived_at`, `summary_version`, `source_range`).
-- Add restore path for on-demand historical replay.
+**At every phase boundary:**
+- Summarize what was completed.
+- List files created or modified.
+- **Wait for explicit confirmation before starting the next phase.**
 
 ---
 
-### 4) Design Tool and Workflow Declaration System
+## Phase Order
 
-**Problem statement**
-- The agent lacks a formal, extensible mechanism to define, register, select, and orchestrate tools/workflows.
-- Without this foundation, advanced capabilities (multi-step operations, robust retries, stateful chains) remain brittle.
-
-**Recommended solution**
-- Build a first-class tool/workflow declaration framework with:
-	- declarative tool schemas
-	- central registry
-	- planner/selector logic
-	- workflow engine with retries, compensation, and state passing
-
-**Priority level**
-- High
-
-**Implementation notes**
-- Define tool manifest fields: `name`, `description`, `inputs`, `outputs`, `capabilities`, `timeout`, `idempotency`, `retry_policy`.
-- Add runtime registry with validation and policy gating before execution.
-- Implement workflow state machine (steps, guards, transitions, failure handlers).
-- Add checkpointing for chained operations so partial progress is recoverable.
-- Record per-step execution telemetry in decision trace for debugging/audit.
-- Add deterministic test harness for tool selection and mid-workflow failure scenarios.
-- Deferred integration tasks after initial registry refactor:
-	- Wire `ToolRegistry` into `command_processor.cpp` dispatch path.
-	- Surface `getAvailableTools()` output to `prompt_factory.cpp` for tool-aware prompting.
-	- Add strict JSON contract checks at registry boundaries (invalid input/tool output).
-	- Add compatibility layer for future API-backed and local tools without changing registry core.
+| # | Phase | Priority |
+|---|---|---|
+| 3 | Self-Building Capability | High |
+| 4 | Memory Stability | High |
+| 5 | Advanced Reasoning | High |
 
 ---
 
-### 5) Plan Model Upgrade Path (Post-Hardware Refresh)
+---
 
-**Problem statement**
-- Current small Qwen model is a constraint-driven choice and may limit complex tool-calling reliability and reasoning depth.
-- Ad hoc model swaps later can break prompts, tool integration, and latency expectations.
+# Phase 3 — Self-Building Capability
 
-**Recommended solution**
-- Document and implement a model abstraction + migration playbook so larger-model adoption is low-risk when hardware is upgraded.
+**Architecture references:** `PLAN.md`, `TOOLS.md`
 
-**Priority level**
-- Low (until hardware changes)
+**Goal:** Give Thoth the ability to read, modify, build, and test its own codebase through the standard tool interface.
 
-**Implementation notes**
-- Create model provider interface with capability flags (context size, tool-calling format, structured output reliability).
-- Externalize prompts/templates by model profile.
-- Define acceptance suite: reasoning quality, tool-call correctness, latency/cost envelope, regression checks.
-- Add staged rollout plan: canary sessions -> partial rollout -> full cutover.
-- Keep rollback path and per-model configuration presets.
+> **Note for Gemini:** All tools in this phase must implement `ITool` per `TOOLS.md v1.0`. All execution must be sandboxed. No tool may directly access memory or SQLite.
 
 ---
 
-## Suggested Execution Order
+## Step 3.1 — `project_analyze` Tool
 
-1. Tool/workflow declaration system (foundational)
-2. SQLite episodic memory migration
-3. Memory pruning + archiving
-4. Vector store scalability evaluation and trigger thresholds
-5. Model upgrade cutover (after hardware upgrade)
+**Description:**
+Implement a tool that scans the Thoth source directory and returns a structured project graph.
 
-## Toolchain Roadmap
+Requirements:
+- Tool name: `project_analyze`
+- Input schema: `{ "root_path": string }` (defaults to `./` if not provided)
+- Output: structured JSON containing:
+  - File list with paths and sizes
+  - Class names extracted from headers
+  - File dependency map (which headers each `.cpp` includes)
+- Must complete within 10 seconds on the current codebase
+- Read-only — must not write or modify any files
 
-### Tool Interface Standard (Applies to All Tools)
+**Output required:**
+- `project_analyze_tool.h` and `project_analyze_tool.cpp`
+- Registration in `ToolRegistry`
+- Unit test: verify output schema on a known directory structure
 
-- Canonical flow: Tool Name -> Input Schema -> Execution -> Structured Output -> Back to Agent.
-- Tool contract must be API-agnostic so the agent runtime does not depend on whether execution is local or external.
-- All tools should register through the same declaration interface once the tool/workflow system is implemented.
-- MCP compatibility should be a design requirement for future plug-and-play interoperability.
-
----
-
-### 1) Web Scraping Tool
-
-**Tool name**
-- Web Scraping Tool
-
-**Implementation approach (custom vs existing API/MCP)**
-- Custom implementation owned internally for targeted domain scraping.
-- Optionally complemented by a general MCP web search tool for broad discovery tasks.
-
-**Recommended libraries or services**
-- `BeautifulSoup` for static HTML extraction.
-- `Playwright` for dynamic rendering and scripted interactions.
-
-**Key implementation notes**
-- Support both static pages and JavaScript-rendered content in one tool contract.
-- Normalize output into chunk-ready documents with URL/source metadata for indexing.
-- Feed tool output directly into the RAG ingestion pipeline so scraped knowledge is searchable.
-- Add guardrails for robots.txt policy, rate limits, and domain allowlists.
-- Store fetch status and parse diagnostics in structured output for traceability.
-
-**Dependencies on other improvements**
-- Depends on the tool/workflow declaration system for registration, invocation, and retries.
-- Benefits from memory pruning/index lifecycle work to prevent unbounded knowledge growth.
-
-**Priority**
-- High
+> ⏸ **PAUSE — Wait for confirmation before Step 3.2**
 
 ---
 
-### 2) Coding Agent Tool
+## Step 3.2 — `run_tests` Tool
 
-**Tool name**
-- Coding Agent Tool
+**Description:**
+Implement a tool that executes the Thoth unit test suite and returns structured results.
 
-**Implementation approach (custom vs existing API/MCP)**
-- Custom implementation, extending existing file manipulation capabilities.
-- Use tools like Aider and Continue as reference patterns for coding loop design.
+Requirements:
+- Tool name: `run_tests`
+- Input schema: `{ "filter": string (optional) }` — allows running a subset by name pattern
+- Output: `{ "total": int, "passed": int, "failed": int, "failures": [ { "name": string, "message": string } ] }`
+- Must capture stdout/stderr from test runner
+- Timeout: 60 seconds max
+- Must NOT allow arbitrary command injection via the `filter` field — sanitize input strictly
 
-**Recommended libraries or services**
-- Local process/sandbox runtime for controlled code execution.
-- Unified diff/patch engine for file change awareness and safe apply flows.
+**Output required:**
+- `run_tests_tool.h` and `run_tests_tool.cpp`
+- Registration in `ToolRegistry`
+- Unit test: verify structured output parsing on a known test result
 
-**Key implementation notes**
-- Implement code execution sandbox boundaries (filesystem scope, command policy, timeout).
-- Add model-facing error feedback loop: compile/test/runtime errors returned as structured observations.
-- Add file diff awareness so the agent reasons over changed hunks instead of full file snapshots.
-- Include iterative loop controls (attempt limits, rollback hooks, stop conditions).
-- Emit structured outputs for each cycle: action, result, diagnostics, and next-step hints.
-
-**Dependencies on other improvements**
-- Hard dependency on tool/workflow declaration system for consistent registration and orchestration.
-- Depends on guardrail/policy framework for safe command execution.
-- Benefits from model upgrade path for stronger multi-step reasoning when hardware improves.
-
-**Priority**
-- High
+> ⏸ **PAUSE — Wait for confirmation before Step 3.3**
 
 ---
 
-### 3) Trading Tool
+## Step 3.3 — `code_modify` Tool (Read + Diff)
 
-**Tool name**
-- Trading Tool
+**Description:**
+Implement the read and diff-application capability of the coding agent tool.
 
-**Implementation approach (custom vs existing API/MCP)**
-- Custom wrapper around existing exchange APIs.
-- Exchange APIs handle market connectivity; wrapper provides agent-facing interface and safety enforcement.
+This step implements read and diff only — no build trigger yet.
 
-**Recommended libraries or services**
-- Alpaca API (stocks).
-- Coinbase API or Binance API (crypto).
+Requirements:
+- Tool name: `code_modify`
+- Input schema:
+  ```json
+  {
+    "operation": "read" | "apply_diff",
+    "file_path": string,
+    "unified_diff": string (required for apply_diff)
+  }
+  ```
+- `read`: returns file contents as a string
+- `apply_diff`: applies a unified diff to the target file, returns success/failure with line-level error detail
+- File path must be validated against an allowlist (only paths under the project root)
+- Reject paths containing `..` or absolute paths outside project root
+- Atomic write: apply to a temp file first, rename on success
 
-**Key implementation notes**
-- Must support paper trading mode as default for development/testing.
-- Require explicit confirmation steps before any live order execution.
-- Enforce position limits and risk caps at tool layer (not only in agent prompts/policies).
-- Add idempotency keys, order-state reconciliation, and failure/retry handling.
-- Log every action with structured audit fields (intent, confirmation, order params, result).
+**Output required:**
+- `code_modify_tool.h` and `code_modify_tool.cpp`
+- Registration in `ToolRegistry`
+- Unit tests for: read, valid diff apply, invalid diff rejection, path traversal rejection
 
-**Dependencies on other improvements**
-- Must be deferred until tool/workflow declaration system is complete.
-- Must be deferred until guardrail architecture and policy enforcement are complete.
-- Should leverage decision trace and logging foundations for compliance and auditability.
-
-**Priority**
-- Low (deferred until guardrails and tool system are complete)
-
----
-
-### 4) Gmail Integration Tool
-
-**Tool name**
-- Gmail Integration Tool
-
-**Implementation approach (custom vs existing API/MCP)**
-- Evaluate existing Gmail MCP server first.
-- If MCP coverage is insufficient, implement custom wrapper using official Gmail REST API with OAuth2.
-
-**Recommended libraries or services**
-- Official Gmail API + OAuth2 flow.
-- Gmail MCP server (first-choice evaluation path).
-
-**Key implementation notes**
-- Prioritize least-privilege scopes and explicit consent flow.
-- Normalize message/list/send actions into shared structured output schema.
-- Add token lifecycle handling (refresh, revocation, secure storage boundaries).
-- Include retry/backoff behavior for quota and transient API failures.
-- Keep implementation contract identical whether provider is MCP-backed or direct API-backed.
-
-**Dependencies on other improvements**
-- Depends on tool/workflow declaration system for pluggable registration.
-- Depends on security policy and secret handling to protect OAuth credentials and message data.
-
-**Priority**
-- Medium
+> ⏸ **PAUSE — Wait for confirmation before Step 3.4**
 
 ---
 
-### Toolchain Sequencing Notes
+## Step 3.4 — `code_modify` Tool (Build + Revert)
 
-1. Finish tool/workflow declaration system first (foundational interface and orchestration).
-2. Implement Web Scraping and Coding Agent tools against the unified contract.
-3. Evaluate Gmail MCP coverage, then select MCP-backed or custom Gmail wrapper.
-4. Defer Trading Tool activation until guardrails/policy architecture is production-ready.
-5. Preserve API-agnostic adapters so model/hardware upgrades do not require tool contract rewrites.
+**Description:**
+Extend `code_modify` with build verification and automatic revert on failure.
+
+New operations:
+- `build`: runs `cmake --build --preset debug`, returns structured result
+- `revert`: restores the file from backup taken before last `apply_diff`
+
+Requirements:
+- Before any `apply_diff`, back up the original file to a temp location
+- After `apply_diff`, optionally auto-trigger build (configurable)
+- If build fails, revert automatically and return failure with build output
+- Revert must be idempotent
+
+**Output required:**
+- Updated `code_modify_tool.cpp`
+- Unit test: verify revert behavior on a simulated build failure
+
+> ⏸ **PAUSE — Wait for confirmation before Phase 3 close-out**
+
+---
+
+## Phase 3 Close-Out
+
+Before moving to Phase 4:
+- Run full build and unit tests
+- Manually verify: ask agent to analyze the project — confirm structured output
+- Manually verify: ask agent to read a source file — confirm it returns contents
+- Confirm all tools registered in `ToolRegistry` and appear in system prompt
+
+**Summarize:**
+- Files created
+- Files modified
+- Any deferred items
+
+> ⏸ **PAUSE — Confirm Phase 3 complete before starting Phase 4**
+
+---
+
+---
+
+# Phase 4 — Memory Stability
+
+**Architecture references:** `GRAG.md`, `memory_summery.md`
+
+**Goal:** Prevent memory bloat, add structured world knowledge, and define the vector store scalability path.
+
+---
+
+## Step 4.1 — Memory Pruning: Policy Design (NO CODE YET)
+
+**Description:**
+Design the pruning and archival policy before writing any implementation.
+
+Define:
+- **Hot tier**: recent N raw turns (configurable, default: last 50 messages)
+- **Warm tier**: compressed summaries of older sessions
+- **Cold tier**: archived raw logs (kept for audit, not used in retrieval)
+
+Policy triggers:
+- Session message count exceeds threshold
+- Session age exceeds threshold (e.g., 30 days)
+- Manual trigger via admin command
+
+Preservation rules:
+- Key decisions, tasks, and tool results must be preserved in summary before pruning raw turns
+- Summary must be searchable via RAG
+
+**Output required:**
+- Design document (inline, no code)
+- Proposed SQLite schema additions: `archived_turns` table
+- Proposed `PruningPolicy` struct definition (header only)
+
+> ⏸ **PAUSE — Wait for confirmation before Step 4.2**
+
+---
+
+## Step 4.2 — Memory Pruning: Implementation
+
+**Description:**
+Implement the pruning and archival pipeline based on the approved design from Step 4.1.
+
+Requirements:
+- New class: `MemoryPruner`
+- Triggered automatically on session write when thresholds are exceeded
+- Uses `DecisionTraceLogger` to log pruning events
+- Audit metadata per archived turn: `archived_at_ms`, `summary_version`, `source_range`
+- Restore path: `MemoryPruner::restore(session_id, range)` for on-demand historical replay
+- All operations must be transactional (SQLite)
+
+**Output required:**
+- `memory_pruner.h` and `memory_pruner.cpp`
+- Updated `SQLiteMemoryRepository` to integrate pruning triggers
+- Unit tests: prune triggers at threshold, restore returns correct turns
+
+> ⏸ **PAUSE — Wait for confirmation before Step 4.3**
+
+---
+
+## Step 4.3 — Structured Fact Store
+
+**Description:**
+Implement a dedicated `facts` SQLite table for structured world knowledge.
+
+This is distinct from episodic conversation memory. It is for persistent, verifiable facts about the project and environment.
+
+Schema:
+```sql
+CREATE TABLE facts (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  confidence REAL DEFAULT 1.0,
+  source TEXT,
+  last_updated_ms INTEGER NOT NULL
+);
+```
+
+Requirements:
+- New class: `FactStore` with methods: `upsert`, `get`, `search`, `delete`
+- `search` must use substring matching on `key` and `value`
+- Accessible from `CommandProcessor` as a retrieval source (alongside RAG)
+- Tools may write facts via a new `store_fact` tool (implement the tool here too)
+- Tool name: `store_fact`, input: `{ "key": string, "value": string, "confidence": float, "source": string }`
+
+**Output required:**
+- `fact_store.h` and `fact_store.cpp`
+- `store_fact_tool.h` and `store_fact_tool.cpp`
+- Unit tests: upsert, retrieval, search
+
+> ⏸ **PAUSE — Wait for confirmation before Step 4.4**
+
+---
+
+## Step 4.4 — Vector Store Scalability Path
+
+**Description:**
+Define and implement the abstraction layer allowing `IndexManager` to swap vector backends.
+
+This step defines the interface and implements the migration path — it does NOT switch the backend yet.
+
+Requirements:
+- New interface: `IVectorStore` (pure virtual)
+  - Methods: `insert`, `search`, `delete_chunk`, `flush`, `chunk_count`
+- Wrap current flat `rag_index.bin` implementation behind `IVectorStore`
+- New class: `FlatVectorStore` (existing behavior, wrapped)
+- Add benchmark contract tests:
+  - Ingest throughput
+  - p50/p95 retrieval latency
+  - Memory usage at 10k / 50k / 100k chunks
+- Document the evaluated candidates: LanceDB, ChromaDB
+- Add dual-write stub (disabled by default) for future migration
+
+**Output required:**
+- `i_vector_store.h` interface
+- `flat_vector_store.h` and `flat_vector_store.cpp` (wrapped existing)
+- Benchmark test scaffold
+- Migration design notes (inline comments or small design doc)
+
+> ⏸ **PAUSE — Wait for confirmation before Phase 4 close-out**
+
+---
+
+## Phase 4 Close-Out
+
+Before moving to Phase 5:
+- Run full build and unit tests
+- Verify `step_metrics` SQLite table is populated after a goal execution
+- Verify `facts` table exists and `store_fact` tool is accessible via tool registry
+- Confirm `IVectorStore` builds cleanly and existing RAG behavior is unchanged
+
+**Summarize:**
+- Files created
+- Files modified
+- Any deferred items
+
+> ⏸ **PAUSE — Confirm Phase 4 complete before starting Phase 5**
+
+---
+
+---
+
+# Phase 5 — Advanced Reasoning
+
+**Architecture references:** `PLAN.md`, `grag_summary.md`, `grag_upgrade.md`
+
+**Goal:** Implement structured scientific reasoning, strategy reuse, and advanced GRAG retrieval modes.
+
+---
+
+## Step 5.1 — Scientific Reasoning Engine: ProblemState Design (NO CODE YET)
+
+**Description:**
+Design the `ProblemState` structure and hypothesis lifecycle before writing implementation.
+
+Define:
+```cpp
+struct ProblemState {
+    std::string problem_description;
+    std::vector<std::string> hypotheses;
+    std::vector<std::string> constraints;
+    std::vector<std::string> unknowns;
+    std::vector<std::string> rejected_paths;
+    std::string current_hypothesis;
+    int iteration_count;
+};
+```
+
+Define the scientific reasoning loop:
+1. Generate hypotheses (LLM call via `IPlanner`)
+2. Extract constraints
+3. Evaluate feasibility (score each hypothesis)
+4. Generate alternatives for low-score hypotheses
+5. Score options on: feasibility, cost realism, risk, novelty
+6. Iterate until stable (convergence threshold configurable)
+
+Define convergence criteria:
+- No new hypotheses added in last 2 iterations
+- Top hypothesis score > 0.8
+
+**Output required:**
+- `problem_state.h` header (struct + enums only)
+- Written loop design (pseudocode or description)
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.2**
+
+---
+
+## Step 5.2 — Scientific Reasoning Engine: Implementation
+
+**Description:**
+Implement the scientific reasoning loop using the Strategy Pattern (per `PLAN.md`).
+
+Requirements:
+- New class: `ScientificExecutionMode` implementing `IExecutionMode`
+- Activated when `ExecutiveController` classifies goal as scientific
+- Goal classification logic: keyword matching + LLM classification call
+- Each iteration updates `ProblemState`
+- `ProblemState` must be persisted to SQLite (new table: `problem_states`)
+- Hypothesis scores returned as structured comparison table
+- No single-shot answers — loop must run minimum 2 iterations
+
+**Output required:**
+- `scientific_execution_mode.h` and `scientific_execution_mode.cpp`
+- `problem_state.cpp` with SQLite persistence
+- Updated `ExecutiveController` to activate `ScientificExecutionMode` on classification
+- Unit tests: loop runs minimum iterations, convergence halts loop
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.3**
+
+---
+
+## Step 5.3 — Strategy Memory & Tool Metrics
+
+**Description:**
+Expand the Plan History system to prefer historically successful strategies.
+
+Requirements:
+- New class: `StrategyMemory`
+- Reads from `step_metrics` table (implemented in Phase 1)
+- Computes per-tool success rates and average latency
+- Exposes ranked list of preferred tools/strategies to `IPlanner`
+- `Planner::createInitialPlan()` must accept a `StrategyHints` struct
+- Plans generated with hints must prefer high-success tools when multiple options exist
+- Hint influence must be configurable (weight 0.0–1.0)
+
+**Output required:**
+- `strategy_memory.h` and `strategy_memory.cpp`
+- Updated `IPlanner` interface to accept `StrategyHints`
+- Unit tests: verify strategy hints influence plan tool selection
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.4**
+
+---
+
+## Step 5.4 — GRAG Upgrade: Hierarchical Goals
+
+**Description:**
+Implement subgoal tree support per `grag_upgrade.md` Upgrade #1.
+
+Requirements:
+- New struct: `GoalNode` with: `description`, `embedding`, `children[]`, `status`
+- `Planner` generates subgoal tree alongside plan
+- `ExecutiveController` activates one subgoal at a time
+- `GragScorer::rescore()` uses `active_subgoal_embedding` instead of root goal embedding
+- Root goal embedding still retained for top-level direction
+- Subgoal transitions logged to `decision_trace.jsonl`
+
+**Output required:**
+- `goal_node.h` (struct definition)
+- Updated `GragScorer::rescore()` signature to accept optional active subgoal embedding
+- Updated `ExecutiveController` to manage subgoal activation
+- Unit tests: verify directional scoring uses active subgoal, not root goal
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.5**
+
+---
+
+## Step 5.5 — GRAG Upgrade: Trajectory Awareness
+
+**Description:**
+Implement progress-aware retrieval per `grag_upgrade.md` Upgrade #2.
+
+Requirements:
+- New class: `TrajectoryBuilder`
+  - Input: last N `EpisodeStep` records (N configurable, default 7)
+  - Output: single trajectory embedding `T`
+- Structured trajectory input for embedding:
+  ```json
+  {
+    "recent_actions": ["..."],
+    "failures": ["..."],
+    "progress_summary": "..."
+  }
+  ```
+- Updated retrieval scoring:
+  ```
+  score = wq * cosine(Q, chunk)
+        + wd * cosine(D, chunk)
+        + wt * cosine(T, chunk)
+  ```
+  Default weights: `wq=0.4`, `wd=0.4`, `wt=0.2` (configurable)
+- `ExecutiveController` updates trajectory embedding after every step
+- `GragDiagnostics` must include trajectory weight and magnitude
+
+New SQLite table: `episode_steps`
+- Fields: `episode_id`, `goal_id`, `step_index`, `state_summary`, `action_taken`, `result_status`, `embedding_blob`, `timestamp_ms`
+
+**Output required:**
+- `trajectory_builder.h` and `trajectory_builder.cpp`
+- Updated `GragScorer::rescore()` to accept trajectory embedding
+- Updated `GragDiagnostics` struct
+- Unit tests: verify trajectory shifts retrieval scores vs. baseline
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.6**
+
+---
+
+## Step 5.6 — GRAG Hardening: Adaptive Graph Learning
+
+**Status: [PROTOTYPE]**
+The current graph memory implementation (0.7 vector / 0.3 graph) is active but uses static edge weights.
+
+**Requirements:**
+- Implement dynamic edge weight adjustment based on successful execution trajectories.
+- Transition from static `graph_weight` to a learned significance model.
+- Add graph density metrics to `grag_metrics.jsonl`.
+
+---
+
+## Step 5.7 — Model Upgrade Path
+
+**Description:**
+Define the abstraction layer and migration playbook for adopting larger models.
+
+This is a design and documentation step — no major code changes.
+
+Requirements:
+- Audit `LLMInterface` for any hard-coded model-specific assumptions
+- Define a `ModelConfig` struct: `{ model_name, context_window, supports_tool_calls, temperature, max_tokens }`
+- Move model selection to runtime config (already partially done — verify and complete)
+- Document migration playbook:
+  - How to test a new model against current prompt templates
+  - How to verify tool call format compatibility
+  - Rollback procedure
+
+**Output required:**
+- Updated `LLMInterface` with `ModelConfig` abstraction
+- Migration playbook as inline comments or a small `.md` file
+
+> ⏸ **PAUSE — Wait for confirmation before Phase 5 close-out**
+
+---
+
+## Phase 5 Close-Out
+
+Final validation before marking roadmap complete:
+- Run full build and unit tests
+- Run a scientific goal end-to-end: verify loop iterations and `ProblemState` persistence
+- Run a standard goal: verify subgoal tree is generated and GRAG uses active subgoal
+- Check `grag_benchmark.jsonl` — confirm trajectory weight field is present
+- Confirm strategy hints are visible in planner trace logs
+
+**Summarize:**
+- Files created
+- Files modified
+- Any deferred items
+- Recommended next roadmap additions
+
+> ⏸ **PAUSE — Confirm Phase 5 complete. Roadmap cycle complete.**
+
+---
+
+## Toolchain Roadmap (Ongoing — Not Phased)
+
+These tools can be implemented independently of the phase structure above. They must comply with `TOOLS.md v1.0`.
+
+### Web Scraping Tool
+- **Priority:** High
+- **Notes:** Support both static and JS-rendered content. Feed output into RAG ingestion pipeline.
+- **Tool name:** `web_scrape`
+
+### Trading Tool
+- **Priority:** Low
+- **Notes:** Position limits, risk caps, paper trading mode required before live use.
+- **Tool name:** `place_order`
+
+### Gmail Integration (Expanded)
+- **Priority:** Medium
+- **Status:** `gmail_read_labels` implemented.
+- **Next tools:** `gmail_read_messages`, `gmail_send_message`, `gmail_search`

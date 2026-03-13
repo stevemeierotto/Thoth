@@ -1,0 +1,135 @@
+[ 70%] Built target basic_agent
+[ 91%] Built target thoth-control-panel
+[ 94%] Building CXX object tests/CMakeFiles/thoth-unit-tests.dir/unit_tests.cpp.o
+/home/steve/Thoth/tests/unit_tests.cpp:740:13: warning: ‘bool testControllerTraceLogging()’ defined but not used [-Wunused-function]
+  740 | static bool testControllerTraceLogging() {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~
+[ 97%] Linking CXX executable thoth-unit-tests
+[100%] Built target thoth-unit-tests
+PASSED: testConfigRoundTrip
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testMemoryPersistence
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+Updated verbosity to 2
+PASSED: testCommandProcessorSetCommand
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testToolRegistryDispatch
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testPromptFactoryTools
+PASSED: testGragCosineSimilarity
+PASSED: testGragComputeDirection
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+[DEBUG] Query embedding size=5, docs=1
+[DEBUG] Doc 0 score=0.401312
+[DEBUG] Retrieved 1 results.
+PASSED: testGragDirectionalBlendLog
+PASSED: testGragComputeAlpha
+PASSED: testGragRescoreDegrade
+PASSED: testGragRescoreWithGoal
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+[ERROR] retrieve() called but no documents/embeddings loaded.
+PASSED: testGragAutoMode
+PASSED: testGragDiagnosticsToJson
+PASSED: testGragRawMagnitude
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+[ERROR] retrieve() called but no documents/embeddings loaded.
+PASSED: testGragBenchmarkLogging
+PASSED: testPlanSerialization
+PASSED: testStubPlanner
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testControllerSuccess
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testControllerRetry
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testControllerAbort
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testControllerRevise
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+[DEBUG] Query embedding size=10000, docs=2
+[DEBUG] Doc 0 score=1.41421
+[DEBUG] Doc 1 score=1.41421
+[DEBUG] Retrieved 2 results.
+PASSED: testGragActivationViaController
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+[DEBUG] Query embedding size=10000, docs=2
+[DEBUG] Doc 0 score=-1.41421
+[DEBUG] Doc 1 score=-1.41421
+[WARN] No relevant results found for query="dummy_routing"
+[DEBUG] Query embedding size=10000, docs=2
+[DEBUG] Doc 0 score=-1.41421
+[DEBUG] Doc 1 score=-1.41421
+[WARN] No relevant results found for query="dummy_routing"
+[DEBUG] Query embedding size=10000, docs=2
+[DEBUG] Doc 0 score=-1.41421
+[DEBUG] Doc 1 score=-1.41421
+[WARN] No relevant results found for query="dummy_routing"
+[DEBUG] Query embedding size=10000, docs=2
+[DEBUG] Doc 0 score=-1.41421
+[DEBUG] Doc 1 score=-1.41421
+[WARN] No relevant results found for query="dummy_routing"
+[DEBUG] Query embedding size=10000, docs=2
+[DEBUG] Doc 0 score=-1.41421
+[DEBUG] Doc 1 score=-1.41421
+[WARN] No relevant results found for query="dummy_routing"
+[DEBUG] Query embedding size=10000, docs=2
+[DEBUG] Doc 0 score=-1.41421
+[DEBUG] Doc 1 score=-1.41421
+[WARN] No relevant results found for query="dummy_routing"
+PASSED: testGragRoutingModes
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testPlanHistoryReuse
+[IndexManager] Cleared all in-memory chunks and store.
+PASSED: testIndexIntegrity
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testGragMetrics
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+PASSED: testGraphMemory
+[MemoryRepositoryFactory] SQLite backend initialized (mandatory).
+[Memory] Phase 4: Migrating embedding schema from v1 to v2...
+[Memory] Migration complete. All v1 embeddings invalidated.
+[BasicAgentPlugin] Warning: config.json not found at: /home/steve/Thoth/build/debug/config.json
+[BasicAgentPlugin] Similarity metric set to: cosine
+[BasicAgentPlugin] Warning: .env not found at: /home/steve/Thoth/build/debug/.env. Using system env.
+[BasicAgentPlugin] RAG index path: /home/steve/Thoth/build/debug/agent_workspace/rag/rag_index.bin
+[basic_agent:RAG] Index loaded from: /home/steve/Thoth/build/debug/agent_workspace/rag/rag_index.bin (entries=0)
+[BasicAgentPlugin] RAG index loaded successfully.
+[AgentInterface] BasicAgentPlugin initialized successfully.
+[BasicAgentPlugin] Destroyed.
+PASSED: testAgentInterfaceLifecycle
+PASSED: testStructuredLoggerRedaction
+All unit tests passed.
