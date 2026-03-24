@@ -45,147 +45,21 @@ Before making any changes:
 
 ## Phase Order
 
-| # | Phase | Priority |
-|---|---|---|
-| 3 | Self-Building Capability | High |
-| 4 | Memory Stability | High |
-| 5 | Advanced Reasoning | High |
+| # | Phase | Priority | Status |
+|---|---|---|---|
+| 3 | Memory Stability | High | 📋 Planned |
+| 4 | Advanced Reasoning | High | 📋 Planned |
+| 5 | Self-Building Capability | Medium | 📋 Planned |
+| 9 | LLM-Driven Step Generation | Critical | ✅ Complete (see completed_improvements_log.md) |
+| 10 | Resume Completeness | High | ✅ Complete (see completed_improvements_log.md) |
+| 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
+| 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
 ---
 
 ---
 
-# Phase 3 — Self-Building Capability
-
-**Architecture references:** `PLAN.md`, `TOOLS.md`
-
-**Goal:** Give Thoth the ability to read, modify, build, and test its own codebase through the standard tool interface.
-
-> **Note for Gemini:** All tools in this phase must implement `ITool` per `TOOLS.md v1.0`. All execution must be sandboxed. No tool may directly access memory or SQLite.
-
----
-
-## Step 3.1 — `project_analyze` Tool
-
-**Description:**
-Implement a tool that scans the Thoth source directory and returns a structured project graph.
-
-Requirements:
-- Tool name: `project_analyze`
-- Input schema: `{ "root_path": string }` (defaults to `./` if not provided)
-- Output: structured JSON containing:
-  - File list with paths and sizes
-  - Class names extracted from headers
-  - File dependency map (which headers each `.cpp` includes)
-- Must complete within 10 seconds on the current codebase
-- Read-only — must not write or modify any files
-
-**Output required:**
-- `project_analyze_tool.h` and `project_analyze_tool.cpp`
-- Registration in `ToolRegistry`
-- Unit test: verify output schema on a known directory structure
-
-> ⏸ **PAUSE — Wait for confirmation before Step 3.2**
-
----
-
-## Step 3.2 — `run_tests` Tool
-
-**Description:**
-Implement a tool that executes the Thoth unit test suite and returns structured results.
-
-Requirements:
-- Tool name: `run_tests`
-- Input schema: `{ "filter": string (optional) }` — allows running a subset by name pattern
-- Output: `{ "total": int, "passed": int, "failed": int, "failures": [ { "name": string, "message": string } ] }`
-- Must capture stdout/stderr from test runner
-- Timeout: 60 seconds max
-- Must NOT allow arbitrary command injection via the `filter` field — sanitize input strictly
-
-**Output required:**
-- `run_tests_tool.h` and `run_tests_tool.cpp`
-- Registration in `ToolRegistry`
-- Unit test: verify structured output parsing on a known test result
-
-> ⏸ **PAUSE — Wait for confirmation before Step 3.3**
-
----
-
-## Step 3.3 — `code_modify` Tool (Read + Diff)
-
-**Description:**
-Implement the read and diff-application capability of the coding agent tool.
-
-This step implements read and diff only — no build trigger yet.
-
-Requirements:
-- Tool name: `code_modify`
-- Input schema:
-  ```json
-  {
-    "operation": "read" | "apply_diff",
-    "file_path": string,
-    "unified_diff": string (required for apply_diff)
-  }
-  ```
-- `read`: returns file contents as a string
-- `apply_diff`: applies a unified diff to the target file, returns success/failure with line-level error detail
-- File path must be validated against an allowlist (only paths under the project root)
-- Reject paths containing `..` or absolute paths outside project root
-- Atomic write: apply to a temp file first, rename on success
-
-**Output required:**
-- `code_modify_tool.h` and `code_modify_tool.cpp`
-- Registration in `ToolRegistry`
-- Unit tests for: read, valid diff apply, invalid diff rejection, path traversal rejection
-
-> ⏸ **PAUSE — Wait for confirmation before Step 3.4**
-
----
-
-## Step 3.4 — `code_modify` Tool (Build + Revert)
-
-**Description:**
-Extend `code_modify` with build verification and automatic revert on failure.
-
-New operations:
-- `build`: runs `cmake --build --preset debug`, returns structured result
-- `revert`: restores the file from backup taken before last `apply_diff`
-
-Requirements:
-- Before any `apply_diff`, back up the original file to a temp location
-- After `apply_diff`, optionally auto-trigger build (configurable)
-- If build fails, revert automatically and return failure with build output
-- Revert must be idempotent
-
-**Output required:**
-- Updated `code_modify_tool.cpp`
-- Unit test: verify revert behavior on a simulated build failure
-
-> ⏸ **PAUSE — Wait for confirmation before Phase 3 close-out**
-
----
-
-## Phase 3 Close-Out
-
-Before moving to Phase 4:
-- Run full build and unit tests
-- Manually verify: ask agent to analyze the project — confirm structured output
-- Manually verify: ask agent to read a source file — confirm it returns contents
-- Confirm all tools registered in `ToolRegistry` and appear in system prompt
-
-**Summarize:**
-- Files created
-- Files modified
-- Any deferred items
-
-> ⏸ **PAUSE — Confirm Phase 3 complete before starting Phase 4**
-
----
-
----
-
-# Phase 4 — Memory Stability
+# Phase 3 — Memory Stability
 
 **Architecture references:** `GRAG.md`, `memory_summery.md`
 
@@ -193,7 +67,7 @@ Before moving to Phase 4:
 
 ---
 
-## Step 4.1 — Memory Pruning: Policy Design (NO CODE YET)
+## Step 3.1 — Memory Pruning: Policy Design (NO CODE YET)
 
 **Description:**
 Design the pruning and archival policy before writing any implementation.
@@ -217,14 +91,14 @@ Preservation rules:
 - Proposed SQLite schema additions: `archived_turns` table
 - Proposed `PruningPolicy` struct definition (header only)
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.2**
+> ⏸ **PAUSE — Wait for confirmation before Step 3.2**
 
 ---
 
-## Step 4.2 — Memory Pruning: Implementation
+## Step 3.2 — Memory Pruning: Implementation
 
 **Description:**
-Implement the pruning and archival pipeline based on the approved design from Step 4.1.
+Implement the pruning and archival pipeline based on the approved design from Step 3.1.
 
 Requirements:
 - New class: `MemoryPruner`
@@ -239,11 +113,11 @@ Requirements:
 - Updated `SQLiteMemoryRepository` to integrate pruning triggers
 - Unit tests: prune triggers at threshold, restore returns correct turns
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.3**
+> ⏸ **PAUSE — Wait for confirmation before Step 3.3**
 
 ---
 
-## Step 4.3 — Structured Fact Store
+## Step 3.3 — Structured Fact Store
 
 **Description:**
 Implement a dedicated `facts` SQLite table for structured world knowledge.
@@ -273,11 +147,11 @@ Requirements:
 - `store_fact_tool.h` and `store_fact_tool.cpp`
 - Unit tests: upsert, retrieval, search
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.4**
+> ⏸ **PAUSE — Wait for confirmation before Step 3.4**
 
 ---
 
-## Step 4.4 — Vector Store Scalability Path
+## Step 3.4 — Vector Store Scalability Path
 
 **Description:**
 Define and implement the abstraction layer allowing `IndexManager` to swap vector backends.
@@ -294,7 +168,7 @@ Requirements:
   - p50/p95 retrieval latency
   - Memory usage at 10k / 50k / 100k chunks
 - Document the evaluated candidates: LanceDB, ChromaDB
-- Add dual-write stub (disabled by default) for future migration
+- Add dual-write_stub (disabled by default) for future migration
 
 **Output required:**
 - `i_vector_store.h` interface
@@ -302,13 +176,13 @@ Requirements:
 - Benchmark test scaffold
 - Migration design notes (inline comments or small design doc)
 
-> ⏸ **PAUSE — Wait for confirmation before Phase 4 close-out**
+> ⏸ **PAUSE — Wait for confirmation before Phase 3 close-out**
 
 ---
 
-## Phase 4 Close-Out
+## Phase 3 Close-Out
 
-Before moving to Phase 5:
+Before moving to Phase 4:
 - Run full build and unit tests
 - Verify `step_metrics` SQLite table is populated after a goal execution
 - Verify `facts` table exists and `store_fact` tool is accessible via tool registry
@@ -319,21 +193,21 @@ Before moving to Phase 5:
 - Files modified
 - Any deferred items
 
-> ⏸ **PAUSE — Confirm Phase 4 complete before starting Phase 5**
+> ⏸ **PAUSE — Confirm Phase 3 complete before starting Phase 4**
 
 ---
 
 ---
 
-# Phase 5 — Advanced Reasoning
+# Phase 4 — Advanced Reasoning
 
-**Architecture references:** `PLAN.md`, `grag_summary.md`, `grag_upgrade.md`
+**Architecture references:** `PLAN.md`, `GRAG.md`, `cognate.md`, `README.md`
 
 **Goal:** Implement structured scientific reasoning, strategy reuse, and advanced GRAG retrieval modes.
 
 ---
 
-## Step 5.1 — Scientific Reasoning Engine: ProblemState Design (NO CODE YET)
+## Step 4.1 — Scientific Reasoning Engine: ProblemState Design (NO CODE YET)
 
 **Description:**
 Design the `ProblemState` structure and hypothesis lifecycle before writing implementation.
@@ -367,11 +241,11 @@ Define convergence criteria:
 - `problem_state.h` header (struct + enums only)
 - Written loop design (pseudocode or description)
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.2**
+> ⏸ **PAUSE — Wait for confirmation before Step 4.2**
 
 ---
 
-## Step 5.2 — Scientific Reasoning Engine: Implementation
+## Step 4.2 — Scientific Reasoning Engine: Implementation
 
 **Description:**
 Implement the scientific reasoning loop using the Strategy Pattern (per `PLAN.md`).
@@ -391,11 +265,11 @@ Requirements:
 - Updated `ExecutiveController` to activate `ScientificExecutionMode` on classification
 - Unit tests: loop runs minimum iterations, convergence halts loop
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.3**
+> ⏸ **PAUSE — Wait for confirmation before Step 4.3**
 
 ---
 
-## Step 5.3 — Strategy Memory & Tool Metrics
+## Step 4.3 — Strategy Memory & Tool Metrics
 
 **Description:**
 Expand the Plan History system to prefer historically successful strategies.
@@ -414,11 +288,11 @@ Requirements:
 - Updated `IPlanner` interface to accept `StrategyHints`
 - Unit tests: verify strategy hints influence plan tool selection
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.4**
+> ⏸ **PAUSE — Wait for confirmation before Step 4.4**
 
 ---
 
-## Step 5.4 — GRAG Upgrade: Hierarchical Goals
+## Step 4.4 — GRAG Upgrade: Hierarchical Goals
 
 **Description:**
 Implement subgoal tree support per `grag_upgrade.md` Upgrade #1.
@@ -437,11 +311,11 @@ Requirements:
 - Updated `ExecutiveController` to manage subgoal activation
 - Unit tests: verify directional scoring uses active subgoal, not root goal
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.5**
+> ⏸ **PAUSE — Wait for confirmation before Step 4.5**
 
 ---
 
-## Step 5.5 — GRAG Upgrade: Trajectory Awareness
+## Step 4.5 — GRAG Upgrade: Trajectory Awareness
 
 **Description:**
 Implement progress-aware retrieval per `grag_upgrade.md` Upgrade #2.
@@ -477,23 +351,27 @@ New SQLite table: `episode_steps`
 - Updated `GragDiagnostics` struct
 - Unit tests: verify trajectory shifts retrieval scores vs. baseline
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.6**
+> ⏸ **PAUSE — Wait for confirmation before Step 4.6**
 
 ---
 
-## Step 5.6 — GRAG Hardening: Adaptive Graph Learning
+## Step 4.6 — GRAG Hardening: Adaptive Graph Learning
 
-**Status: [PROTOTYPE]**
-The current graph memory implementation (0.7 vector / 0.3 graph) is active but uses static edge weights.
+**Status: [COMPLETE]**
+Dynamic graph edge learning is now fully operational. Edge weights are adjusted via `GraphRefiner` based on execution success/failure using a logistic learning rule (learning_rate=0.2).
 
-**Requirements:**
-- Implement dynamic edge weight adjustment based on successful execution trajectories.
-- Transition from static `graph_weight` to a learned significance model.
-- Add graph density metrics to `grag_metrics.jsonl`.
+**Completed:**
+- ✅ Dynamic edge weight adjustment based on successful execution trajectories (`GraphRefiner::refineFromTrajectory`)
+- ✅ Graph density metrics added to `GragDiagnostics` and logged in `grag_benchmark.jsonl`:
+  - Total nodes and edges
+  - Average edge weight
+  - Graph activations per retrieval
+  - Maximum graph contribution
+- ✅ Enhanced logging in `GraphRefiner` to track weight updates, edge creation/updates, and learning progress
 
 ---
 
-## Step 5.7 — Model Upgrade Path
+## Step 4.7 — Model Upgrade Path
 
 **Description:**
 Define the abstraction layer and migration playbook for adopting larger models.
@@ -513,11 +391,11 @@ Requirements:
 - Updated `LLMInterface` with `ModelConfig` abstraction
 - Migration playbook as inline comments or a small `.md` file
 
-> ⏸ **PAUSE — Wait for confirmation before Phase 5 close-out**
+> ⏸ **PAUSE — Wait for confirmation before Phase 4 close-out**
 
 ---
 
-## Phase 5 Close-Out
+## Phase 4 Close-Out
 
 Final validation before marking roadmap complete:
 - Run full build and unit tests
@@ -532,7 +410,139 @@ Final validation before marking roadmap complete:
 - Any deferred items
 - Recommended next roadmap additions
 
-> ⏸ **PAUSE — Confirm Phase 5 complete. Roadmap cycle complete.**
+> ⏸ **PAUSE — Confirm Phase 4 complete. Roadmap cycle complete.**
+
+---
+
+---
+
+# Phase 5 — Self-Building Capability
+
+**Architecture references:** `PLAN.md`, `TOOLS.md`
+
+**Priority: Medium**
+
+**Goal:** Give Thoth the ability to read, modify, build, and test its own codebase through the standard tool interface.
+
+> **Note for Gemini:** All tools in this phase must implement `ITool` per `TOOLS.md v1.0`. All execution must be sandboxed. No tool may directly access memory or SQLite.
+
+---
+
+## Step 5.1 — `project_analyze` Tool
+
+**Description:**
+Implement a tool that scans the Thoth source directory and returns a structured project graph.
+
+Requirements:
+- Tool name: `project_analyze`
+- Input schema: `{ "root_path": string }` (defaults to `./` if not provided)
+- Output: structured JSON containing:
+  - File list with paths and sizes
+  - Class names extracted from headers
+  - File dependency map (which headers each `.cpp` includes)
+- Must complete within 10 seconds on the current codebase
+- Read-only — must not write or modify any files
+
+**Output required:**
+- `project_analyze_tool.h` and `project_analyze_tool.cpp`
+- Registration in `ToolRegistry`
+- Unit test: verify output schema on a known directory structure
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.2**
+
+---
+
+## Step 5.2 — `run_tests` Tool
+
+**Description:**
+Implement a tool that executes the Thoth unit test suite and returns structured results.
+
+Requirements:
+- Tool name: `run_tests`
+- Input schema: `{ "filter": string (optional) }` — allows running a subset by name pattern
+- Output: `{ "total": int, "passed": int, "failed": int, "failures": [ { "name": string, "message": string } ] }`
+- Must capture stdout/stderr from test runner
+- Timeout: 60 seconds max
+- Must NOT allow arbitrary command injection via the `filter` field — sanitize input strictly
+
+**Output required:**
+- `run_tests_tool.h` and `run_tests_tool.cpp`
+- Registration in `ToolRegistry`
+- Unit test: verify structured output parsing on a known test result
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.3**
+
+---
+
+## Step 5.3 — `code_modify` Tool (Read + Diff)
+
+**Description:**
+Implement the read and diff-application capability of the coding agent tool.
+
+This step implements read and diff only — no build trigger yet.
+
+Requirements:
+- Tool name: `code_modify`
+- Input schema:
+  ```json
+  {
+    "operation": "read" | "apply_diff",
+    "file_path": string,
+    "unified_diff": string (required for apply_diff)
+  }
+  ```
+- `read`: returns file contents as a string
+- `apply_diff`: applies a unified diff to the target file, returns success/failure with line-level error detail
+- File path must be validated against an allowlist (only paths under the project root)
+- Reject paths containing `..` or absolute paths outside project root
+- Atomic write: apply to a temp file first, rename on success
+
+**Output required:**
+- `code_modify_tool.h` and `code_modify_tool.cpp`
+- Registration in `ToolRegistry`
+- Unit tests for: read, valid diff apply, invalid diff rejection, path traversal rejection
+
+> ⏸ **PAUSE — Wait for confirmation before Step 5.4**
+
+---
+
+## Step 5.4 — `code_modify` Tool (Build + Revert)
+
+**Description:**
+Extend `code_modify` with build verification and automatic revert on failure.
+
+New operations:
+- `build`: runs `cmake --build --preset debug`, returns structured result
+- `revert`: restores the file from backup taken before last `apply_diff`
+
+Requirements:
+- Before any `apply_diff`, back up the original file to a temp location
+- After `apply_diff`, optionally auto-trigger build (configurable)
+- If build fails, revert automatically and return failure with build output
+- Revert must be idempotent
+
+**Output required:**
+- Updated `code_modify_tool.cpp`
+- Unit test: verify revert behavior on a simulated build failure
+
+> ⏸ **PAUSE — Wait for confirmation before Phase 5 close-out**
+
+---
+
+## Phase 5 Close-Out
+
+Before moving to next Roadmap iteration:
+- Run full build and unit tests
+- Manually verify: ask agent to analyze the project — confirm structured output
+- Manually verify: ask agent to read a source file — confirm it returns contents
+- Confirm all tools registered in `ToolRegistry` and appear in system prompt
+
+**Summarize:**
+- Files created
+- Files modified
+- Any deferred items
+
+> ⏸ **PAUSE — Confirm Phase 5 complete.**
 
 ---
 
@@ -552,5 +562,53 @@ These tools can be implemented independently of the phase structure above. They 
 
 ### Gmail Integration (Expanded)
 - **Priority:** Medium
-- **Status:** `gmail_read_labels` implemented.
-- **Next tools:** `gmail_read_messages`, `gmail_send_message`, `gmail_search`
+- **Status:** `gmail_read_labels` and `gmail_read_messages` implemented.
+- **Next tools:** `gmail_send_message`, `gmail_search`
+
+---
+
+# Phase 9 — LLM-Driven Step Generation
+
+**Status:** ✅ Complete — See `completed_improvements_log.md` for details
+
+**Note:** This phase was completed. The implementation details are preserved below for reference, but work has been completed and moved to the completed log.
+
+**Architecture references:** `PLAN.md`, `cognate.md`
+
+**Goal:** Replace the hardcoded 3-step scaffold with a fully dynamic planning loop where the LLM generates, parses, and executes arbitrary plan steps. This is the primary unlock for full agent autonomy.
+
+---
+
+# Phase 10 — Resume Completeness
+
+**Status:** ✅ Complete — See `completed_improvements_log.md` for details
+
+**Note:** This phase was completed. The implementation details are preserved below for reference, but work has been completed and moved to the completed log.
+
+**Architecture references:** `architectural_facts.md` (§6 Resume Compatibility), `PLAN.md`
+
+**Goal:** Ensure the `decision_trace.jsonl` log and the SQLite persistence layer contain enough information to fully reconstruct and resume a plan after a crash or restart, eliminating the four known gaps identified in `architectural_facts.md §6`.
+
+---
+
+# Phase 11 — Dynamic Plan Revision
+
+**Status:** ✅ Complete — See `completed_improvements_log.md` for details
+
+**Note:** This phase was completed. The implementation details are preserved below for reference, but work has been completed and moved to the completed log.
+
+**Architecture references:** `PLAN.md`, `cognate.md`
+
+**Goal:** Replace the `revise_plan` stub with a real-time correction mechanism that uses trajectory failure data to instruct the LLM to generate a repaired plan mid-execution.
+
+---
+
+# Phase 12 — Extended Agent & Tool Re-enablement
+
+**Status:** ✅ Complete — See `completed_improvements_log.md` for details
+
+**Note:** This phase was completed. The implementation details are preserved below for reference, but work has been completed and moved to the completed log.
+
+**Architecture references:** `TOOLS.md`, `basic_agent_design_goal.md`, `PLAN.md`
+
+**Goal:** Re-enable the tool system after the three Basic Agent criteria from `basic_agent_design_goal.md` are verified met. Introduce the first production-grade extended tools and validate the agent operates safely and correctly with tools active.

@@ -2,6 +2,7 @@
 #pragma once
 #include <wx/wx.h>
 #include <wx/graphics.h>
+#include <json.hpp>
 
 class ChatMessagePanel : public wxPanel {
 public:
@@ -15,6 +16,8 @@ private:
     wxString m_message;
     bool m_isUser;
     wxTextCtrl* m_textCtrl;
+
+    void RenderStructuredContent(const nlohmann::json& j);
 
     static constexpr int BUBBLE_PADDING = 12;
     static constexpr int BUBBLE_RADIUS = 12;

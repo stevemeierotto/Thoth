@@ -21,5 +21,6 @@ namespace Thoth { // Using a namespace to avoid global name collisions
         std::int64_t updatedAtMs = 0;
         std::vector<ChatMessage> messages;
         std::vector<std::string> ragFilePaths;
+        std::string activeGoal;
     };
 } // namespace Thoth

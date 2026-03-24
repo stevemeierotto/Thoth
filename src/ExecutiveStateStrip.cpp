@@ -20,9 +20,11 @@ ExecutiveStateStrip::ExecutiveStateStrip(wxWindow* parent)
 }
 
 void ExecutiveStateStrip::ResetPlan(const nlohmann::json& planJson) {
+    std::cerr << "[ExecutiveStateStrip] ResetPlan called.\n";
     m_steps.clear();
     try {
         if (planJson.contains("steps") && planJson["steps"].is_array()) {
+            std::cerr << "[ExecutiveStateStrip] Found " << planJson["steps"].size() << " steps.\n";
             for (const auto& s : planJson["steps"]) {
                 VisualStep vs;
                 vs.id = s.value("step_id", "");
@@ -30,13 +32,18 @@ void ExecutiveStateStrip::ResetPlan(const nlohmann::json& planJson) {
                 vs.status = StepStatus::PENDING; // Initial state
                 m_steps.push_back(vs);
             }
+        } else {
+            std::cerr << "[ExecutiveStateStrip] No steps found in JSON!\n";
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        std::cerr << "[ExecutiveStateStrip] Exception in ResetPlan: " << e.what() << "\n";
+    }
     
     Refresh();
 }
 
 void ExecutiveStateStrip::UpdateStepStatus(const std::string& stepId, StepStatus status) {
+    std::cerr << "[ExecutiveStateStrip] UpdateStepStatus: " << stepId << " -> " << (int)status << "\n";
     for (auto& s : m_steps) {
         if (s.id == stepId) {
             s.status = status;
@@ -48,14 +55,25 @@ void ExecutiveStateStrip::UpdateStepStatus(const std::string& stepId, StepStatus
 
 void ExecutiveStateStrip::OnPaint(wxPaintEvent& WXUNUSED(event)) {
     wxAutoBufferedPaintDC dc(this);
+    
+    // Explicitly draw background because wxBG_STYLE_PAINT requires it
+    dc.SetBackground(wxBrush(GetBackgroundColour()));
     dc.Clear();
     
     std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
-    if (!gc) return;
+    if (!gc) {
+        std::cerr << "[ExecutiveStateStrip] Failed to create GraphicsContext!\n";
+        return;
+    }
 
     wxFont font = GetFont();
     font.SetPointSize(8);
     gc->SetFont(font, *wxBLACK);
+
+    if (m_steps.empty()) {
+        gc->DrawText("No active plan execution", MARGIN, MARGIN);
+        return;
+    }
 
     int x = MARGIN;
     int y = MARGIN;

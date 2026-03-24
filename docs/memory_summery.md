@@ -1,73 +1,76 @@
-# Memory Architecture Summary
+# Thoth Memory Architecture Summary
 
-This project uses a practical hybrid memory model across conversation state, persisted summaries, execution traces, and retrieval index data.
+Thoth uses an advanced, multi-layered cognitive memory model. It has transitioned from simple JSON storage to a robust, SQLite-backed relational system designed for high-integrity autonomous reasoning.
 
-## 1) Episodic Memory ("what happened")
+---
 
-Episodic memory captures conversation events and response lifecycle outcomes.
+## 1) Episodic Memory ("What Happened")
 
-- Primary store: `agent_workspace/memory.json`
-  - `conversation`: ordered user/assistant turns with timestamps
-  - `short_summary` and `extended_summary`: condensed session narrative
-- Session timeline store: `agent_workspace/chat_sessions.json`
-  - Keeps session-level histories (`id`, `messages`, `created_at_ms`, `updated_at_ms`, `title`)
-- Decision/event trace store: `agent_workspace/decision_trace.jsonl`
-  - Structured per-request stages (intent, validation, policy, context, generation, post-check)
-- Operational log stream: `agent_workspace/app_log.jsonl`
-  - Events like `query_generated`, `memory_updated`, `query_complete`
+Episodic memory captures raw conversation history and high-level session metadata.
 
-In short: this layer records *what happened over time* for chats and request execution.
+- **Primary Store:** `agent_workspace/memory.db` (SQLite)
+  - `messages` table: Durable storage of user/assistant turns with timestamps.
+  - `chat_sessions` table: Manages session lifecycles, titles, and creation metadata.
+- **Pruning System:** **MemoryPruner** automatically migrates older turns into "Warm" summaries to prevent context window bloat while preserving key decisions.
+- **Trace Logs:** `agent_workspace/decision_trace.jsonl` provides a "black box" recording of the agent's internal reasoning stages for every turn.
 
-## 2) Semantic Memory ("facts/knowledge")
+**Summary:** This layer provides the narrative thread of the agent's interactions over time.
 
-Semantic memory is represented by durable summaries and retrievable indexed knowledge.
+---
 
-- Persistent factual/concept abstraction in `memory.json` summaries:
-  - `short_summary` for quick recall
-  - `extended_summary` for larger context accumulation
-- External/project knowledge is accessed through RAG retrieval, not only chat replay.
-- Query-time semantic context is merged into prompts through the prompt-building path (memory + retrieved chunks + current query).
+## 2) Process Memory ("How We Solved It")
 
-In short: this layer stores and retrieves *generalized knowledge and distilled facts* rather than raw turn-by-turn text only.
+Process memory is a unique Thoth feature that tracks the mechanics of goal execution.
 
-## 3) Working Memory ("active context now")
+- **Trajectory Tracking:** `episode_steps` table in SQLite.
+- **TrajectoryBuilder:** Summarizes the last 7 actions and failures into a structured JSON object.
+- **Semantic Feedback:** The trajectory is embedded as vector **T**, allowing retrieval to be aware of what the agent has *already tried* or *just learned* during a complex task.
+- **Strategy Engine:** Analyzes completed trajectories to identify successful patterns and store them as reusable `Strategies`.
 
-Working memory is the temporary context assembled for the current response.
+**Summary:** This layer enables the agent to learn from its own successes and failures across goals.
 
-- Built during request processing in the command pipeline.
-- Typical composition:
-  - recent conversation window from `Memory`
-  - retrieved RAG chunks (if available)
-  - current user prompt
-- Evidence in traces:
-  - `decision_trace.jsonl` context stage reports whether RAG chunks were loaded (or fallback to conversation-only prompt).
+---
 
-In short: this is *short-lived, in-flight context* used to generate the next answer.
+## 3) Semantic Memory ("Facts & Knowledge")
 
-## 4) Vector Storage System (RAG index)
+Semantic memory provides durable, verifiable world knowledge and past planning experience.
 
-The vector storage subsystem provides similarity search for retrieval-augmented generation.
+- **Structured Fact Store:** A dedicated `facts` table in SQLite for persistent project truths (e.g., "The sandbox root is /home/steve/Thoth/agent_workspace").
+- **Plan History Reuse:** Stores successful plans as embeddings. Future planning calls automatically retrieve and inject these historical successes to speed up task generation.
+- **Graph Memory [PROTOTYPE]:** SQLite-backed nodes and edges representing causal relationships between code units and decisions.
 
-- Index file: `agent_workspace/rag/rag_index.bin`
-- Logical flow:
-  1. Query embedding generation
-  2. Similarity scoring in vector store
-  3. Top-K chunk retrieval
-  4. Prompt augmentation with retrieved chunks
-- Architecture notes (from embedded `basic_agent` docs):
-  - `IndexManager` manages chunks and index interactions
-  - `VectorStore` supports pluggable similarity metrics (cosine, dot-product, euclidean, jaccard)
-  - `RAGPipeline` coordinates retrieval and passes relevant chunks to prompt assembly
+**Summary:** This layer stores distilled, generalized knowledge rather than raw experience.
 
-In short: vector storage is the project’s *semantic retrieval backbone* for non-conversational knowledge.
+---
+
+## 4) GRAG: Vector Storage System ("Directional Retrieval")
+
+Thoth has evolved from standard RAG to **GRAG (Goal-Relative Adaptive Graph Retrieval)**. This is the agent's primary navigation engine for large-scale documentation and code.
+
+- **Abstraction Layer:** `IVectorStore` decoupling (Flat vector store vs. future professional vector DBs).
+- **The GRAG Formula:** Retrieval is no longer just "similarity." It is **Directional**:
+  - **Goal (G):** Where we want to be.
+  - **State (C):** Where we are now.
+  - **Direction (D = G - C):** A vector pointing toward the objective.
+- **Hybrid Scoring:** Dynamically blends four signals for every retrieved chunk:
+  1.  **Query Similarity (Q):** Matches the immediate text.
+  2.  **Goal Direction (D):** Matches the remaining work.
+  3.  **Trajectory (T):** Avoids redundancy based on process memory.
+  4.  **Keyword (TF-IDF):** Ensures precision for technical terms.
+- **Multi-Index Routing:** Automatically selects between `Code`, `Docs`, and `Memory` based on the active `ControllerState`.
+
+**Summary:** GRAG provides the semantic retrieval backbone, ensuring that retrieved information is always oriented toward the goal.
+
+---
 
 ## 5) Overall Classification
 
-Yes — the architecture effectively spans all requested memory types:
+The Thoth architecture spans the full spectrum of cognitive memory types:
 
-- **Episodic**: conversation/session/history + decision/log traces
-- **Semantic**: summaries + retrievable indexed knowledge via RAG
-- **Working memory**: runtime prompt context assembly per request
-- **Vector storage**: persisted RAG index (`rag_index.bin`) with similarity retrieval
+- **Episodic:** SQL-backed message history and session tracking.
+- **Process:** Trajectory embeddings and action logs (`episode_steps`).
+- **Semantic:** Persistent Fact Store and Plan History reuse.
+- **Working Memory:** Runtime context assembled from the layers above per request.
+- **Vector Memory:** Sandboxed GRAG index anchored to `agent_workspace/rag/`.
 
-This gives the system both continuity of dialogue and expandable knowledge retrieval beyond the immediate chat window.
+This multi-layered approach ensures Thoth is not just a "stateless" prompt-chainer, but a truly **Experience-Aware Cognitive System**.

@@ -1,7 +1,72 @@
 # Completed Improvements Log
 
-Last updated: 2026-03-10
+Last updated: 2026-03-22
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+### 2026-03-22 (Research Console & Stability Hardening)
+
+- **Cognitive Spine Thread-Safety (ExecutiveController)**:
+    - **Goal**: Resolve the "Thread-Safety Vacuum" causing UI crashes and state corruption due to concurrent access between UI (main) and Agent (background) threads.
+    - **Issues Resolved**:
+        - Unprotected public methods: `transition_to`, `update_goal_embedding`, `update_trajectory_embedding`, `dispatch_step`, `set_workflow_engine`.
+        - Reference leakage: `get_current_plan()` returning `const Plan&`.
+        - Inconsistent internal locking leading to race conditions and deadlocks.
+        - Data races on GRAG embeddings (Goal, Current, Trajectory).
+    - **Implementation Details**:
+        - **Mutex Protection**: Applied `std::lock_guard<std::mutex>` across all shared state access in `ExecutiveController`.
+        - **Snapshot Inspection**: Switched `get_current_plan()` to return by value (snapshot), ensuring UI thread memory safety.
+        - **Deadlock-Free Internal Transitions**: Implemented `_unlocked` method variants for safe internal calls within the state machine's lock.
+        - **Execution Reliability**: Fixed `execute_goal` execution loop start logic and joined stale threads to prevent leaks.
+    - **Verification**: Successfully recompiled and passed full suite of unit tests including parallel tool batching and reflection cycles.
+- **UI Restoration & Observability Hardening**:
+    - **Menu Bar Implementation**: Restored the missing `SetupMenuBar` and implemented full handlers for File, Agent, Tools, Benchmarks, View, and Help menus.
+    - **Plan Execution Panel**: Implemented a new vertical `PlanExecutionPanel` that exposes the real-time state of the `ExecutiveController`, showing current goal and ordered step statuses.
+    - **GRAG Diagnostic Fixes**: Resolved a bug where GRAG diagnostics showed zero values by ensuring the `Config` constructor properly initializes retrieval weights ($w_q, w_d, w_t, w_k, w_g$) and the `grag_directional` toggle.
+    - **Executive Control Integration**: Exposed `pause`, `resume`, `abort`, and `executeGoal` methods in `AgentInterface`, allowing direct control of the agent's cognitive loop from the UI.
+    - **Contextual Explanation Buttons**: Replaced the generic `?` button with explicit `Explain Retrieval` and `Explain Plan` actions, and added a `Revise` button to the goal banner for dynamic goal steering.
+- **RAG Indexer Stability & Parallelization**:
+    - **Goal**: Decouple the indexing lifecycle from the cognitive loop to prevent system-wide deadlocks and multi-minute blocking during large file batch processing.
+    - **Implementation Details**:
+        - **Asynchronous Architecture**: Refactored `IndexManager` with a background worker thread and a thread-safe task queue. Added `indexFileAsync` and `indexProjectAsync`.
+        - **CURL Handle Pool**: Upgraded `EmbeddingEngine` from a single handle to a thread-safe pool, allowing concurrent embeddings for indexing and real-time chat queries.
+        - **Stateless Retrieval**: Hardened `RAGPipeline::retrieveRelevant` to support passing embeddings as arguments, removing reliance on shared internal state and reducing mutex contention.
+        - **Granular Locking**: Optimized `IndexManager` to release `chunksMutex` during heavy embedding phases, allowing concurrent reads during long-running write operations.
+    - **Verification**: Confirmed fix with successful project-wide compilation and verified background worker lifecycle.
+- **Benchmark Integrity & Reliability**:
+    - **Mock Data Isolation**: Modified `testBenchmarkReporter` in `tests/unit_tests.cpp` to prevent unit tests from polluting the production `benchmark_results.md` with hardcoded mock data.
+    - **Benchmark Sampling**: Added a `--sample` flag to the `run_grag_benchmark` tool, allowing for rapid verification of real retrieval performance on a subset of test cases without environment timeouts.
+    - **Log Sanitization**: Cleaned `docs/benchmark_results.md` to remove duplicate mock entries, restoring the document as a reliable source of actual research performance history.
+- **Research-Oriented UI Transformation**:
+...
+    - **3-Column Main Workspace**: Implemented a professional layout with Knowledge Base (Left), Central Chat/Plan (Center), and Diagnostics/Strategy (Right) using `wxAuiManager`.
+    - **System State Tray**: Added a tabbed bottom notebook providing dedicated views for RAG context management, Trajectory history, Experiment Lab, Knowledge Graph statistics, and live decision logs.
+    - **Structured Tool Rendering**: Upgraded chat bubbles to detect and render JSON-encoded tool results (e.g., diff viewers for `code_modify`, web previews for `web_scrape`).
+- **Cognitive Reliability & Persistence**:
+    - **Stateful Resumption**: Fixed `checkResumablePlan` to fully restore the agent's internal state (goal, plan, embeddings) upon session activation, ensuring continuity across window reloads.
+    - **Session-Aware Event Routing**: Added `session_id` to the `ControllerEvent` system, allowing the UI to accurately save goals and plans to background sessions even if the user switches chats.
+    - **Cold-Start GRAG**: Optimized `GragScorer` to activate directional retrieval from Step 1 by treating empty current state as a zero vector, preventing zeroed diagnostics at plan initiation.
+- **Stability & Memory Hardening**:
+    - **Thread Pool Architecture**: Refactored `AgentInterface` from a leaking thread-per-operation model to a single persistent worker thread with a task queue.
+    - **Micro-Batch Indexing**: Implemented batching (size 10) in `IndexManager` and `EmbeddingEngine` to eliminate memory spikes and `std::bad_alloc` crashes during large file indexing.
+    - **SQLite Safety**: Deployed a `safe_col_text` helper across all repository methods to prevent crashes when encountering NULL database columns.
+    - **UI Resource Guards**: Implemented character limits for chat messages (50k), generic tool outputs (5k), and log tailing (10k) to ensure smooth rendering of massive agent outputs.
+    - **Window Lifetime Checks**: Added validity guards in all asynchronous `CallAfter` callbacks to prevent segmentation faults during application shutdown.
+
+### 2026-03-16 (UI & Diagnostics Enhancements)
+
+- **Menu Bar Integration**: Added the requested File/Agent/Tools/Benchmarks/View/Help menu structure with placeholder bindings so the UI now exposes the agent controls, benchmarking hooks, and visibility toggles while keeping the core window responsive. citeturn0exec0
+- **Goal Continuity**: Persisted the active goal inside each `Thoth::ChatSession`, saved/loaded it with `chat_sessions.json`, and refreshed the banner on activation or after plan events so the goal stays visible across restarts. citeturn0exec1
+- **GRAG Diagnostics Fixes**: Normalized the diagnostics payload (nested `result` & `diagnostics` blobs), restored the retrieved-chunks score column, and added percentage formatting so alpha/magnitude/scoring type reflect the telemetry instead of defaulting to zero. citeturn0exec1
+
+### 2026-03-12 (Adaptive Graph Learning Final Implementation)
+
+- **Adaptive Graph Learning (Phase 5.6)**:
+    - **Stable Chunk Identity**: Implemented content-based hashing (SHA256) for chunks to ensure graph associations survive project re-indexing.
+    - **Schema Hardening**: Updated SQLite schema to track edge weights, success/failure counts, and last-used timestamps for dormancy detection.
+    - **Causal Linking**: Modified `ExecutiveController` to capture the "Active Set" of chunks (Top 5 with 0.8 relative threshold) and link them across successful step transitions.
+    - **Logistic Reinforcement**: Deployed `GraphRefiner` with a logistic learning rule ($W_{new} = W + lr \times (1-W)$) to saturate weights and prevent numerical explosion.
+    - **One-Hop Activation**: Upgraded `GragScorer` to perform 1-hop neighbor activation from high-confidence query hits ($Q_{sim} \geq 0.7$), ensuring experience-guided retrieval without noise.
+    - **Multi-Tier Forgetting**: Integrated a global decay mechanism ($0.995$) with an additional dormancy penalty ($0.97$) for edges unused for > 30 days.
+    - **Observability**: Expanded retrieval diagnostics to include `graph_source_node`, `graph_activations`, and contribution metrics in `grag_benchmark.jsonl`.
 
 ## Summary
 
@@ -53,14 +118,17 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
     - **Enforcement**: Modified `IndexManager` to hard-reject and log any indexing requests outside `/home/steve/Thoth/agent_workspace/`.
     - **Bootstrap Security**: Updated `CommandProcessor::ensureInitialized` to bootstrap RAG exclusively from the `agent_workspace/rag/` sandbox rather than the project root.
     - **Benchmark Hardening**: Rewrote `run_grag_benchmark.cpp` to use a strictly sandboxed corpus and added path-guard logic to prevent accidental directory traversal.
-- **Trajectory-Aware Retrieval (Phase 5.5)**:
-    - **TrajectoryBuilder**: Implemented a new component that summarizes the last 7 execution steps into a semantic vector ($T$).
-    - **Infrastructure Wiring**: Updated `ExecutiveController` to persist episode steps in SQLite and update `RAGPipeline` after every step.
-    - **Benchmark Validation**: Verified GRAG performance using a comprehensive 100-case sandboxed benchmark suite.
-    - **Empirical Results**: Confirmed significant lift in ambiguous retrieval:
-        - **Overall nDCG@5**: +0.022 lift.
-        - **Mean RR**: +0.084 lift (0.528 → 0.612).
-        - **Goal Disambiguation**: +0.101 nDCG lift, proving the effectiveness of the $G - C$ directional vector in selecting the correct context when queries are ambiguous.
+- **External Corpus Integration (Research Papers)**:
+    - **New Corpus**: Replaced project documentation with 5 high-density AI research papers (ReAct, RAG, MemGPT, Generative Agents, CoT) as the primary retrieval benchmark.
+    - **Test Suite Expansion**: Designed 30 new test cases (10 per type) specifically targeting semantic overlaps between papers (e.g., "memory" in MemGPT vs. Generative Agents).
+    - **Retrieval Hardening**: 
+        - **Chunk Optimization**: Reduced target chunk size to 2048 chars and added a hard 8000-char truncation guard to prevent Ollama context window errors.
+        - **Reliability**: Forced `127.0.0.1` for Ollama connections to prevent IPv6 resolution failures.
+        - **Cold Start Fix**: Updated `IndexManager` to train the local TF-IDF engine's vocabulary before chunking, ensuring valid keyword scores even when semantic embeddings are delayed.
+    - **Empirical Validation**:
+        - **Goal Disambiguation**: Confirmed a massive **+0.216 nDCG@5 lift**, proving that GRAG's directional steering is highly effective at selecting the correct paper when terminology overlaps.
+        - **Overall Mean RR**: Improved from 0.587 to 0.647.
+        - **Stability**: Verified that the sandbox boundary is strictly enforced across the research corpus.
 
 ### 2026-03-09
 

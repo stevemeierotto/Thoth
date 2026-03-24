@@ -5,10 +5,18 @@
 #include "MainFrame.h"
 #include "VisualizationFrame.h"
 #include "GragDiagnosticsPanel.h"
+#include "StrategyPanel.h"
+#include "PlanExecutionPanel.h"
+#include "TrajectoryViewer.h"
+#include "ExperimentLabPanel.h"
+#include "GraphPanel.h"
 #include "ExecutiveStateStrip.h"
 #include "file_handler.h"
 
 #include <json.hpp>
+#include <wx/notebook.h>
+#include <wx/clipbrd.h>
+#include <wx/aboutdlg.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -97,8 +105,16 @@ void MainFrame::LoadChatSessions() {
             session.title = item.value("title", "New Chat");
             session.createdAtMs = item.value("created_at_ms", 0LL);
             session.updatedAtMs = item.value("updated_at_ms", session.createdAtMs);
+            session.activeGoal = item.value("active_goal", "");
 
-            if (item.contains("ragFilePaths") && item["ragFilePaths"].is_array()) {
+            if (item.contains("rag_files") && item["rag_files"].is_array()) {
+                for (const auto& path : item["rag_files"]) {
+                    if (path.is_string()) {
+                        session.ragFilePaths.push_back(path.get<std::string>());
+                    }
+                }
+            } else if (item.contains("ragFilePaths") && item["ragFilePaths"].is_array()) {
+                // Fallback for old schema
                 for (const auto& path : item["ragFilePaths"]) {
                     if (path.is_string()) {
                         session.ragFilePaths.push_back(path.get<std::string>());
@@ -156,7 +172,8 @@ void MainFrame::SaveChatSessions() const {
         sessionJson["title"] = session.title;
         sessionJson["created_at_ms"] = session.createdAtMs;
         sessionJson["updated_at_ms"] = session.updatedAtMs;
-        sessionJson["ragFilePaths"] = session.ragFilePaths;
+        sessionJson["rag_files"] = session.ragFilePaths;
+        sessionJson["active_goal"] = session.activeGoal;
         sessionJson["messages"] = json::array();
 
         for (const auto& message : session.messages) {
@@ -266,7 +283,11 @@ void MainFrame::RenderSession(std::size_t sessionIndex) {
 
     for (const auto& message : session.messages) {
         bool isUser = (message.role == "user");
-        ChatMessagePanel* bubble = new ChatMessagePanel(m_chatContainer, wxString::FromUTF8(message.content), isUser);
+        std::string safeContent = message.content;
+        if (safeContent.size() > 50000) {
+            safeContent = safeContent.substr(0, 50000) + "\n... [TRUNCATED] ...";
+        }
+        ChatMessagePanel* bubble = new ChatMessagePanel(m_chatContainer, wxString::FromUTF8(safeContent), isUser);
         m_chatSizer->Add(bubble, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 5);
     }
 
@@ -281,15 +302,31 @@ bool MainFrame::SyncAgentMemoryFromActiveSession() {
     }
 
     const Thoth::ChatSession& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    
+    // Migrate files to sandbox before indexing
+    auto sessionCopy = session;
+    MigrateFilesToSandbox(sessionCopy.ragFilePaths);
+    
     std::vector<std::pair<std::string, std::string>> memoryMessages;
     memoryMessages.reserve(session.messages.size());
     for (const auto& message : session.messages) {
         memoryMessages.emplace_back(message.role, message.content);
     }
 
-    agent->setRagFiles(session.ragFilePaths);
-    return agent->loadConversationMemory(memoryMessages, BuildMemorySummary(session));
+    agent->setRagFiles(sessionCopy.ragFilePaths);
+    bool ok = agent->loadConversationMemory(memoryMessages, BuildMemorySummary(session));
+    if (ok) {
+        agent->checkResumablePlan();
+    }
+    
+    // Safety: Always ensure the goal banner reflects the session we just loaded
+    if (!session.activeGoal.empty()) {
+        RefreshGoalBanner();
+    }
+    
+    return ok;
 }
+
 
 void MainFrame::ActivateSession(std::size_t sessionIndex) {
     if (sessionIndex >= m_sessions.size()) {
@@ -313,6 +350,8 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
     RefreshRagPanel(); // New: Update the RAG file panel
     const bool memoryLoaded = SyncAgentMemoryFromActiveSession();
     SetStatusText(memoryLoaded ? "Loaded selected chat into memory" : "Selected chat (memory sync unavailable)");
+    RefreshGoalBanner();
+    RefreshAllPanels();
 }
 
 MainFrame::MainFrame()
@@ -325,6 +364,11 @@ MainFrame::MainFrame()
 
     agent->onResponse = [this](const std::string& reply, const std::string& requestId) {
         wxTheApp->CallAfter([this, reply, requestId]() {
+            // Safety: Check if this window still exists
+            if (wxPendingDelete.Member(this) || !wxWindow::FindWindowById(GetId())) {
+                return;
+            }
+
             const auto requestIt = m_requestToSession.find(requestId);
             if (requestIt == m_requestToSession.end()) {
                 return;
@@ -345,7 +389,9 @@ MainFrame::MainFrame()
             sessionIt->updatedAtMs = NowMs();
             SaveChatSessions();
 
-            m_typingIndicator->Hide();
+            if (m_typingIndicator) {
+                m_typingIndicator->Hide();
+            }
             this->Layout();
 
             RefreshChatList();
@@ -356,39 +402,92 @@ MainFrame::MainFrame()
             }
 
             SetStatusText("Response received");
+            RefreshAllPanels();
         });
     };
 
     // --- Wire Observability events (Phase 2) ---
     agent->onEvent = [this](const ControllerEvent& ev) {
-        wxTheApp->CallAfter([this, event = ev]() {
-            if (event.type == EventType::RETRIEVAL_DIAGNOSTICS) {
-                if (this->m_gragPanel) {
-                    this->m_gragPanel->UpdateDiagnostics(event.metadata);
-                }
-            } else if (event.type == EventType::PLAN_CREATED || event.type == EventType::PLAN_REVISED) {
-                if (event.metadata.contains("plan")) {
-                    if (this->m_stateStrip) this->m_stateStrip->ResetPlan(event.metadata["plan"]);
-                    if (this->m_goalText && event.metadata["plan"].contains("goal")) {
-                        this->m_goalText->SetLabel(wxString::FromUTF8(event.metadata["plan"]["goal"]));
-                        this->m_goalBanner->Show();
-                        this->Layout();
+        // Explicitly capture metadata by value to avoid lifetime issues
+        nlohmann::json metadata = ev.metadata;
+        EventType type = ev.type;
+        std::string stepId = ev.step_id;
+        std::string eventSessionId = ev.session_id;
+
+        wxTheApp->CallAfter([this, type, metadata, stepId, eventSessionId]() {
+            // Safety: Check if this window still exists
+            if (!wxPendingDelete.Member(this) && wxWindow::FindWindowById(GetId())) {
+                bool isActiveSession = (eventSessionId.empty() || eventSessionId == this->m_sessionId);
+                
+                std::cerr << "[MainFrame] onEvent: type=" << (int)type 
+                          << ", evSid=" << eventSessionId 
+                          << ", curSid=" << this->m_sessionId 
+                          << ", active=" << (isActiveSession ? "YES" : "NO") << "\n";
+
+                if (type == EventType::RETRIEVAL_DIAGNOSTICS) {
+                    std::cerr << "[MainFrame] Received RETRIEVAL_DIAGNOSTICS event.\n";
+                    if (isActiveSession && this->m_gragPanel) {
+                        this->m_gragPanel->UpdateDiagnostics(metadata);
                     }
+                } else if (type == EventType::PLAN_CREATED || type == EventType::PLAN_REVISED) {
+                    if (metadata.contains("plan")) {
+                        if (isActiveSession) {
+                            if (this->m_stateStrip) this->m_stateStrip->ResetPlan(metadata["plan"]);
+                            if (this->m_planPanel) {
+                                this->m_planPanel->ResetPlan(metadata["plan"]);
+                                this->m_planPanel->SetExecutionState("Running");
+                            }
+                        }
+                        if (metadata["plan"].contains("goal") && metadata["plan"]["goal"].is_string()) {
+                            // Use eventSessionId if present (best correlation)
+                            std::string targetSid = eventSessionId;
+                            if (targetSid.empty()) {
+                                // If event has no ID, only update current session if we're sure
+                                targetSid = this->m_sessionId;
+                            }
+                            
+                            if (!targetSid.empty()) {
+                                SetSessionGoal(targetSid, metadata["plan"]["goal"].get<std::string>());
+                            }
+                        }
+                    }
+                } else if (type == EventType::STEP_STARTED) {
+                    if (isActiveSession) {
+                        if (this->m_stateStrip) this->m_stateStrip->UpdateStepStatus(stepId, StepStatus::RUNNING);
+                        if (this->m_planPanel) this->m_planPanel->UpdateStepStatus(stepId, "Running");
+                    }
+                } else if (type == EventType::STEP_COMPLETED) {
+                    if (isActiveSession) {
+                        if (this->m_stateStrip) this->m_stateStrip->UpdateStepStatus(stepId, StepStatus::SUCCESS);
+                        if (this->m_planPanel) this->m_planPanel->UpdateStepStatus(stepId, "Success");
+                    }
+                } else if (type == EventType::STEP_FAILED) {
+                    if (isActiveSession) {
+                        if (this->m_stateStrip) this->m_stateStrip->UpdateStepStatus(stepId, StepStatus::FAILED);
+                        if (this->m_planPanel) this->m_planPanel->UpdateStepStatus(stepId, "Failed");
+                    }
+                } else if (type == EventType::INDEXING_STARTED) {
+                    std::string path = metadata["file_path"].get<std::string>();
+                    this->SetStatusText("Chunking: " + path);
+                    this->UpdateRagSlotLabel(path, "Chunking...");
+                } else if (type == EventType::INDEXING_COMPLETED) {
+                    std::string path = metadata["file_path"].get<std::string>();
+                    this->SetStatusText("Indexing complete: " + path);
+                    this->RefreshRagPanel();
+                } else if (type == EventType::PLAN_COMPLETED) {
+                    this->SetStatusText("Goal completed successfully");
+                    if (isActiveSession && this->m_planPanel) this->m_planPanel->SetExecutionState("Completed");
+                    this->RefreshAllPanels();
+                } else if (type == EventType::PLAN_FAILED) {
+                    if (isActiveSession && this->m_planPanel) this->m_planPanel->SetExecutionState("Failed");
+                } else if (type == EventType::PLAN_ABORTED) {
+                    if (isActiveSession && this->m_planPanel) this->m_planPanel->SetExecutionState("Aborted");
                 }
-            } else if (event.type == EventType::STEP_STARTED) {
-                if (this->m_stateStrip) {
-                    this->m_stateStrip->UpdateStepStatus(event.step_id, StepStatus::RUNNING);
+                
+                // Periodically refresh panels during execution for live updates
+                if (type == EventType::STEP_COMPLETED) {
+                    this->RefreshAllPanels();
                 }
-            } else if (event.type == EventType::STEP_COMPLETED) {
-                if (this->m_stateStrip) {
-                    this->m_stateStrip->UpdateStepStatus(event.step_id, StepStatus::SUCCESS);
-                }
-            } else if (event.type == EventType::STEP_FAILED) {
-                if (this->m_stateStrip) {
-                    this->m_stateStrip->UpdateStepStatus(event.step_id, StepStatus::FAILED);
-                }
-            } else if (event.type == EventType::PLAN_COMPLETED || event.type == EventType::PLAN_FAILED || event.type == EventType::PLAN_ABORTED) {
-                // Keep banner visible but maybe update status
             }
         });
     };
@@ -407,98 +506,107 @@ MainFrame::MainFrame()
     m_chatListModel = new ChatSessionDataViewModel(&m_sessions);
     m_chatList->AssociateModel(m_chatListModel.get());
 
-    // Setup column
-    auto* title_col = new wxDataViewTextRenderer();
-    wxDataViewColumn* column = new wxDataViewColumn("Session", title_col, ChatSessionDataViewModel::Col_Title, wxDVC_DEFAULT_WIDTH, wxALIGN_LEFT);
-    m_chatList->AppendColumn(column);
+    m_chatList->AppendTextColumn("Date", 0, wxDATAVIEW_CELL_INERT, 100, wxALIGN_LEFT);
+    m_chatList->AppendTextColumn("Title", 1, wxDATAVIEW_CELL_INERT, 150, wxALIGN_LEFT);
 
+    leftSizer->Add(sidebarLabel, 0, wxALL, 5);
+    leftSizer->Add(m_chatList, 1, wxEXPAND | wxALL, 5);
 
-    m_newChatButton = new wxButton(leftPanel, wxID_ANY, "New Chat");
-    m_deleteChatButton = new wxButton(leftPanel, wxID_ANY, "Delete Chat");
-    m_copyChatButton = new wxButton(leftPanel, wxID_ANY, "Copy Chat");
+    wxBoxSizer* sidebarBtnSizer = new wxBoxSizer(wxHORIZONTAL);
+    m_newChatButton = new wxButton(leftPanel, wxID_ANY, "New", wxDefaultPosition, wxSize(60, 30));
+    m_deleteChatButton = new wxButton(leftPanel, wxID_ANY, "Del", wxDefaultPosition, wxSize(60, 30));
+    m_copyChatButton = new wxButton(leftPanel, wxID_ANY, "Copy", wxDefaultPosition, wxSize(60, 30));
+    sidebarBtnSizer->Add(m_newChatButton, 1, wxALL, 2);
+    sidebarBtnSizer->Add(m_deleteChatButton, 1, wxALL, 2);
+    sidebarBtnSizer->Add(m_copyChatButton, 1, wxALL, 2);
+    leftSizer->Add(sidebarBtnSizer, 0, wxEXPAND);
 
-    leftSizer->Add(sidebarLabel, 0, wxALL, 8);
-    leftSizer->Add(m_chatList, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
-    leftSizer->Add(m_newChatButton, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
-    leftSizer->Add(m_deleteChatButton, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
-    leftSizer->Add(m_copyChatButton, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
     leftPanel->SetSizer(leftSizer);
 
-    // --- Center Main Chat Area ---
-    wxPanel* centerPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
+    // --- Center Chat Area ---
+    wxPanel* centerPanel = new wxPanel(this, wxID_ANY);
     wxBoxSizer* centerSizer = new wxBoxSizer(wxVERTICAL);
 
-    // Active Goal Banner (Step 2.4)
+    m_stateStrip = new Thoth::ExecutiveStateStrip(centerPanel);
+    centerSizer->Add(m_stateStrip, 0, wxEXPAND | wxALL, 0);
+
     m_goalBanner = new wxPanel(centerPanel, wxID_ANY);
-    m_goalBanner->SetBackgroundColour(wxColour(232, 245, 233)); // Light green
-    wxBoxSizer* bannerSizer = new wxBoxSizer(wxHORIZONTAL);
-    
-    m_goalText = new wxStaticText(m_goalBanner, wxID_ANY, "No Active Goal");
+    m_goalBanner->SetBackgroundColour(wxColour(255, 243, 224));
+    wxBoxSizer* goalSizer = new wxBoxSizer(wxHORIZONTAL);
+    m_goalText = new wxStaticText(m_goalBanner, wxID_ANY, "Current Goal: None");
     m_goalText->SetFont(m_goalText->GetFont().Bold());
     
-    m_clearGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "Clear", wxDefaultPosition, wxSize(60, 24));
     m_reviseGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "Revise", wxDefaultPosition, wxSize(60, 24));
+    m_clearGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "X", wxDefaultPosition, wxSize(24, 24));
     
-    bannerSizer->Add(new wxStaticText(m_goalBanner, wxID_ANY, "ACTIVE GOAL: "), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 10);
-    bannerSizer->Add(m_goalText, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 10);
-    bannerSizer->Add(m_reviseGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-    bannerSizer->Add(m_clearGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
-    m_goalBanner->SetSizer(bannerSizer);
-    m_goalBanner->Hide(); // Hidden by default
-
-    centerSizer->Add(m_goalBanner, 0, wxEXPAND | wxALL, 5);
-
-    // Executive State Visualizer (Step 2.3)
-    m_stateStrip = new Thoth::ExecutiveStateStrip(centerPanel);
-    centerSizer->Add(m_stateStrip, 0, wxEXPAND | wxALL, 5);
+    goalSizer->Add(m_goalText, 1, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    goalSizer->Add(m_reviseGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+    goalSizer->Add(m_clearGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+    m_goalBanner->SetSizer(goalSizer);
+    centerSizer->Add(m_goalBanner, 0, wxEXPAND | wxALL, 0);
+    m_goalBanner->Hide();
 
     m_chatContainer = new wxScrolledWindow(centerPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
-    m_chatContainer->SetScrollRate(0, 20);
+    m_chatContainer->SetScrollRate(0, 10);
     m_chatContainer->SetBackgroundColour(*wxWHITE);
-    
     m_chatSizer = new wxBoxSizer(wxVERTICAL);
+    m_chatSizer->AddStretchSpacer(1); // Add a spacer to stabilize initial layout
     m_chatContainer->SetSizer(m_chatSizer);
 
-    wxBoxSizer* inputSizer = new wxBoxSizer(wxHORIZONTAL);
-    m_inputCtrl = new wxTextCtrl(
-        centerPanel,
-        wxID_ANY,
-        "",
-        wxDefaultPosition,
-        wxSize(-1, 60), // taller box for multiline input
-        wxTE_MULTILINE | wxTE_RICH2 | wxTE_WORDWRAP
-    );
-
-
-    m_sendButton = new wxButton(centerPanel, wxID_ANY, "Send");
-    m_traceButton = new wxButton(centerPanel, wxID_ANY, "Why this answer?");
-
-    m_typingIndicator = new wxStaticText(centerPanel, wxID_ANY, "Agent is thinking...");
-    m_typingIndicator->SetFont(m_typingIndicator->GetFont().Italic());
-    m_typingIndicator->SetForegroundColour(wxColour(120, 120, 120));
+    m_typingIndicator = new wxStaticText(centerPanel, wxID_ANY, "Agent thinking...");
+    m_typingIndicator->SetForegroundColour(wxColour(100, 100, 100));
     m_typingIndicator->Hide();
 
-    inputSizer->Add(m_inputCtrl, 1, wxEXPAND | wxALL, 6);
-    inputSizer->Add(m_sendButton, 0, wxALIGN_CENTER_VERTICAL | wxALL, 6);
-    inputSizer->Add(m_traceButton, 0, wxALIGN_CENTER_VERTICAL | wxALL, 6);
+    wxPanel* inputPanel = new wxPanel(centerPanel, wxID_ANY);
+    wxBoxSizer* inputSizer = new wxBoxSizer(wxHORIZONTAL);
+    m_inputCtrl = new wxTextCtrl(inputPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE);
+    m_sendButton = new wxButton(inputPanel, wxID_ANY, "Send", wxDefaultPosition, wxSize(80, -1));
+    
+    m_retrievalExplainBtn = new wxButton(inputPanel, wxID_ANY, "Explain Retrieval", wxDefaultPosition, wxSize(120, -1));
+    m_retrievalExplainBtn->SetToolTip("Show retrieval diagnostics for the last answer");
+    
+    m_planExplainBtn = new wxButton(inputPanel, wxID_ANY, "Explain Plan", wxDefaultPosition, wxSize(100, -1));
+    m_planExplainBtn->SetToolTip("Show the full decision trace and plan reasoning");
+
+    inputSizer->Add(m_inputCtrl, 1, wxEXPAND | wxALL, 5);
+    inputSizer->Add(m_sendButton, 0, wxALIGN_BOTTOM | wxALL, 5);
+    inputSizer->Add(m_retrievalExplainBtn, 0, wxALIGN_BOTTOM | wxALL, 5);
+    inputSizer->Add(m_planExplainBtn, 0, wxALIGN_BOTTOM | wxALL, 5);
+    inputPanel->SetSizer(inputSizer);
 
     centerSizer->Add(m_chatContainer, 1, wxEXPAND | wxALL, 0);
     centerSizer->Add(m_typingIndicator, 0, wxALIGN_LEFT | wxLEFT, 15);
-    centerSizer->Add(inputSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
+    centerSizer->Add(inputPanel, 0, wxEXPAND | wxALL, 0);
     centerPanel->SetSizer(centerSizer);
 
-    // --- RAG File Drop Area ---
-    wxPanel* bottomPanel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
-    wxFlexGridSizer* bottomSizer = new wxFlexGridSizer(2, 2, 5, 5);
-    bottomSizer->AddGrowableCol(0, 1);
-    bottomSizer->AddGrowableCol(1, 1);
-    bottomSizer->AddGrowableRow(0, 1);
-    bottomSizer->AddGrowableRow(1, 1);
+    // --- Right Observability Panel ---
+    wxPanel* rightPanel = new wxPanel(this, wxID_ANY);
+    wxBoxSizer* rightSizer = new wxBoxSizer(wxVERTICAL);
+    
+    m_planPanel = new PlanExecutionPanel(rightPanel);
+    m_gragPanel = new GragDiagnosticsPanel(rightPanel);
+    m_strategyPanel = new StrategyPanel(rightPanel);
+    
+    rightSizer->Add(m_planPanel, 1, wxEXPAND | wxALL, 0);
+    rightSizer->Add(m_gragPanel, 1, wxEXPAND | wxALL, 0);
+    rightSizer->Add(m_strategyPanel, 1, wxEXPAND | wxALL, 0);
+    rightPanel->SetSizer(rightSizer);
 
-    auto createSlotSizer = [this, bottomPanel](wxStaticText*& slot, wxButton*& btn, int index) {
+    // --- Bottom Tabbed Notebook ---
+    m_bottomNotebook = new wxNotebook(this, wxID_ANY);
+    
+    // 1. RAG Files Tab
+    wxPanel* ragTab = new wxPanel(m_bottomNotebook, wxID_ANY);
+    wxFlexGridSizer* ragSizer = new wxFlexGridSizer(2, 2, 5, 5);
+    ragSizer->AddGrowableCol(0, 1);
+    ragSizer->AddGrowableCol(1, 1);
+    ragSizer->AddGrowableRow(0, 1);
+    ragSizer->AddGrowableRow(1, 1);
+
+    auto createSlotSizer = [this, ragTab](wxStaticText*& slot, wxButton*& btn, int index) {
         wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
-        slot = new wxStaticText(bottomPanel, wxID_ANY, wxString::Format("Empty Slot %d", index));
-        btn = new wxButton(bottomPanel, wxID_ANY, "X", wxDefaultPosition, wxSize(32, 32));
+        slot = new wxStaticText(ragTab, wxID_ANY, wxString::Format("Empty Slot %d", index));
+        btn = new wxButton(ragTab, wxID_ANY, "X", wxDefaultPosition, wxSize(32, 32));
         btn->SetToolTip("Remove file");
         
         wxFont font = slot->GetFont();
@@ -524,15 +632,34 @@ MainFrame::MainFrame()
         return sizer;
     };
 
-    bottomSizer->Add(createSlotSizer(m_ragFileSlot1, m_ragDeleteBtn1, 1), 1, wxEXPAND);
-    bottomSizer->Add(createSlotSizer(m_ragFileSlot2, m_ragDeleteBtn2, 2), 1, wxEXPAND);
-    bottomSizer->Add(createSlotSizer(m_ragFileSlot3, m_ragDeleteBtn3, 3), 1, wxEXPAND);
-    bottomSizer->Add(createSlotSizer(m_ragFileSlot4, m_ragDeleteBtn4, 4), 1, wxEXPAND);
+    ragSizer->Add(createSlotSizer(m_ragFileSlot1, m_ragDeleteBtn1, 1), 1, wxEXPAND);
+    ragSizer->Add(createSlotSizer(m_ragFileSlot2, m_ragDeleteBtn2, 2), 1, wxEXPAND);
+    ragSizer->Add(createSlotSizer(m_ragFileSlot3, m_ragDeleteBtn3, 3), 1, wxEXPAND);
+    ragSizer->Add(createSlotSizer(m_ragFileSlot4, m_ragDeleteBtn4, 4), 1, wxEXPAND);
+    ragTab->SetSizer(ragSizer);
+    ragTab->SetDropTarget(new FileDropTarget(this));
 
-    bottomPanel->SetSizer(bottomSizer);
+    // 2. Trajectories Tab
+    m_trajectoryViewer = new TrajectoryViewer(m_bottomNotebook);
 
-    // --- Right Observability Panel (Step 2.2) ---
-    m_gragPanel = new GragDiagnosticsPanel(this);
+    // 3. Experiments Tab
+    m_experimentLab = new ExperimentLabPanel(m_bottomNotebook);
+
+    // 4. Graph Tab
+    m_graphPanel = new GraphPanel(m_bottomNotebook);
+
+    // 5. Logs Tab
+    m_logPanel = new wxPanel(m_bottomNotebook);
+    wxBoxSizer* logSizer = new wxBoxSizer(wxVERTICAL);
+    m_logText = new wxTextCtrl(m_logPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE | wxTE_READONLY);
+    logSizer->Add(m_logText, 1, wxEXPAND);
+    m_logPanel->SetSizer(logSizer);
+
+    m_bottomNotebook->AddPage(ragTab, "RAG Files");
+    m_bottomNotebook->AddPage(m_trajectoryViewer, "Trajectories");
+    m_bottomNotebook->AddPage(m_experimentLab, "Experiments");
+    m_bottomNotebook->AddPage(m_graphPanel, "Graph");
+    m_bottomNotebook->AddPage(m_logPanel, "Logs");
 
     // Add panes to the AUI manager
     m_auiManager.AddPane(leftPanel, wxAuiPaneInfo()
@@ -540,7 +667,7 @@ MainFrame::MainFrame()
         .Layer(1)
         .BestSize(250, -1)
         .MinSize(200, -1)
-        .Caption("Chat Sessions")
+        .Caption("Knowledge Base")
         .CloseButton(false)
         .PinButton(true));
 
@@ -548,41 +675,40 @@ MainFrame::MainFrame()
         .CenterPane()
         .PaneBorder(false));
 
-    m_auiManager.AddPane(bottomPanel, wxAuiPaneInfo()
+    m_auiManager.AddPane(m_bottomNotebook, wxAuiPaneInfo()
         .Bottom()
         .Layer(1)
-        .BestSize(-1, 200)
+        .BestSize(-1, 250)
         .MinSize(-1, 150)
-        .Caption("RAG Files")
+        .Caption("System State")
         .CloseButton(true)
         .PinButton(true));
 
-    m_auiManager.AddPane(m_gragPanel, wxAuiPaneInfo()
+    m_auiManager.AddPane(rightPanel, wxAuiPaneInfo()
         .Right()
         .Layer(1)
-        .Position(0)
-        .MinSize(250, -1)
-        .BestSize(300, -1)
-        .Caption("GRAG Diagnostics")
+        .MinSize(300, -1)
+        .BestSize(350, -1)
+        .Caption("Diagnostics")
         .CloseButton(true)
         .MaximizeButton(true));
-
-    bottomPanel->SetDropTarget(new FileDropTarget(this));
 
     // Commit the layout
     m_auiManager.Update();
 
     // Event bindings
     m_sendButton->Bind(wxEVT_BUTTON, &MainFrame::OnSend, this);
-    m_traceButton->Bind(wxEVT_BUTTON, &MainFrame::OnShowDecisionTrace, this);
+    m_retrievalExplainBtn->Bind(wxEVT_BUTTON, &MainFrame::OnMenuViewShowGrag, this);
+    m_planExplainBtn->Bind(wxEVT_BUTTON, &MainFrame::OnShowDecisionTrace, this);
     m_inputCtrl->Bind(wxEVT_KEY_DOWN, [this](wxKeyEvent& event) {
-    if (event.ControlDown() && event.GetKeyCode() == WXK_RETURN) {
-        wxCommandEvent dummy;
-        OnSend(dummy);
-    } else {
-        event.Skip();
-    }
-});
+        if (event.ControlDown() && event.GetKeyCode() == WXK_RETURN) {
+            wxCommandEvent evt(wxEVT_BUTTON, m_sendButton->GetId());
+            OnSend(evt);
+        } else {
+            event.Skip();
+        }
+    });
+
     m_chatList->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED, &MainFrame::OnChatSelected, this);
     m_newChatButton->Bind(wxEVT_BUTTON, &MainFrame::OnNewChat, this);
     m_deleteChatButton->Bind(wxEVT_BUTTON, &MainFrame::OnDeleteChat, this);
@@ -590,12 +716,21 @@ MainFrame::MainFrame()
 
     // Goal Banner bindings
     m_clearGoalBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-        m_goalBanner->Hide();
-        m_goalText->SetLabel("No Active Goal");
-        this->Layout();
+        ClearActiveGoal();
+    });
+    
+    m_reviseGoalBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) return;
+        auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
+        wxString newGoal = wxGetTextFromUser("Revise active goal:", "Revise Goal", wxString::FromUTF8(session.activeGoal), this);
+        if (!newGoal.IsEmpty()) {
+            if (agent) agent->executeGoal(newGoal.ToStdString());
+        }
     });
 
     CreateStatusBar(1);
+
+    SetupMenuBar();
 
     LoadChatSessions();
     if (m_sessions.empty()) {
@@ -640,7 +775,7 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
     m_inputCtrl->Clear();
 
     // Ensure we have a valid session and it's active
-    if (m_activeSessionIndex < 0 || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
+    if (m_activeSessionIndex < 0 || m_activeSessionIndex >= static_cast<int>(m_sessions.size()) || m_sessionId.empty()) {
         CreateNewSession("New Chat");
         ActivateSession(m_sessions.size() - 1);
     }
@@ -689,6 +824,7 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
     } else {
         wxMessageBox("Agent not initialized.", "Error", wxOK | wxICON_ERROR, this);
     }
+    RefreshAllPanels();
 }
 
 void MainFrame::OnShowDecisionTrace(wxCommandEvent& WXUNUSED(evt)) {
@@ -809,6 +945,7 @@ bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
     }
 
     if (filesAddedCount > 0) {
+        MigrateFilesToSandbox(session.ragFilePaths);
         SaveChatSessions();
         RefreshRagPanel();
         if (agent) {
@@ -819,4 +956,395 @@ bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
     }
 
     return false;
+}
+
+void MainFrame::RefreshAllPanels() {
+    if (!agent) return;
+
+    if (m_strategyPanel) {
+        m_strategyPanel->UpdateStrategies(agent->getStrategies());
+    }
+    if (m_trajectoryViewer) {
+        m_trajectoryViewer->UpdateTrajectories(agent->getTrajectories());
+    }
+    if (m_experimentLab) {
+        m_experimentLab->UpdateExperiments(agent->getExperiments());
+    }
+    if (m_graphPanel) {
+        m_graphPanel->UpdateGraphStats(agent->getGraphStats());
+    }
+    
+    // Refresh logs if available (Safe tail read)
+    FileHandler fileHandler;
+    std::string tracePath = fileHandler.getAgentWorkspacePath("decision_trace.jsonl");
+    if (m_logText && std::filesystem::exists(tracePath)) {
+        try {
+            std::ifstream in(tracePath, std::ios::binary | std::ios::ate);
+            if (in) {
+                std::streamsize fileSize = in.tellg();
+                size_t maxRead = 4096; // Read last 4KB
+                size_t toRead = std::min(static_cast<size_t>(fileSize), maxRead);
+                
+                in.seekg(fileSize - static_cast<std::streamsize>(toRead));
+                std::string content(toRead, '\0');
+                in.read(&content[0], static_cast<std::streamsize>(toRead));
+                
+                size_t start = 0;
+                while (start < content.size() && (static_cast<unsigned char>(content[start]) & 0xC0) == 0x80) {
+                    start++;
+                }
+
+                wxString logContent = wxString::FromUTF8(content.substr(start));
+                m_logText->SetValue(logContent);
+                if (m_logText->GetValue().length() > 10000) {
+                    m_logText->SetValue(m_logText->GetValue().Right(10000));
+                }
+                m_logText->SetInsertionPointEnd();
+            }
+        } catch (...) {
+            m_logText->SetValue("Error reading log file.");
+        }
+    }
+}
+
+void MainFrame::OnMenuFileNewChat(wxCommandEvent& evt) {
+    OnNewChat(evt);
+}
+
+void MainFrame::OnMenuFileOpenSession(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("File → Open Session", "Use the sidebar to switch between sessions.");
+}
+
+void MainFrame::OnMenuFileSaveSession(wxCommandEvent& WXUNUSED(evt)) {
+    SaveChatSessions();
+    SetStatusText("Sessions saved.");
+}
+
+void MainFrame::OnMenuFileExportSession(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("File → Export Session", "Exporting sessions is not yet implemented.");
+}
+
+void MainFrame::OnMenuFileImportCorpus(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("File → Import Corpus", "Drag and drop files into the Knowledge Base sidebar or RAG tab.");
+}
+
+void MainFrame::OnMenuFileExit(wxCommandEvent& WXUNUSED(evt)) {
+    Close(true);
+}
+
+void MainFrame::OnMenuAgentRunGoal(wxCommandEvent& WXUNUSED(evt)) {
+    wxString goal = wxGetTextFromUser("Enter autonomous goal:", "Run Goal", "", this);
+    if (!goal.IsEmpty()) {
+        if (agent) {
+            agent->executeGoal(goal.ToStdString());
+        }
+    }
+}
+
+void MainFrame::OnMenuAgentPause(wxCommandEvent& WXUNUSED(evt)) {
+    if (agent) {
+        agent->pause();
+        SetStatusText("Agent execution paused.");
+    }
+}
+
+void MainFrame::OnMenuAgentResume(wxCommandEvent& WXUNUSED(evt)) {
+    if (agent) {
+        agent->resume();
+        SetStatusText("Agent execution resumed.");
+    }
+}
+
+void MainFrame::OnMenuAgentAbort(wxCommandEvent& WXUNUSED(evt)) {
+    const int confirm = wxMessageBox("Abort active goal?", "Confirm Abort", wxYES_NO | wxICON_WARNING, this);
+    if (confirm == wxYES && agent) {
+        agent->abort();
+        SetStatusText("Agent execution aborted.");
+    }
+}
+
+void MainFrame::SetupMenuBar() {
+    wxMenuBar* menuBar = new wxMenuBar();
+
+    // File Menu
+    wxMenu* fileMenu = new wxMenu();
+    fileMenu->Append(ID_MENU_FILE_NEW_CHAT, "&New Chat\tCtrl+N");
+    fileMenu->Append(ID_MENU_FILE_OPEN_SESSION, "&Open Session\tCtrl+O");
+    fileMenu->Append(ID_MENU_FILE_SAVE_SESSION, "&Save Sessions\tCtrl+S");
+    fileMenu->AppendSeparator();
+    fileMenu->Append(ID_MENU_FILE_EXPORT_SESSION, "&Export Session...");
+    fileMenu->Append(ID_MENU_FILE_IMPORT_CORPUS, "&Import Corpus...");
+    fileMenu->AppendSeparator();
+    fileMenu->Append(ID_MENU_FILE_EXIT, "E&xit\tAlt+F4");
+
+    // Agent Menu
+    wxMenu* agentMenu = new wxMenu();
+    agentMenu->Append(ID_MENU_AGENT_RUN_GOAL, "&Run Goal...\tCtrl+G");
+    agentMenu->Append(ID_MENU_AGENT_PAUSE, "&Pause Execution");
+    agentMenu->Append(ID_MENU_AGENT_RESUME, "&Resume Execution");
+    agentMenu->Append(ID_MENU_AGENT_ABORT, "&Abort Execution\tCtrl+Shift+A");
+    agentMenu->AppendSeparator();
+    agentMenu->Append(ID_MENU_AGENT_SHOW_PLAN, "Show Current &Plan");
+    agentMenu->Append(ID_MENU_AGENT_SHOW_TRAJECTORY, "Show &Trajectory");
+
+    // Tools Menu
+    wxMenu* toolsMenu = new wxMenu();
+    toolsMenu->Append(ID_MENU_TOOLS_STRATEGY_VIEWER, "&Strategy Viewer");
+    toolsMenu->Append(ID_MENU_TOOLS_TRAJECTORY_BROWSER, "&Trajectory Browser");
+    toolsMenu->Append(ID_MENU_TOOLS_TOOL_REGISTRY, "&Tool Registry");
+    toolsMenu->Append(ID_MENU_TOOLS_PROMPT_TEMPLATES, "&Prompt Templates");
+
+    // Benchmarks Menu
+    wxMenu* benchMenu = new wxMenu();
+    benchMenu->Append(ID_MENU_BENCH_RUN_GRAG, "Run &GRAG Benchmark");
+    benchMenu->Append(ID_MENU_BENCH_RETRIEVAL_COMPARISON, "Run &Retrieval Comparison");
+    benchMenu->Append(ID_MENU_BENCH_STRATEGY_LEARNING, "Run &Strategy Learning Test");
+    benchMenu->Append(ID_MENU_BENCH_FULL_SYSTEM, "Run &Full System Benchmark");
+
+    // View Menu
+    wxMenu* viewMenu = new wxMenu();
+    viewMenu->Append(ID_MENU_VIEW_SHOW_GRAG, "Show &GRAG Diagnostics");
+    viewMenu->Append(ID_MENU_VIEW_SHOW_STRATEGY, "Show &Strategy Engine");
+    viewMenu->Append(ID_MENU_VIEW_SHOW_RETRIEVAL_GRAPH, "Show &Retrieval Graph");
+    viewMenu->Append(ID_MENU_VIEW_SHOW_PLAN_TREE, "Show &Plan Tree");
+    viewMenu->AppendSeparator();
+    viewMenu->Append(ID_MENU_VIEW_TOGGLE_DARK, "&Toggle Dark Mode");
+
+    // Help Menu
+    wxMenu* helpMenu = new wxMenu();
+    helpMenu->Append(ID_MENU_HELP_DOCUMENTATION, "&Documentation\tF1");
+    helpMenu->Append(ID_MENU_HELP_ARCH_OVERVIEW, "&Architecture Overview");
+    helpMenu->Append(ID_MENU_HELP_ABOUT, "&About Thoth");
+
+    menuBar->Append(fileMenu, "&File");
+    menuBar->Append(agentMenu, "&Agent");
+    menuBar->Append(toolsMenu, "&Tools");
+    menuBar->Append(benchMenu, "&Benchmarks");
+    menuBar->Append(viewMenu, "&View");
+    menuBar->Append(helpMenu, "&Help");
+
+    SetMenuBar(menuBar);
+
+    // Bindings
+    Bind(wxEVT_MENU, &MainFrame::OnMenuFileNewChat, this, ID_MENU_FILE_NEW_CHAT);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuFileOpenSession, this, ID_MENU_FILE_OPEN_SESSION);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuFileSaveSession, this, ID_MENU_FILE_SAVE_SESSION);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuFileExportSession, this, ID_MENU_FILE_EXPORT_SESSION);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuFileImportCorpus, this, ID_MENU_FILE_IMPORT_CORPUS);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuFileExit, this, ID_MENU_FILE_EXIT);
+
+    Bind(wxEVT_MENU, &MainFrame::OnMenuAgentRunGoal, this, ID_MENU_AGENT_RUN_GOAL);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuAgentPause, this, ID_MENU_AGENT_PAUSE);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuAgentResume, this, ID_MENU_AGENT_RESUME);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuAgentAbort, this, ID_MENU_AGENT_ABORT);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuAgentShowPlan, this, ID_MENU_AGENT_SHOW_PLAN);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuAgentShowTrajectory, this, ID_MENU_AGENT_SHOW_TRAJECTORY);
+
+    Bind(wxEVT_MENU, &MainFrame::OnMenuToolsStrategyViewer, this, ID_MENU_TOOLS_STRATEGY_VIEWER);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuToolsTrajectoryBrowser, this, ID_MENU_TOOLS_TRAJECTORY_BROWSER);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuToolsToolRegistry, this, ID_MENU_TOOLS_TOOL_REGISTRY);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuToolsPromptTemplates, this, ID_MENU_TOOLS_PROMPT_TEMPLATES);
+
+    Bind(wxEVT_MENU, &MainFrame::OnMenuBenchRunGrag, this, ID_MENU_BENCH_RUN_GRAG);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuBenchRetrievalComparison, this, ID_MENU_BENCH_RETRIEVAL_COMPARISON);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuBenchStrategyLearning, this, ID_MENU_BENCH_STRATEGY_LEARNING);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuBenchFullSystem, this, ID_MENU_BENCH_FULL_SYSTEM);
+
+    Bind(wxEVT_MENU, &MainFrame::OnMenuViewShowGrag, this, ID_MENU_VIEW_SHOW_GRAG);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuViewShowStrategy, this, ID_MENU_VIEW_SHOW_STRATEGY);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuViewShowRetrievalGraph, this, ID_MENU_VIEW_SHOW_RETRIEVAL_GRAPH);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuViewShowPlanTree, this, ID_MENU_VIEW_SHOW_PLAN_TREE);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuViewToggleDark, this, ID_MENU_VIEW_TOGGLE_DARK);
+
+    Bind(wxEVT_MENU, &MainFrame::OnMenuHelpDocumentation, this, ID_MENU_HELP_DOCUMENTATION);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuHelpArchitecture, this, ID_MENU_HELP_ARCH_OVERVIEW);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuHelpAbout, this, ID_MENU_HELP_ABOUT);
+}
+
+void MainFrame::OnMenuAgentShowPlan(wxCommandEvent& WXUNUSED(evt)) {
+    auto& pane = m_auiManager.GetPane(m_bottomNotebook);
+    if (pane.IsOk()) {
+        pane.Show();
+        m_bottomNotebook->SetSelection(0); // RAG Files
+        m_auiManager.Update();
+    }
+}
+
+void MainFrame::OnMenuAgentShowTrajectory(wxCommandEvent& WXUNUSED(evt)) {
+    auto& pane = m_auiManager.GetPane(m_bottomNotebook);
+    if (pane.IsOk()) {
+        pane.Show();
+        m_bottomNotebook->SetSelection(1); // Trajectories
+        m_auiManager.Update();
+    }
+}
+
+void MainFrame::OnMenuToolsStrategyViewer(wxCommandEvent& evt) {
+    OnMenuViewShowStrategy(evt);
+}
+
+void MainFrame::OnMenuToolsTrajectoryBrowser(wxCommandEvent& evt) {
+    OnMenuAgentShowTrajectory(evt);
+}
+
+void MainFrame::OnMenuToolsToolRegistry(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Tools → Tool Registry", "Listing active tools is forthcoming.");
+}
+
+void MainFrame::OnMenuToolsPromptTemplates(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Tools → Prompt Templates", "Prompt management is forthcoming.");
+}
+
+void MainFrame::OnMenuBenchRunGrag(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Benchmarks → Run GRAG Benchmark", "Benchmark results will appear in the Experiments tab.");
+}
+
+void MainFrame::OnMenuBenchRetrievalComparison(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Benchmarks → Retrieval Comparison", "Comparison tool is forthcoming.");
+}
+
+void MainFrame::OnMenuBenchStrategyLearning(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Benchmarks → Strategy Learning", "Learning analysis is forthcoming.");
+}
+
+void MainFrame::OnMenuBenchFullSystem(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Benchmarks → Run Full System", "System benchmark is forthcoming.");
+}
+
+void MainFrame::OnMenuViewShowGrag(wxCommandEvent& WXUNUSED(evt)) {
+    auto& pane = m_auiManager.GetPane("Diagnostics");
+    if (pane.IsOk()) {
+        pane.Show();
+        m_auiManager.Update();
+    }
+}
+
+void MainFrame::OnMenuViewShowStrategy(wxCommandEvent& WXUNUSED(evt)) {
+    auto& pane = m_auiManager.GetPane("Diagnostics");
+    if (pane.IsOk()) {
+        pane.Show();
+        m_auiManager.Update();
+    }
+}
+
+void MainFrame::OnMenuViewShowRetrievalGraph(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("View → Show Retrieval Graph", "Retrieval graph visualization is forthcoming.");
+}
+
+void MainFrame::OnMenuViewShowPlanTree(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("View → Show Plan Tree", "Hierarchical plan view is forthcoming.");
+}
+
+void MainFrame::OnMenuViewToggleDark(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("View → Toggle Dark Mode", "Dark mode is forthcoming.");
+}
+
+void MainFrame::OnMenuHelpDocumentation(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Help → Documentation", "Documentation is available in the docs/ folder.");
+}
+
+void MainFrame::OnMenuHelpArchitecture(wxCommandEvent& WXUNUSED(evt)) {
+    ShowMenuStatus("Help → Architecture", "Refer to docs/README.md for architectural details.");
+}
+
+void MainFrame::OnMenuHelpAbout(wxCommandEvent& WXUNUSED(evt)) {
+    wxAboutDialogInfo info;
+    info.SetName("Thoth Control Panel");
+    info.SetVersion("0.2.0");
+    info.SetDescription("Experience-Aware Cognitive Agent Research Console");
+    info.SetCopyright("(c) 2025 Steve Meierotto");
+    wxAboutBox(info);
+}
+
+void MainFrame::RefreshGoalBanner() {
+    if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) {
+        std::cerr << "[MainFrame] RefreshGoalBanner: Invalid index " << m_activeSessionIndex << "\n";
+        if (m_goalBanner) m_goalBanner->Hide();
+        this->Layout();
+        return;
+    }
+
+    const std::string& goal = m_sessions[static_cast<size_t>(m_activeSessionIndex)].activeGoal;
+    std::cerr << "[MainFrame] RefreshGoalBanner: goal=\"" << goal << "\"\n";
+    if (goal.empty()) {
+        if (m_goalBanner) m_goalBanner->Hide();
+    } else {
+        if (m_goalText) m_goalText->SetLabel("Current Goal: " + wxString::FromUTF8(goal));
+        if (m_goalBanner) m_goalBanner->Show();
+    }
+    this->Layout();
+}
+
+void MainFrame::ClearActiveGoal() {
+    if (m_activeSessionIndex >= 0 && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+        m_sessions[static_cast<size_t>(m_activeSessionIndex)].activeGoal.clear();
+        SaveChatSessions();
+    }
+    RefreshGoalBanner();
+}
+
+void MainFrame::SetSessionGoal(const std::string& sessionId, const std::string& goal) {
+    std::cerr << "[MainFrame] SetSessionGoal: sid=" << sessionId << ", goal=\"" << goal << "\"\n";
+    auto it = std::find_if(m_sessions.begin(), m_sessions.end(), [&sessionId](const Thoth::ChatSession& session){
+        return session.id == sessionId;
+    });
+    if (it == m_sessions.end()) {
+        std::cerr << "[MainFrame] SetSessionGoal: Session NOT FOUND!\n";
+        return;
+    }
+
+    it->activeGoal = goal;
+    SaveChatSessions();
+
+    std::cerr << "[MainFrame] SetSessionGoal: updated goal for " << sessionId << ", curSid=" << m_sessionId << "\n";
+    if (m_sessionId == sessionId) {
+        RefreshGoalBanner();
+    }
+}
+
+void MainFrame::UpdateRagSlotLabel(const std::string& path, const std::string& label) {
+    auto update = [&](wxStaticText* slot, const std::string& p) {
+        if (!slot || m_activeSessionIndex < 0) return false;
+        std::filesystem::path fp(p);
+        if (slot->GetLabel().Contains(fp.filename().string())) {
+            slot->SetLabel(fp.filename().string() + " (" + label + ")");
+            return true;
+        }
+        return false;
+    };
+
+    if (update(m_ragFileSlot1, path)) return;
+    if (update(m_ragFileSlot2, path)) return;
+    if (update(m_ragFileSlot3, path)) return;
+    if (update(m_ragFileSlot4, path)) return;
+}
+
+void MainFrame::MigrateFilesToSandbox(std::vector<std::string>& paths) {
+    bool changed = false;
+    for (auto& path : paths) {
+        if (path.find("agent_workspace/rag/") == std::string::npos) {
+            try {
+                std::filesystem::path src(path);
+                if (std::filesystem::exists(src)) {
+                    std::filesystem::path destDir = "/home/steve/Thoth/agent_workspace/rag/";
+                    if (!std::filesystem::exists(destDir)) {
+                        std::filesystem::create_directories(destDir);
+                    }
+                    std::filesystem::path dest = destDir / src.filename();
+                    if (!std::filesystem::exists(dest)) {
+                        std::filesystem::copy_file(src, dest);
+                    }
+                    path = dest.string();
+                    changed = true;
+                }
+            } catch (...) {}
+        }
+    }
+    if (changed) {
+        SaveChatSessions();
+    }
+}
+
+void MainFrame::ShowMenuStatus(const wxString& title, const wxString& message) {
+    wxMessageBox(message, title, wxOK | wxICON_INFORMATION, this);
 }

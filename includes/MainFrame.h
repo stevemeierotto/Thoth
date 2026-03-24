@@ -22,6 +22,11 @@
 #include "ChatSessionTypes.h" // Contains ChatMessage and ChatSession structs
 
 class GragDiagnosticsPanel;
+class StrategyPanel;
+class PlanExecutionPanel;
+class TrajectoryViewer;
+class ExperimentLabPanel;
+class GraphPanel;
 namespace Thoth { class ExecutiveStateStrip; }
 
 class MainFrame : public wxFrame {
@@ -36,6 +41,37 @@ private:
     // AUI Manager
     wxAuiManager m_auiManager;
 
+    enum MenuID : int {
+        ID_MENU_FILE_NEW_CHAT = wxID_HIGHEST + 1,
+        ID_MENU_FILE_OPEN_SESSION,
+        ID_MENU_FILE_SAVE_SESSION,
+        ID_MENU_FILE_EXPORT_SESSION,
+        ID_MENU_FILE_IMPORT_CORPUS,
+        ID_MENU_FILE_EXIT,
+        ID_MENU_AGENT_RUN_GOAL,
+        ID_MENU_AGENT_PAUSE,
+        ID_MENU_AGENT_RESUME,
+        ID_MENU_AGENT_ABORT,
+        ID_MENU_AGENT_SHOW_PLAN,
+        ID_MENU_AGENT_SHOW_TRAJECTORY,
+        ID_MENU_TOOLS_STRATEGY_VIEWER,
+        ID_MENU_TOOLS_TRAJECTORY_BROWSER,
+        ID_MENU_TOOLS_TOOL_REGISTRY,
+        ID_MENU_TOOLS_PROMPT_TEMPLATES,
+        ID_MENU_BENCH_RUN_GRAG,
+        ID_MENU_BENCH_RETRIEVAL_COMPARISON,
+        ID_MENU_BENCH_STRATEGY_LEARNING,
+        ID_MENU_BENCH_FULL_SYSTEM,
+        ID_MENU_VIEW_SHOW_GRAG,
+        ID_MENU_VIEW_SHOW_STRATEGY,
+        ID_MENU_VIEW_SHOW_RETRIEVAL_GRAPH,
+        ID_MENU_VIEW_SHOW_PLAN_TREE,
+        ID_MENU_VIEW_TOGGLE_DARK,
+        ID_MENU_HELP_DOCUMENTATION,
+        ID_MENU_HELP_ARCH_OVERVIEW,
+        ID_MENU_HELP_ABOUT
+    };
+
     // UI elements
     wxDataViewCtrl* m_chatList = nullptr;
     wxButton* m_newChatButton = nullptr;
@@ -44,6 +80,16 @@ private:
     wxScrolledWindow* m_chatContainer = nullptr;
     wxBoxSizer* m_chatSizer = nullptr;
     GragDiagnosticsPanel* m_gragPanel = nullptr;
+    StrategyPanel* m_strategyPanel = nullptr;
+    PlanExecutionPanel* m_planPanel = nullptr;
+
+    wxNotebook* m_bottomNotebook = nullptr;
+    TrajectoryViewer* m_trajectoryViewer = nullptr;
+    ExperimentLabPanel* m_experimentLab = nullptr;
+    GraphPanel* m_graphPanel = nullptr;
+    wxPanel* m_logPanel = nullptr;
+    wxTextCtrl* m_logText = nullptr;
+
     Thoth::ExecutiveStateStrip* m_stateStrip = nullptr;
     
     wxPanel*      m_goalBanner = nullptr;
@@ -53,7 +99,8 @@ private:
 
     wxTextCtrl* m_inputCtrl = nullptr;
     wxButton* m_sendButton = nullptr;
-    wxButton* m_traceButton = nullptr;
+    wxButton* m_retrievalExplainBtn = nullptr;
+    wxButton* m_planExplainBtn = nullptr;
 
     wxStaticText* m_typingIndicator = nullptr;
 
@@ -88,9 +135,12 @@ private:
     void CreateNewSession(const std::string& title = "New Chat");
     void RefreshChatList();
     void RefreshRagPanel();
+    void UpdateRagSlotLabel(const std::string& path, const std::string& label);
+    void MigrateFilesToSandbox(std::vector<std::string>& paths);
     void RenderSession(std::size_t sessionIndex);
     void ActivateSession(std::size_t sessionIndex);
     bool SyncAgentMemoryFromActiveSession();
+    void RefreshAllPanels();
 
     // Event handlers
     void OnSend(wxCommandEvent& evt);
@@ -99,4 +149,39 @@ private:
     void OnNewChat(wxCommandEvent& evt);
     void OnDeleteChat(wxCommandEvent& evt);
     void OnCopyChat(wxCommandEvent& evt);
+    void OnMenuFileNewChat(wxCommandEvent& evt);
+    void OnMenuFileOpenSession(wxCommandEvent& evt);
+    void OnMenuFileSaveSession(wxCommandEvent& evt);
+    void OnMenuFileExportSession(wxCommandEvent& evt);
+    void OnMenuFileImportCorpus(wxCommandEvent& evt);
+    void OnMenuFileExit(wxCommandEvent& evt);
+    void OnMenuAgentRunGoal(wxCommandEvent& evt);
+    void OnMenuAgentPause(wxCommandEvent& evt);
+    void OnMenuAgentResume(wxCommandEvent& evt);
+    void OnMenuAgentAbort(wxCommandEvent& evt);
+    void OnMenuAgentShowPlan(wxCommandEvent& evt);
+    void OnMenuAgentShowTrajectory(wxCommandEvent& evt);
+    void OnMenuToolsStrategyViewer(wxCommandEvent& evt);
+    void OnMenuToolsTrajectoryBrowser(wxCommandEvent& evt);
+    void OnMenuToolsToolRegistry(wxCommandEvent& evt);
+    void OnMenuToolsPromptTemplates(wxCommandEvent& evt);
+    void OnMenuBenchRunGrag(wxCommandEvent& evt);
+    void OnMenuBenchRetrievalComparison(wxCommandEvent& evt);
+    void OnMenuBenchStrategyLearning(wxCommandEvent& evt);
+    void OnMenuBenchFullSystem(wxCommandEvent& evt);
+    void OnMenuViewShowGrag(wxCommandEvent& evt);
+    void OnMenuViewShowStrategy(wxCommandEvent& evt);
+    void OnMenuViewShowRetrievalGraph(wxCommandEvent& evt);
+    void OnMenuViewShowPlanTree(wxCommandEvent& evt);
+    void OnMenuViewToggleDark(wxCommandEvent& evt);
+    void OnMenuHelpDocumentation(wxCommandEvent& evt);
+    void OnMenuHelpArchitecture(wxCommandEvent& evt);
+    void OnMenuHelpAbout(wxCommandEvent& evt);
+
+    void RefreshGoalBanner();
+    void ClearActiveGoal();
+    void SetSessionGoal(const std::string& sessionId, const std::string& goal);
+
+    void SetupMenuBar();
+    void ShowMenuStatus(const wxString& title, const wxString& message);
 };

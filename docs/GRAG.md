@@ -92,7 +92,7 @@ To prevent semantic drift, $G$ and $C$ are embedded as structured JSON:
 ## 6. Known Gaps & Planned Upgrades
 1.  **[PLANNED] Hierarchical Subgoals (Upgrade 1):** Moving from a single $G$ to an active subgoal embedding $G_{active}$ to reduce direction noise in complex plans.
 2.  **[PLANNED] Trajectory Awareness (Upgrade 2):** Activating the trajectory embedding $T$ to prevent retrieval redundancy and re-surface failure context.
-3.  **[UNCLEAR] Dynamic Graph Learning:** Current graph edges are added upon step success but weights are static. Needs research on dynamic edge weighting.
+3.  **[COMPLETE] Dynamic Graph Learning:** Graph edges are dynamically updated via `GraphRefiner` based on execution success. Edge weights are adjusted using a logistic learning rule (learning_rate=0.2) that rewards successful trajectories and penalizes failures. Graph density metrics (node count, edge count, avg weight, activations) are logged in `grag_benchmark.jsonl`.
 4.  **[STUB] Code Modification:** `CodeModifyTool` needs a functional `apply_diff` logic to fulfill the "Self-Building" promise.
 
 ---

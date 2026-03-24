@@ -20,27 +20,15 @@ AgentInterface::AgentInterface() {
         };
 
         std::cerr << "[AgentInterface] BasicAgentPlugin initialized successfully.\n";
-        StructuredLogger::instance().log(
-            LogLevel::Info,
-            "agent_interface",
-            "agent_initialized",
-            "BasicAgentPlugin initialized successfully");
+        
+        // Start worker thread
+        workerThread = std::thread(&AgentInterface::workerLoop, this);
+
     } catch (const std::exception& ex) {
         std::cerr << "[AgentInterface][Error] Failed to initialize agent: " 
                   << ex.what() << "\n";
-        StructuredLogger::instance().log(
-            LogLevel::Error,
-            "agent_interface",
-            "agent_init_failed",
-            "Failed to initialize BasicAgentPlugin",
-            {{"error", ex.what()}});
     } catch (...) {
         std::cerr << "[AgentInterface][Error] Unknown error during agent init.\n";
-        StructuredLogger::instance().log(
-            LogLevel::Error,
-            "agent_interface",
-            "agent_init_failed",
-            "Unknown error during agent initialization");
     }
 }
 
@@ -48,205 +36,282 @@ AgentInterface::~AgentInterface() {
     shutdownWorkers();
 }
 
-void AgentInterface::shutdownWorkers() {
-    shuttingDown.store(true);
+void AgentInterface::workerLoop() {
+    while (!shuttingDown) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock(workersMutex);
+            workersCv.wait(lock, [this] { return shuttingDown || !taskQueue.empty(); });
+            
+            if (shuttingDown && taskQueue.empty()) return;
+            
+            task = std::move(taskQueue.front());
+            taskQueue.pop();
+        }
+        
+        if (task) {
+            try {
+                task();
+            } catch (const std::exception& e) {
+                std::cerr << "[AgentInterface][Worker] Task exception: " << e.what() << "\n";
+            } catch (...) {
+                std::cerr << "[AgentInterface][Worker] Unknown task exception.\n";
+            }
+        }
+    }
+}
 
-    std::vector<std::thread> activeWorkers;
+void AgentInterface::shutdownWorkers() {
     {
         std::lock_guard<std::mutex> lock(workersMutex);
-        activeWorkers.swap(workers);
+        shuttingDown = true;
     }
-
-    for (auto& worker : activeWorkers) {
-        if (worker.joinable()) {
-            worker.join();
-        }
+    workersCv.notify_all();
+    if (workerThread.joinable()) {
+        workerThread.join();
     }
 }
 
 void AgentInterface::setSessionId(const std::string& sessionId) {
     std::lock_guard<std::mutex> lock(workersMutex);
     activeSessionId = sessionId;
+    
+    taskQueue.push([this, sessionId]() {
+        if (plugin) plugin->setSessionId(sessionId);
+    });
+    workersCv.notify_one();
 }
 
 bool AgentInterface::loadConversationMemory(
     const std::vector<std::pair<std::string, std::string>>& messages,
     const std::string& summary) {
-    if (!plugin) {
-        return false;
-    }
+    if (!plugin) return false;
 
-    try {
-        plugin->setConversationMemory(messages, summary);
-        return true;
-    } catch (...) {
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this, messages, summary]() {
+            if (plugin) plugin->setConversationMemory(messages, summary);
+        });
     }
+    workersCv.notify_one();
+    return true;
 }
 
 void AgentInterface::setRagFiles(const std::vector<std::string>& filePaths) {
-    if (plugin) {
-        plugin->setRagFiles(filePaths);
+    if (!plugin) return;
+
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this, filePaths]() {
+            if (plugin) plugin->setRagFiles(filePaths);
+        });
     }
+    workersCv.notify_one();
 }
 
-std::string AgentInterface::processUserInput(const std::string& input, const std::string& requestId) {
+void AgentInterface::checkResumablePlan() {
+    if (!plugin) return;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this]() {
+            if (plugin) plugin->checkResumablePlan();
+        });
+    }
+    workersCv.notify_one();
+}
+
+void AgentInterface::pause() {
+    if (!plugin) return;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this]() {
+            if (plugin) plugin->pause();
+        });
+    }
+    workersCv.notify_one();
+}
+
+void AgentInterface::resume() {
+    if (!plugin) return;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this]() {
+            if (plugin) plugin->resume();
+        });
+    }
+    workersCv.notify_one();
+}
+
+void AgentInterface::abort() {
+    if (!plugin) return;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this]() {
+            if (plugin) plugin->abort();
+        });
+    }
+    workersCv.notify_one();
+}
+
+void AgentInterface::executeGoal(const std::string& goal) {
+    if (!plugin) return;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this, goal]() {
+            if (plugin) plugin->executeGoal(goal);
+        });
+    }
+    workersCv.notify_one();
+}
+
+void AgentInterface::processUserInput(const std::string& input, const std::string& requestId) {
+    if (!plugin) return;
+    
     std::string resolvedRequestId = requestId;
     if (resolvedRequestId.empty()) {
         resolvedRequestId = "req-" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
     }
 
-    std::string sessionIdCopy;
     {
         std::lock_guard<std::mutex> lock(workersMutex);
-        sessionIdCopy = activeSessionId;
-    }
-
-    if (shuttingDown.load()) {
-        StructuredLogger::instance().log(
-            LogLevel::Warn,
-            "agent_interface",
-            "input_rejected",
-            "Input rejected: agent shutting down",
-            {{"input_length", input.size()}},
-            resolvedRequestId,
-            sessionIdCopy);
-        return "[Error: Agent is shutting down]";
-    }
-
-    if (!plugin) {
-        StructuredLogger::instance().log(
-            LogLevel::Error,
-            "agent_interface",
-            "input_rejected",
-            "Input rejected: plugin not initialized",
-            {{"input_length", input.size()}},
-            resolvedRequestId,
-            sessionIdCopy);
-        return "[Error: BasicAgentPlugin not initialized]";
-    }
-
-    std::cerr << "[AgentInterface] Processing user input.\n";
-    StructuredLogger::instance().log(
-        LogLevel::Info,
-        "agent_interface",
-        "input_received",
-        "Processing user input",
-        {{"input_length", input.size()}},
-        resolvedRequestId,
-        sessionIdCopy);
-
-    std::lock_guard<std::mutex> lock(workersMutex);
-    workers.emplace_back([this, input, resolvedRequestId, sessionIdCopy]() {
-        StructuredLogger::instance().setContext(resolvedRequestId, sessionIdCopy);
-        try {
-            std::string result = plugin->processInput(input);
-            std::cerr << "[AgentInterface] Agent response ready.\n";
-            StructuredLogger::instance().log(
-                LogLevel::Info,
-                "agent_interface",
-                "response_ready",
-                "Agent response generated",
-                {{"response_length", result.size()}},
-                resolvedRequestId,
-                sessionIdCopy);
-
-            if (!shuttingDown.load() && onResponse) {
-                onResponse(result, resolvedRequestId);
+        taskQueue.push([this, input, resolvedRequestId]() {
+            if (plugin) {
+                std::string reply = plugin->processInput(input);
+                if (onResponse) onResponse(reply, resolvedRequestId);
             }
-
-        } catch (const std::exception& e) {
-            std::cerr << "[AgentInterface] Exception: " << e.what() << "\n";
-            StructuredLogger::instance().log(
-                LogLevel::Error,
-                "agent_interface",
-                "response_failed",
-                "Exception while generating agent response",
-                {{"error", e.what()}},
-                resolvedRequestId,
-                sessionIdCopy);
-            if (!shuttingDown.load() && onResponse) {
-                std::string err = "[Agent Error] " + std::string(e.what());
-                onResponse(err, resolvedRequestId);
-            }
-        } catch (...) {
-            std::cerr << "[AgentInterface] Unknown exception\n";
-            StructuredLogger::instance().log(
-                LogLevel::Error,
-                "agent_interface",
-                "response_failed",
-                "Unknown exception while generating agent response",
-                nlohmann::json::object(),
-                resolvedRequestId,
-                sessionIdCopy);
-            if (!shuttingDown.load() && onResponse) {
-                onResponse("[Agent Error] Unknown exception", resolvedRequestId);
-            }
-        }
-
-        StructuredLogger::instance().clearContext();
-    });
-
-    return "[Processing...]";
+        });
+    }
+    workersCv.notify_one();
 }
 
 std::string AgentInterface::getLatestDecisionTraceSummary() const {
-    FileHandler fileHandler;
-    const std::string tracePath = fileHandler.getAgentWorkspacePath("decision_trace.jsonl");
+    FileHandler fh;
+    std::string path = fh.getAgentWorkspacePath("decision_trace.jsonl");
+    if (!std::filesystem::exists(path)) return "No trace available.";
 
-    std::ifstream in(tracePath);
-    if (!in.is_open()) {
-        return "No decision trace found yet.";
-    }
-
-    json lastTrace;
-    bool found = false;
-    std::string line;
-
+    std::ifstream in(path);
+    std::string line, lastLine;
     while (std::getline(in, line)) {
-        if (line.empty()) continue;
-        try {
-            json parsed = json::parse(line);
-            if (!parsed.is_object()) continue;
-            lastTrace = std::move(parsed);
-            found = true;
-        } catch (...) {
-            continue;
+        if (!line.empty()) lastLine = line;
+    }
+
+    if (lastLine.empty()) return "Trace empty.";
+
+    try {
+        auto j = json::parse(lastLine);
+        std::ostringstream out;
+        out << "Latest Event: " << j.value("trace_type", "unknown") << "\n";
+        if (j.contains("stages") && j["stages"].is_array() && !j["stages"].empty()) {
+            auto lastStage = j["stages"].back();
+            out << "Status: " << lastStage.value("name", "none") 
+                << " (" << (lastStage.value("success", false) ? "OK" : "Failed") << ")\n";
+            out << "Summary: " << lastStage.value("summary", "none");
         }
+        return out.str();
+    } catch (...) {
+        return "Failed to parse latest trace.";
     }
-
-    if (!found) {
-        return "No valid decision trace entries available.";
-    }
-
-    std::ostringstream out;
-    out << "Request: " << lastTrace.value("request_id", "unknown") << "\n";
-    out << "Type: " << lastTrace.value("trace_type", "unknown") << "\n";
-    out << "Result: " << lastTrace.value("result_summary", "n/a") << "\n";
-    out << "Success: " << (lastTrace.value("success", false) ? "yes" : "no") << "\n";
-
-    if (lastTrace.contains("duration_ms") && lastTrace["duration_ms"].is_number()) {
-        out << "Duration: " << lastTrace["duration_ms"].get<long long>() << " ms\n";
-    }
-
-    out << "\nStages:\n";
-
-    if (lastTrace.contains("stages") && lastTrace["stages"].is_array()) {
-        for (const auto& stage : lastTrace["stages"]) {
-            const std::string name = stage.value("name", "unnamed");
-            const bool success = stage.value("success", false);
-            const std::string summary = stage.value("summary", "");
-            out << "- " << name << " [" << (success ? "ok" : "failed") << "]";
-            if (!summary.empty()) {
-                out << ": " << summary;
-            }
-            out << "\n";
-        }
-    } else {
-        out << "- No stages recorded\n";
-    }
-
-    return out.str();
 }
 
+nlohmann::json AgentInterface::getStrategies() const {
+    if (!plugin) return json::array();
+    try {
+        auto strats = plugin->getAllStrategies();
+        json result = json::array();
+        for (const auto& s : strats) {
+            json stepPattern = json::array();
+            try { stepPattern = json::parse(s.step_pattern_json); } catch(...) {}
+            result.push_back({
+                {"strategy_id", s.strategy_id},
+                {"description", s.description},
+                {"step_pattern", stepPattern},
+                {"success_rate", s.success_rate},
+                {"created_at", s.created_at}
+            });
+        }
+        return result;
+    } catch (...) { return json::array(); }
+}
+
+nlohmann::json AgentInterface::getTrajectories() const {
+    if (!plugin) return json::array();
+    try {
+        auto trajs = plugin->getAllTrajectories();
+        std::sort(trajs.begin(), trajs.end(), [](const auto& a, const auto& b) {
+            return a.created_at > b.created_at;
+        });
+        if (trajs.size() > 20) trajs.resize(20);
+
+        json result = json::array();
+        for (const auto& t : trajs) {
+            json trajectory = json::object();
+            try { trajectory = json::parse(t.trajectory_json); } catch(...) {}
+            result.push_back({
+                {"trajectory_id", t.trajectory_id},
+                {"goal", t.goal},
+                {"trajectory", trajectory},
+                {"success_score", t.success_score},
+                {"created_at", t.created_at},
+                {"usage_count", t.usage_count},
+                {"tier", t.tier}
+            });
+        }
+        return result;
+    } catch (...) { return json::array(); }
+}
+
+nlohmann::json AgentInterface::getExperiments() const {
+    if (!plugin) return json::array();
+    try {
+        auto exprs = plugin->getAllExperiments();
+        json result = json::array();
+        for (const auto& e : exprs) {
+            json config = json::object();
+            json results = json::object();
+            try { config = json::parse(e.configuration_json); } catch(...) {}
+            try { results = json::parse(e.results_json); } catch(...) {}
+            result.push_back({
+                {"experiment_id", e.experiment_id},
+                {"name", e.name},
+                {"hypothesis", e.hypothesis},
+                {"configuration", config},
+                {"results", results},
+                {"created_at", e.created_at},
+                {"status", e.status}
+            });
+        }
+        return result;
+    } catch (...) { return json::array(); }
+}
+
+bool AgentInterface::saveExperiment(const nlohmann::json& experimentJson) {
+    if (!plugin) return false;
+    try {
+        Memory::CognateExperimentRecord rec;
+        rec.experiment_id = experimentJson.value("experiment_id", "");
+        rec.name = experimentJson.value("name", "Unnamed Experiment");
+        rec.hypothesis = experimentJson.value("hypothesis", "");
+        rec.configuration_json = experimentJson.value("configuration", json::object()).dump();
+        rec.results_json = experimentJson.value("results", json::object()).dump();
+        rec.created_at = experimentJson.value("created_at", 0LL);
+        rec.status = experimentJson.value("status", "pending");
+        return plugin->saveExperiment(rec);
+    } catch (...) { return false; }
+}
+
+nlohmann::json AgentInterface::getGraphStats() const {
+    if (!plugin) return json::object();
+    try {
+        auto stats = plugin->getGraphStatistics();
+        return {
+            {"total_nodes", stats.total_nodes},
+            {"total_edges", stats.total_edges},
+            {"avg_edge_weight", stats.avg_edge_weight},
+            {"max_edge_weight", stats.max_edge_weight},
+            {"min_edge_weight", stats.min_edge_weight},
+            {"total_success_count", stats.total_success_count},
+            {"total_failure_count", stats.total_failure_count}
+        };
+    } catch (...) { return json::object(); }
+}
