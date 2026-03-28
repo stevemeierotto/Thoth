@@ -46,6 +46,9 @@ endif()
 find_package(wxWidgets REQUIRED COMPONENTS core base adv aui stc)
 include(${wxWidgets_USE_FILE})
 
+# --- CURL ---
+find_package(CURL REQUIRED)
+
 # --- Source files ---
 set(SOURCES
     src/main.cpp
@@ -81,6 +84,7 @@ target_include_directories(thoth-control-panel PRIVATE
 target_link_libraries(thoth-control-panel
     PRIVATE
         ${wxWidgets_LIBRARIES}
+        ${CURL_LIBRARIES}
         basic_agent
 )
 

@@ -20,7 +20,8 @@ void ExperimentLabPanel::InitializeUI() {
 
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Scientific Experiments:"), 0, wxALL, 5);
     
-    m_experimentList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 300));
+    m_experimentList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+    m_experimentList->SetMinSize(wxSize(-1, 60));
     m_experimentList->AppendTextColumn("ID", wxDATAVIEW_CELL_INERT, 100);
     m_experimentList->AppendTextColumn("Name", wxDATAVIEW_CELL_INERT, 200);
     m_experimentList->AppendTextColumn("Hypothesis", wxDATAVIEW_CELL_INERT, 300);

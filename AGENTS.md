@@ -22,6 +22,8 @@ This document describes the architecture, conventions, and critical rules for th
 
 ## Architecture
 
+**CRITICAL**: Before modifying the user interface, read **[docs/architectural_facts.md](docs/architectural_facts.md) §8** for the mandatory UI Sidebar Architecture standards.
+
 ### System Overview Diagram
 
 ```
@@ -433,6 +435,10 @@ These files track project progress. Append to them; do not overwrite.
 ### 🚫 DO NOT modify GUI files without understanding the bridge
 
 `src/MainFrame.cpp`, `src/AgentInterface.cpp`, and `src/VisualizationFrame.cpp` interact with the core through `AgentInterface`. Changes require understanding this boundary.
+
+### 🚫 DO NOT bypass the AddCollapsiblePane pattern
+
+The UI sidebars must remain stable and scrollable. Never add sections to sidebars without using the `AddCollapsiblePane` helper and following the rules in `docs/architectural_facts.md §8`.
 
 ---
 

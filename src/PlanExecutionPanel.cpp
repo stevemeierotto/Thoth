@@ -20,7 +20,8 @@ void PlanExecutionPanel::InitializeUI() {
 
     mainSizer->Add(new wxStaticLine(this), 0, wxEXPAND | wxALL, 5);
 
-    m_stepList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 200));
+    m_stepList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+    m_stepList->SetMinSize(wxSize(-1, 60));
     m_stepList->AppendTextColumn("Step", wxDATAVIEW_CELL_INERT, 200);
     m_stepList->AppendTextColumn("Status", wxDATAVIEW_CELL_INERT, 80);
     

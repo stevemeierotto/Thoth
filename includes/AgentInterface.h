@@ -35,6 +35,7 @@ public:
     // Cognate Memory Access (for UI panels)
     nlohmann::json getStrategies() const;
     nlohmann::json getTrajectories() const;
+    nlohmann::json getEpisodeSteps() const;
     nlohmann::json getExperiments() const;
     nlohmann::json getGraphStats() const;
 

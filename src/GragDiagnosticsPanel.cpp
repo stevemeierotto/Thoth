@@ -46,7 +46,8 @@ void GragDiagnosticsPanel::InitializeUI() {
 
     // Chunks List
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Retrieved Chunks:"), 0, wxALL, 5);
-    m_chunksList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 250));
+    m_chunksList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+    m_chunksList->SetMinSize(wxSize(-1, 60));
     m_chunksList->AppendTextColumn("Score", wxDATAVIEW_CELL_INERT, 80);
     m_chunksList->AppendTextColumn("File", wxDATAVIEW_CELL_INERT, 150);
     m_chunksList->AppendTextColumn("Symbol", wxDATAVIEW_CELL_INERT, 150);

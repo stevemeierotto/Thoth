@@ -309,4 +309,29 @@ I have reviewed the decide_transition() implementation in
   Confirmation: The systems are decoupled. grag_benchmark.jsonl focuses on the retrieval math, while
   decision_trace.jsonl focuses on the agent's behavior.
 
+----------------------------------------------------------------------------------------------------------------
+🔎 8. UI Sidebar Architecture (Stable & Scrollable)
+
+To prevent sidebar "vanishing" and ensure a consistent research console experience, the UI follows a strict architectural pattern for the Left and Right columns.
+
+1. Sidebar Containers:
+   - Both `m_leftSidebar` and `m_rightSidebar` are permanent `wxScrolledWindow` objects.
+   - They must NEVER be hidden or closed.
+   - They use a fixed `SetScrollRate(0, 10)` to ensure vertical accessibility when sections are expanded.
+
+2. Mandatory AUI Locking:
+   - Sidebars are added to `m_auiManager` with these specific flags:
+     - `.CloseButton(false)`: Prevents the column from being accidentally closed.
+     - `.MaximizeButton(false)`: Prevents the column from filling the entire screen.
+     - `.PaneBorder(true)`: Ensures a visual boundary is always visible.
+
+3. The AddCollapsiblePane Pattern:
+   - All internal sections (Past Chats, Plan, Diagnostics, etc.) must be added via the `AddCollapsiblePane()` helper.
+   - This helper manages the `wxCollapsiblePane` wrapper, handles reparenting, and binds the `FitInside()` logic.
+   - Requirement: Every toggle event MUST trigger `parent->FitInside()` followed by `m_auiManager.Update()` to recalculate scrollbars.
+
+4. Layout Stability Rule:
+   - Sizers for sidebars (`leftSizer`, `rightSizer`) MUST be initialized and assigned to the sidebar (`SetSizer`) BEFORE sections are added via the helper. Failing to do this results in blank columns.
+
+
 

@@ -19,7 +19,7 @@ private:
 
     void RenderStructuredContent(const nlohmann::json& j);
 
-    static constexpr int BUBBLE_PADDING = 12;
-    static constexpr int BUBBLE_RADIUS = 12;
-    static constexpr int MARGIN = 10;
+    static constexpr int BUBBLE_PADDING = 8;
+    static constexpr int BUBBLE_RADIUS = 10;
+    static constexpr int MARGIN = 5;
 };

@@ -261,6 +261,26 @@ nlohmann::json AgentInterface::getTrajectories() const {
     } catch (...) { return json::array(); }
 }
 
+nlohmann::json AgentInterface::getEpisodeSteps() const {
+    if (!plugin) return json::array();
+    try {
+        auto steps = plugin->getAllEpisodeSteps();
+        json result = json::array();
+        for (const auto& s : steps) {
+            result.push_back({
+                {"episode_id", s.episode_id},
+                {"goal_id", s.goal_id},
+                {"step_index", s.step_index},
+                {"state_summary", s.state_summary},
+                {"action_taken", s.action_taken},
+                {"result_status", s.result_status},
+                {"timestamp_ms", s.timestamp_ms}
+            });
+        }
+        return result;
+    } catch (...) { return json::array(); }
+}
+
 nlohmann::json AgentInterface::getExperiments() const {
     if (!plugin) return json::array();
     try {

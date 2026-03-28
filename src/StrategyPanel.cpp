@@ -20,7 +20,8 @@ void StrategyPanel::InitializeUI() {
 
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Learned Strategies:"), 0, wxALL, 5);
     
-    m_strategyList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 200));
+    m_strategyList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+    m_strategyList->SetMinSize(wxSize(-1, 60));
     m_strategyList->AppendTextColumn("ID", wxDATAVIEW_CELL_INERT, 80);
     m_strategyList->AppendTextColumn("Pattern", wxDATAVIEW_CELL_INERT, 150);
     m_strategyList->AppendTextColumn("Success", wxDATAVIEW_CELL_INERT, 70);

@@ -54,12 +54,12 @@ ChatMessagePanel::ChatMessagePanel(wxWindow* parent, const wxString& message, bo
             lineCount = (m_message.Length() / 50) + 1;
         }
         int height = m_textCtrl->GetCharHeight() * (lineCount + 1) + 20;
-        m_textCtrl->SetMinSize(wxSize(350, height));
+        m_textCtrl->SetMinSize(wxSize(-1, height));
         sizer->Add(m_textCtrl, 0, wxALL | wxEXPAND, BUBBLE_PADDING + MARGIN);
     }
 
     // Optional: Add a small copy button
-    wxButton* copyBtn = new wxButton(this, wxID_ANY, "Copy", wxDefaultPosition, wxSize(50, 20));
+    wxButton* copyBtn = new wxButton(this, wxID_ANY, "Copy", wxDefaultPosition, wxDefaultSize);
     copyBtn->SetWindowStyle(wxBORDER_NONE);
     sizer->Add(copyBtn, 0, (m_isUser ? wxALIGN_RIGHT : wxALIGN_LEFT) | wxLEFT | wxRIGHT | wxBOTTOM, MARGIN);
 

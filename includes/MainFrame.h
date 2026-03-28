@@ -6,6 +6,7 @@
 #pragma once
 #include "AgentInterface.h"
 #include <wx/aui/aui.h>
+#include <wx/collpane.h>
 #include <wx/button.h>
 #include <wx/dataview.h>
 #include <wx/scrolwin.h>
@@ -62,6 +63,8 @@ private:
         ID_MENU_BENCH_RETRIEVAL_COMPARISON,
         ID_MENU_BENCH_STRATEGY_LEARNING,
         ID_MENU_BENCH_FULL_SYSTEM,
+        ID_MENU_VIEW_SHOW_SESSIONS,
+        ID_MENU_VIEW_SHOW_PLAN,
         ID_MENU_VIEW_SHOW_GRAG,
         ID_MENU_VIEW_SHOW_STRATEGY,
         ID_MENU_VIEW_SHOW_RETRIEVAL_GRAPH,
@@ -103,6 +106,13 @@ private:
     wxButton* m_planExplainBtn = nullptr;
 
     wxStaticText* m_typingIndicator = nullptr;
+
+    // Sidebar Containers
+    wxScrolledWindow* m_leftSidebar = nullptr;
+    wxScrolledWindow* m_rightSidebar = nullptr;
+
+    // Helper for collapsible sections
+    wxCollapsiblePane* AddCollapsiblePane(wxScrolledWindow* parent, const wxString& label, wxWindow* content, bool expanded = true);
 
     wxStaticText* m_ragFileSlot1 = nullptr;
     wxStaticText* m_ragFileSlot2 = nullptr;
