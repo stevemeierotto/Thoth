@@ -9,7 +9,7 @@ class MainFrame; // Still need MainFrame forward declaration for explicit constr
 class ChatSessionDataViewModel final : public wxDataViewModel {
 public:
     enum {
-        Col_Title,
+        Col_Session,
         Col_Max
     };
 

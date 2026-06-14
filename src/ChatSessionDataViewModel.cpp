@@ -11,8 +11,8 @@
  }
 
  wxString ChatSessionDataViewModel::GetColumnType(unsigned int col) const {
-     if (col == Col_Title) {
-         return "string";
+     if (col == Col_Session) {
+         return "void*";
      }
      return "string";
 }
@@ -24,8 +24,8 @@
          return;
      }
 
-     if (col == Col_Title) {
-         variant = wxString::FromUTF8(session->title);
+     if (col == Col_Session) {
+         variant = static_cast<void*>(session);
      }
  }
 

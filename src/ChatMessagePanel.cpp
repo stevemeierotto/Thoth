@@ -85,6 +85,10 @@ void ChatMessagePanel::OnCopy(wxCommandEvent& WXUNUSED(event)) {
 
 void ChatMessagePanel::OnPaint(wxPaintEvent& WXUNUSED(event)) {
     wxPaintDC dc(this);
+    
+    wxSize size = GetClientSize();
+    if (size.x <= 0 || size.y <= 0) return;
+
     std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
     if (!gc) return;
 

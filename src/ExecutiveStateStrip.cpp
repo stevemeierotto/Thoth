@@ -56,6 +56,9 @@ void ExecutiveStateStrip::UpdateStepStatus(const std::string& stepId, StepStatus
 void ExecutiveStateStrip::OnPaint(wxPaintEvent& WXUNUSED(event)) {
     wxAutoBufferedPaintDC dc(this);
     
+    wxSize size = GetClientSize();
+    if (size.x <= 0 || size.y <= 0) return;
+
     // Explicitly draw background because wxBG_STYLE_PAINT requires it
     dc.SetBackground(wxBrush(GetBackgroundColour()));
     dc.Clear();

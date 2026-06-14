@@ -1,3 +1,6 @@
+#include <wx/stdpaths.h>
+#include <wx/filename.h>
+#include <wx/dir.h>
 #include "AgentInterface.h"
 #include <chrono>
 #include <iostream>
@@ -334,4 +337,79 @@ nlohmann::json AgentInterface::getGraphStats() const {
             {"total_failure_count", stats.total_failure_count}
         };
     } catch (...) { return json::object(); }
+}
+
+wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
+    // 1. Get the directory of the currently running executable
+    wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+    wxFileName exeFileName(exePath);
+    wxString exeDir = exeFileName.GetPath();
+    
+    std::cerr << "[AgentInterface] exeDir: " << exeDir.ToStdString() << "\n";
+
+    // 2. Check the same directory as the executable
+    wxFileName target(exeDir, binaryName);
+    if (target.FileExists() && target.IsFileExecutable()) {
+        std::cerr << "[AgentInterface] Found binary in exeDir: " << target.GetFullPath().ToStdString() << "\n";
+        return target.GetFullPath();
+    }
+
+    // 3. Search upwards for the project root and then look into known build structures
+    wxString current = exeDir;
+    while (!current.IsEmpty()) {
+        // Option A: current contains agent_workspace (the project root)
+        wxFileName rootCheck(current, "");
+        rootCheck.AppendDir("agent_workspace");
+        
+        // Option B: current IS "build"
+        wxFileName buildCheck(current, "");
+        bool isBuildDir = (buildCheck.GetDirs().Last() == "build");
+
+        if (rootCheck.DirExists() || isBuildDir) {
+            wxString buildRoot = isBuildDir ? current : (current + "/build");
+            std::cerr << "[AgentInterface] Searching build root: " << buildRoot.ToStdString() << "\n";
+            
+            wxArrayString subPaths;
+            subPaths.Add("debug/external/basic_agent");
+            subPaths.Add("release/external/basic_agent");
+            subPaths.Add("external/basic_agent");
+
+            for (const auto& sub : subPaths) {
+                wxFileName candidate(buildRoot, "");
+                candidate.AppendDir(sub);
+                wxFileName finalPath(candidate.GetPath(), binaryName);
+                
+                std::cerr << "[AgentInterface] Checking: " << finalPath.GetFullPath().ToStdString() << "\n";
+                if (finalPath.FileExists() && finalPath.IsFileExecutable()) {
+                    std::cerr << "[AgentInterface] Found binary: " << finalPath.GetFullPath().ToStdString() << "\n";
+                    return finalPath.GetFullPath();
+                }
+            }
+        }
+        
+        // Go up one level
+        wxString parent = wxFileName(current, "").GetPath();
+        if (parent == current || parent.IsEmpty()) break;
+        current = parent;
+    }
+
+    // 4. Fallback: Try hardcoded paths relative to project root (if we can find it)
+    // Assume we are in /home/steve/Thoth (project root)
+    {
+        wxArrayString hardcoded;
+        hardcoded.Add("/home/steve/Thoth/build/debug/external/basic_agent");
+        hardcoded.Add("/home/steve/Thoth/build/external/basic_agent");
+        
+        for (const auto& p : hardcoded) {
+            wxFileName finalPath(p, binaryName);
+            if (finalPath.FileExists() && finalPath.IsFileExecutable()) {
+                std::cerr << "[AgentInterface] Found via hardcoded path: " << finalPath.GetFullPath().ToStdString() << "\n";
+                return finalPath.GetFullPath();
+            }
+        }
+    }
+
+    // Final Fallback: Return just the name and hope it's in the PATH
+    std::cerr << "[AgentInterface] WARNING: Binary not found. Falling back to PATH: " << binaryName.ToStdString() << "\n";
+    return binaryName;
 }

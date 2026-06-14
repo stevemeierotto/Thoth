@@ -1,7 +1,37 @@
 # Completed Improvements Log
 
-Last updated: 2026-03-26
+Last updated: 2026-03-30
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+
+**NOTE ON DOCUMENTATION ACCURACY (2026-03-30)**: An internal audit revealed that some features listed as "complete" are actually in a prototype or stub state. This document is being updated to reflect the actual implementation status:
+- **Self-Building Capability**: The harness exists (analyzing, testing), but the `apply_diff` operation is currently a non-functional stub.
+- **Trajectory Awareness**: The infrastructure for trajectory-based retrieval is implemented, but the weight ($w_t$) is currently set to 0.0 in the configuration.
+- **Hierarchical Subgoals**: This is still in the planning phase.
+- **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
+
+### 2026-03-29 (Cognitive Loop Stability & Score Accuracy)
+
+- **Reflection Loop & Success Scoring Hardening**:
+    - **Goal**: Resolve the "Always 0 Success Score" bug and prevent infinite reflection loops.
+    - **Implementation Details**:
+        - **Decoupled Scoring**: Refactored `calculate_trajectory_score` to use explicit success flags instead of relying on transient controller states, ensuring accurate scoring (1.0 for success) at the moment of plan completion.
+        - **Empty Plan Guard**: Updated `decide_transition` to handle plans with 0 steps. These are now correctly scored as 0.0 and routed through the reflection loop for repair or marked as `FAILED` if unrecoverable.
+        - **Terminal State Enforcement**: Guaranteed that plans with 0 steps cannot transition to `COMPLETED`, ensuring the "Success" status accurately reflects actual work performed.
+    - **Verification**: Successfully recompiled; verified logic via code review and integrated testing of the reflection cycle.
+
+### 2026-03-29 (Production-Grade Benchmark UI)
+
+- **Benchmark Execution & Visualization Layer**:
+    - **Goal**: Enable real-time execution and visualization of agent benchmarks (`run_grag_benchmark`, `run_cognate_benchmark`) directly from the Thoth UI.
+    - **Implementation Details**:
+        - **BenchmarkWindow**: Implemented a dedicated `BenchmarkWindow` for real-time output visualization using a multi-line, monospace `wxTextCtrl`.
+        - **Thread-Safe Pipe Handling**: Developed an asynchronous pipe reading mechanism using a 100ms `wxTimer` and thread-safe `wxTheApp->CallAfter` with explicit buffer copying to prevent corruption.
+        - **Process Lifecycle Management**: Implemented robust process control with `wxProcess`, supporting graceful termination (SIGTERM) and timed escalation to force-kill (SIGKILL) via a non-blocking `wxTimer`.
+        - **SQLite Concurrency Guard**: Added a singleton execution constraint in `MainFrame` to prevent database contention and deadlocks during benchmark runs.
+        - **Robust Path Resolution**: Implemented `AgentInterface::GetBenchmarkBinaryPath` to dynamically locate benchmark executables across multiple build configurations (Debug/Release) without hardcoding.
+        - **Observability Integration**: Integrated anchored regex parsing for real-time metric extraction (`nDCG@5`, `Success Rate`) and a "View Results" handler to open `docs/benchmark_results.md`.
+        - **Shutdown Protection**: Added a `MainFrame` close handler to ensure running benchmarks are terminated before application exit, preventing zombie processes.
+    - **Verification**: Successfully recompiled; verified process lifecycle, path resolution, and thread-safe output streaming via integrated GUI testing.
 
 ### 2026-03-28 (Cognate V2 — Phase 5.2)
 
@@ -220,7 +250,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - Verified Resume Completeness (Phase 10), ensuring the system can fully reconstruct and resume plans from trace logs.
 - Implemented Dynamic Plan Revision (Phase 11), allowing the LLM to automatically repair plans after step failures.
 - Implemented Extended Agent & Cognitive Spine (Phase 12), re-enabling all tools and verifying the full goal-execution lifecycle with an end-to-end integration test.
-- Implemented Self-Building Capability (Phase 3 of improvements.md), giving the agent tools to analyze, test, and modify its own codebase.
+- Implemented Self-Building Capability (Phase 3 of improvements.md) — Prototype harness established for analyzing and testing the codebase; unified diff application (`apply_diff`) is currently a non-functional stub.
 - **Semantic Transition & Retrieval Hardening (embedding_fix.md Phase 1-4)**:
     - **Dense Semantic Embeddings**: Integrated Ollama REST API (`/api/embed`) with `nomic-embed-text` support.
     - **Metric Hardening**: Implemented nDCG@5 and Directional Rank Lift to detect subtle ranking improvements.

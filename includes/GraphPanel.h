@@ -16,6 +16,7 @@ public:
 
     void UpdateGraphStats(const nlohmann::json& statsJson);
     void UpdateControllerState(const std::string& state);
+    void ResetNodes();
 
 private:
     wxStaticText* m_nodesValue = nullptr;
@@ -26,12 +27,18 @@ private:
     struct GraphNode {
         std::string label;
         wxRect rect;
-        bool active = false;
+        bool active = false;  // Has been touched in current request
+        bool current = false; // Is currently performing work (pulses)
     };
     std::map<std::string, GraphNode> m_cognitiveNodes;
     std::string m_currentState;
 
     void InitializeUI();
     void OnPaint(wxPaintEvent& event);
+    void OnTimer(wxTimerEvent& event);
     void DrawArrow(wxGraphicsContext* gc, const wxPoint& start, const wxPoint& end);
+
+    wxTimer m_timer;
+    float m_pulseValue = 0.0f;
+    bool m_pulseIncreasing = true;
 };

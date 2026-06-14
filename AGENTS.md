@@ -364,6 +364,7 @@ Abstracts the model backend. Currently supports Ollama local models.
 - **Tool Confirmation System**: `requires_confirmation()` enforced across all risky operations
 - **Sandbox Boundaries**: `IndexManager` hard-rejects requests outside `agent_workspace/`
 - **Constraint Checking**: Validates operations before execution
+- **Known Gap**: The `allow_shell_exec` configuration flag is currently bypassed by tools using `popen` (e.g., `run_tests`, `code_modify build`).
 
 ### JSON Library
 
@@ -520,20 +521,19 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 - FactStore for structured knowledge
 - Strategy Engine and trajectory learning infrastructure
 - Scientific execution mode
-- Self-building capabilities (project analysis, test execution, code modification)
 - Security enforcement (ConstraintChecker, sandbox boundaries)
 
 ### 🔬 Prototype / Partial
-- Trajectory Awareness (infrastructure exists, `w_t` stubbed to 0.0 in scoring)
-- Code Modification (`apply_diff` is stub)
+- Self-building capabilities: infrastructure for project analysis and test execution is active, but code modification (`apply_diff`) is a stub.
+- Trajectory Awareness: infrastructure is implemented, but the trajectory weight (`w_t`) is currently set to 0.0 in the default configuration.
 
 ### 📋 Planned
 - Hierarchical Subgoal Trees (active subgoal embedding per subgoal)
-- Trajectory Awareness activation in scoring
+- Trajectory Awareness activation (enabling non-zero weights in retrieval)
 - Memory Pruning and Archival policies
 
 ### 🚫 Stub / Not Implemented
-- `code_modify` tool's `apply_diff` operation
+- `code_modify` tool's `apply_diff` operation (currently returns a prototype error)
 
 ---
 

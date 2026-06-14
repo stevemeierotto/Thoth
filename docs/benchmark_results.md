@@ -142,3 +142,29 @@ The system employs a multi-tier verification process for autonomous learning:
 2. **Deterministic Stability:** Uses hash-based IDs to prevent pattern drift.
 3. **Thesis-Critical Promotion Threshold:** Minimum 80% Success Rate AND 3 independent occurrences required for promotion to the Strategy Library.
 
+
+## Benchmark Run: Sun Mar 29 14:22:08 2026
+- **Embedding Model:** nomic-embed-text
+- **Corpus Size:** 311 chunks
+- **Weights:** $w_q=0.4, w_d=0.4, w_k=0.3$
+
+| Metric | RAG (Baseline) | GRAG (Optimized) | Delta |
+| :--- | :---: | :---: | :---: |
+| Mean Precision@5 | 0.600 | 0.620 | +0.020 |
+| Mean MRR | 0.683 | 0.700 | +0.017 |
+| Mean nDCG@5 | 0.600 | 0.619 | +0.019 |
+
+---
+
+## Benchmark Run: Wed Apr  1 08:57:00 2026
+- **Embedding Model:** nomic-embed-text
+- **Corpus Size:** 311 chunks
+- **Weights:** $w_q=0.4, w_d=0.4, w_k=0.3$
+
+| Metric | RAG (Baseline) | GRAG (Optimized) | Delta |
+| :--- | :---: | :---: | :---: |
+| Mean Precision@5 | 0.600 | 0.620 | +0.020 |
+| Mean MRR | 0.683 | 0.700 | +0.017 |
+| Mean nDCG@5 | 0.600 | 0.619 | +0.019 |
+
+---

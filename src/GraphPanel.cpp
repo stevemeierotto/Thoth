@@ -13,10 +13,41 @@
 #include <cmath>
 
 GraphPanel::GraphPanel(wxWindow* parent)
-    : wxPanel(parent, wxID_ANY)
+    : wxPanel(parent, wxID_ANY), m_timer(this)
 {
     InitializeUI();
     Bind(wxEVT_PAINT, &GraphPanel::OnPaint, this);
+    Bind(wxEVT_TIMER, &GraphPanel::OnTimer, this, m_timer.GetId());
+    m_timer.Start(50); // 20 FPS for smooth pulsing
+}
+
+void GraphPanel::OnTimer(wxTimerEvent& event) {
+    if (m_pulseIncreasing) {
+        m_pulseValue += 0.05f;
+        if (m_pulseValue >= 1.0f) {
+            m_pulseValue = 1.0f;
+            m_pulseIncreasing = false;
+        }
+    } else {
+        m_pulseValue -= 0.05f;
+        if (m_pulseValue <= 0.0f) {
+            m_pulseValue = 0.0f;
+            m_pulseIncreasing = true;
+        }
+    }
+
+    // Only refresh if something is currently performing work
+    bool anyCurrent = false;
+    for (auto const& [key, node] : m_cognitiveNodes) {
+        if (node.current) {
+            anyCurrent = true;
+            break;
+        }
+    }
+
+    if (anyCurrent) {
+        Refresh();
+    }
 }
 
 void GraphPanel::InitializeUI() {
@@ -79,34 +110,60 @@ void GraphPanel::UpdateGraphStats(const nlohmann::json& statsJson) {
 void GraphPanel::UpdateControllerState(const std::string& state) {
     m_currentState = state;
     
-    // Reset all nodes
+    // Clear current flag for all nodes
     for (auto& [key, node] : m_cognitiveNodes) {
-        node.active = false;
+        node.current = false;
     }
 
+    auto activate = [&](const std::string& key) {
+        if (m_cognitiveNodes.count(key)) {
+            m_cognitiveNodes[key].active = true;
+            m_cognitiveNodes[key].current = true;
+        }
+    };
+
     // Map state to nodes
-    if (state == "PLANNING") {
-        m_cognitiveNodes["GOAL"].active = true;
-        m_cognitiveNodes["PLANNER"].active = true;
+    if (state == "PLANNING" || state == "CONVERSATIONAL") {
+        if (state == "PLANNING") activate("GOAL");
+        activate("PLANNER");
     } else if (state == "EXECUTING_STEP" || state == "OBSERVING_RESULT") {
-        m_cognitiveNodes["EXECUTOR"].active = true;
+        activate("EXECUTOR");
+    } else if (state == "EXECUTING_RETRIEVAL") {
+        activate("EXECUTOR");
+        activate("MEMORY");
+    } else if (state == "EXECUTING_LLM") {
+        activate("EXECUTOR");
+        activate("PLANNER");
+    } else if (state == "EXECUTING_TOOL") {
+        activate("EXECUTOR");
+        activate("LEARNING");
     } else if (state == "SCIENTIFIC_MODE") {
-        m_cognitiveNodes["SCIENTIFIC"].active = true;
+        activate("SCIENTIFIC");
     } else if (state == "REVISING_PLAN") {
-        m_cognitiveNodes["PLANNER"].active = true;
-        m_cognitiveNodes["EXECUTOR"].active = true;
+        activate("PLANNER");
+        activate("EXECUTOR");
     } else if (state == "COMPLETED") {
-        m_cognitiveNodes["LEARNING"].active = true;
-        m_cognitiveNodes["MEMORY"].active = true;
-    } else if (state == "IDLE") {
-        // All nodes inactive - already handled by reset loop above
+        activate("LEARNING");
+        activate("MEMORY");
     }
 
     Refresh();
 }
 
+void GraphPanel::ResetNodes() {
+    for (auto& [key, node] : m_cognitiveNodes) {
+        node.active = false;
+        node.current = false;
+    }
+    Refresh();
+}
+
 void GraphPanel::OnPaint(wxPaintEvent& event) {
     wxPaintDC dc(this);
+    
+    wxSize size = GetClientSize();
+    if (size.x <= 0 || size.y <= 0) return;
+
     wxGraphicsContext* gc = wxGraphicsContext::Create(dc);
     if (!gc) return;
 
@@ -133,9 +190,16 @@ void GraphPanel::OnPaint(wxPaintEvent& event) {
 
     // Draw Nodes
     for (auto const& [key, node] : m_cognitiveNodes) {
-        if (node.active) {
-            gc->SetBrush(wxBrush(wxColour(100, 200, 100))); // Green for active
-            gc->SetPen(wxPen(wxColour(50, 150, 50), 2));
+        if (node.current) {
+            // Pulse between bright green and a softer green
+            int r = 100 + (int)(50 * m_pulseValue);
+            int g = 200 + (int)(55 * m_pulseValue);
+            int b = 100 + (int)(50 * m_pulseValue);
+            gc->SetBrush(wxBrush(wxColour(r, g, b))); 
+            gc->SetPen(wxPen(wxColour(50, 150, 50), 2 + (int)(2 * m_pulseValue)));
+        } else if (node.active) {
+            gc->SetBrush(wxBrush(wxColour(120, 220, 120))); // Solid green for previously active
+            gc->SetPen(wxPen(wxColour(80, 180, 80), 2));
         } else {
             gc->SetBrush(wxBrush(wxColour(240, 240, 240))); // Grey for inactive
             gc->SetPen(wxPen(wxColour(200, 200, 200), 1));
@@ -145,6 +209,13 @@ void GraphPanel::OnPaint(wxPaintEvent& event) {
         
         double tw, th;
         gc->GetTextExtent(node.label, &tw, &th);
+        
+        if (node.current || node.active) {
+            gc->SetFont(font.Bold(), *wxBLACK);
+        } else {
+            gc->SetFont(font, *wxBLACK);
+        }
+        
         gc->DrawText(node.label, node.rect.x + (node.rect.width - tw)/2, node.rect.y + (node.rect.height - th)/2);
     }
 

@@ -28,6 +28,7 @@ class PlanExecutionPanel;
 class TrajectoryViewer;
 class ExperimentLabPanel;
 class GraphPanel;
+class BenchmarkWindow;
 namespace Thoth { class ExecutiveStateStrip; }
 
 class MainFrame : public wxFrame {
@@ -41,6 +42,10 @@ public:
 private:
     // AUI Manager
     wxAuiManager m_auiManager;
+    
+    // Benchmark state
+    bool m_isBenchmarkRunning = false;
+    BenchmarkWindow* m_activeBenchmarkWindow = nullptr;
 
     enum MenuID : int {
         ID_MENU_FILE_NEW_CHAT = wxID_HIGHEST + 1,
@@ -187,6 +192,7 @@ private:
     void OnMenuHelpDocumentation(wxCommandEvent& evt);
     void OnMenuHelpArchitecture(wxCommandEvent& evt);
     void OnMenuHelpAbout(wxCommandEvent& evt);
+    void OnClose(wxCloseEvent& evt);
 
     void RefreshGoalBanner();
     void ClearActiveGoal();

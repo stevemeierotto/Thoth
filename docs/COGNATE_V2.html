@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>COGNATE_V2.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<p>Cognate: A Controller-Based Cognitive Architecture for Experience-Guided AI Agents
+Author: Steve Meierotto
+Affiliation: Professor Hawkeinstein Educational Foundation
+Version: 2.0.1
+Date: March 28, 2026
+Keywords: cognitive architecture, autonomous agents, retrieval-augmented generation, strategy learning, LLM orchestration</p>
+<p>Abstract</p>
+<p>Contemporary AI agent frameworks are largely built on iterative prompt loops, combining large language models (LLMs) with tool invocation in reactive pipelines. While effective for narrow tasks, these systems lack structured cognition, persistent reasoning state, and principled execution control. This paper introduces Cognate, a controller-based cognitive architecture developed within the Thoth system. Cognate decomposes intelligence into distinct subsystems—planning, execution, memory, and learning—connected through a continuous, state-driven reasoning loop. The architecture demonstrates empirical signals of automated, experience-driven adaptation and stable iterative reasoning.</p>
+<ol>
+<li>Introduction</li>
+</ol>
+<p>Most modern AI agents follow a common paradigm: Prompt → LLM → Tool Call → Repeat. While flexible, this pattern behaves as a stateless improviser, recomputing decisions at each step with minimal reuse of past experience. Cognate addresses these limitations by formalizing how goals are transformed into structured plans, how execution is controlled, and how experience is rigorously retained and promoted into reusable strategies.</p>
+<ol start="2">
+<li>Related Work</li>
+</ol>
+<p>Recent agent frameworks such as ReAct, AutoGPT, and BabyAGI improve task performance by interleaving thought and tool use, but remain fundamentally reactive and lack explicit execution control. Graph-based orchestration systems such as LangGraph introduce structured flows and partial state persistence, but execution remains primarily loop-driven rather than governed by an explicit controller. Classical cognitive architectures like ACT-R and SOAR emphasize symbolic state and controlled execution but lack integration with modern LLM capabilities. Cognate builds on these works by combining generative models with a controlled learning loop that results in measurable behavioral adaptation.</p>
+<ol start="3">
+<li>Architectural Overview</li>
+</ol>
+<p>Cognate defines a structured reasoning loop: Goal → Planner → Plan → Executive Controller → Execution → Memory Update → Pattern Analysis &amp; Promotion. This loop is stateful, observable, and resumable, forming the backbone of system cognition and experience-driven self-improvement.</p>
+<ol start="4">
+<li>Core Components
+4.1 Planner</li>
+</ol>
+<p>The Planner transforms high-level goals into structured, multi-step plans. It incorporates prior experience by explicitly injecting high-success strategies and relevant past trajectories into the model's context window.</p>
+<p>4.2 Executive Controller</p>
+<p>The Executive Controller governs execution as a state machine. It is responsible for step progression, failure detection, and recovery. Execution is deterministic at the control-flow level and resumable from any intermediate state.</p>
+<p>4.3 Memory System</p>
+<p>Cognate integrates multiple memory layers: Episodic Memory (raw trajectories and &quot;Plan vs. Reality&quot; comparisons), Semantic Memory (structured world knowledge), and Vector Memory (GRAG - goal-relative directional retrieval).</p>
+<p>4.4 Scientific Execution Mode: Iterative Hypothesis Loop</p>
+<p>The Scientific Execution mode provides a structured framework for hypothesis-driven reasoning. Unlike the linear progression of Standard mode, the Scientific mode implements a four-stage iterative loop:</p>
+<ol>
+<li>Hypothesis Generation: The model proposes potential solutions or explanations.</li>
+<li>Constraint Extraction: Relevant environmental and logical constraints are identified.</li>
+<li>Feasibility Evaluation: Each hypothesis is scored against the constraints and available data.</li>
+<li>Final Selection or Revision: The system selects the highest-scoring hypothesis or, if confidence is low, initiates another iteration to refine the problem state.
+This loop repeats until numerical convergence is reached or a maximum iteration limit is hit.</li>
+</ol>
+<p>4.5 Strategy Engine: Automated Pattern Promotion</p>
+<p>A primary novelty of Cognate is the Strategy Engine, which identifies reusable problem-solving patterns from episodic history. The system enforces a rigorous Thesis Gate: semantic pattern extraction from tool sequences, deterministic hash-based identification, and a promotion threshold of 80% success rate over minimum 3 independent runs.</p>
+<ol start="5">
+<li>Design Rationale
+5.1 Cognitive/Execution Decoupling</li>
+</ol>
+<p>By separating cognitive planning from execution control, Cognate allows for pluggable reasoning paradigms (e.g. Scientific vs Standard) without requiring modification to the core execution logic.</p>
+<p>5.2 State Machine Governance</p>
+<p>Transitioning from implicit &quot;think-act&quot; loops to explicit state machine transitions aims to improve the predictability and reproducibility of agent behavior in complex environments.</p>
+<p>5.3 Stability through Iteration</p>
+<p>The Scientific Execution mode represents a distinct operational mode designed to stabilize LLM outputs. This does not imply global optimality, only high-stability convergence toward solutions under defined constraints and feedback.</p>
+<p>5.4 Experience-Driven Adaptation</p>
+<p>The system aims to create an observable learning effect through the explicit injection of promoted strategies, providing a measurable association between historical experience and behavioral change.</p>
+<ol start="6">
+<li>Evaluation and Empirical Results</li>
+</ol>
+<p>The architecture was evaluated against a series of high-complexity software engineering tasks, including multi-file codebase analysis, security auditing, and embedding optimization.</p>
+<p>6.1 Formal Metric: Strategy Conformance Rate (SCR)</p>
+<p>The primary signal for measuring strategy adoption is the Strategy Conformance Rate (SCR).
+Definition: SCR is the percentage of plan steps in a generated plan that identically match the semantic pattern of a promoted Strategy.
+Formula: $SCR = \frac{N_{matching_steps}}{N_{total_steps}}$</p>
+<p>6.2 Cold vs. Warm Start Comparison</p>
+<p>To measure behavioral adaptation, the system was subjected to a two-pass benchmark.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">Metric</th>
+<th style="text-align:center">Pass 1 (Cold)</th>
+<th style="text-align:center">Pass 2 (Warm)</th>
+<th style="text-align:center">Delta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left">Promoted Strategies</td>
+<td style="text-align:center">0</td>
+<td style="text-align:center">1</td>
+<td style="text-align:center">+1</td>
+</tr>
+<tr>
+<td style="text-align:left">Strategy Conformance (SCR)</td>
+<td style="text-align:center">62%</td>
+<td style="text-align:center">80%</td>
+<td style="text-align:center">+18%</td>
+</tr>
+<tr>
+<td style="text-align:left">Avg. Steps per Plan</td>
+<td style="text-align:center">2.3</td>
+<td style="text-align:center">3.3</td>
+<td style="text-align:center">+43%</td>
+</tr>
+</tbody>
+</table>
+<p>Results: Strategy promotion led to a 43% increase in planning thoroughness and a measured adoption effect (SCR +18%). Qualitative analysis of the extra steps in Pass 2 confirmed they represented necessary validation and edge-case handling (e.g., automated test verification steps) absent in the baseline.</p>
+<p>6.3 Iterative Reasoning Stability (Scientific Mode)</p>
+<p>Stability was audited across 10 tasks involving the diagnosis of conflicting architectural documentation and retrieval math failures. Reasoning depth is measured by iterations to reach convergence ($\Delta &lt; 0.05$).</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">Metric</th>
+<th style="text-align:center">Audited Value</th>
+<th style="text-align:left">Significance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left">Mean Reasoning Depth ($\mu$)</td>
+<td style="text-align:center">51.1</td>
+<td style="text-align:left">51x increase over standard mode.</td>
+</tr>
+<tr>
+<td style="text-align:left">Std. Deviation ($\sigma$)</td>
+<td style="text-align:center">1.37</td>
+<td style="text-align:left">High stability ($CV \approx 2.7%$).</td>
+</tr>
+<tr>
+<td style="text-align:left">Convergence Rate</td>
+<td style="text-align:center">100%</td>
+<td style="text-align:left">Full numerical stability reached.</td>
+</tr>
+</tbody>
+</table>
+<p>The low coefficient of variation indicates that Cognate provides a robust, iterative platform where LLMs can reliably traverse deep reasoning trees without diverging.</p>
+<ol start="7">
+<li>Conclusion</li>
+</ol>
+<p>Cognate represents a shift from reactive agents to architecture-driven cognitive systems. The empirical results—specifically the automated promotion of successful strategies and the stable 51x increase in reasoning depth—provide evidence that Cognate can amplify and stabilize LLM performance on the evaluated task class. This provides a rigorous foundation for building reliable, experience-driven self-improving AI systems.</p>
+
+</body>
+</html>

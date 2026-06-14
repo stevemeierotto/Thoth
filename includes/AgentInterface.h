@@ -9,12 +9,19 @@
 #include <utility>
 #include <condition_variable>
 #include <queue>
+#include <wx/string.h>
+#include <wx/stdpaths.h>
+#include <wx/filename.h>
 #include "basic_agent_plugin.h"
 
 class AgentInterface {
 public:
     AgentInterface();
     ~AgentInterface();
+
+    // Helper to locate benchmark binaries without hardcoding paths.
+    // Searches executable dir, sibling build/ dirs, and PATH.
+    static wxString GetBenchmarkBinaryPath(const wxString& binaryName);
 
     // Processes user input asynchronously
     void processUserInput(const std::string& input, const std::string& requestId = "");

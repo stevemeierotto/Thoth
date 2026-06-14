@@ -100,4 +100,4 @@ The low coefficient of variation indicates that Cognate provides a robust, itera
 
 7. Conclusion
 
-Cognate represents a shift from reactive agents to architecture-driven cognitive systems. The empirical results—specifically the automated promotion of successful strategies and the stable 51x increase in reasoning depth—provide evidence that Cognate can amplify and stabilize LLM performance on the evaluated task class. This provides a rigorous foundation for building reliable, experience-driven self-improving AI systems.
+Cognate represents a shift from reactive agents to architecture-driven cognitive systems. The empirical results—specifically the automated promotion of successful strategies and the stable 51x increase in reasoning depeloth—provide evidence that Cognate can amplify and stabilize LLM performance on the evaluated task class. This provides a rigorous foundation for building reliable, experience-driven self-improving AI systems.

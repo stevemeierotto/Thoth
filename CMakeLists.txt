@@ -54,6 +54,7 @@ set(SOURCES
     src/main.cpp
     src/MainFrame.cpp
     src/ChatSessionDataViewModel.cpp
+    src/ChatSessionRenderer.cpp
     src/FileDropTarget.cpp
     src/AgentInterface.cpp
     src/VisualizationFrame.cpp
@@ -65,6 +66,7 @@ set(SOURCES
     src/ExperimentLabPanel.cpp
     src/GraphPanel.cpp
     src/ExecutiveStateStrip.cpp
+    src/BenchmarkWindow.cpp
 )
 
 # --- Add the external basic_agent project ---

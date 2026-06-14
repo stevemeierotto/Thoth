@@ -10,6 +10,7 @@
 #include "TrajectoryViewer.h"
 #include "ExperimentLabPanel.h"
 #include "GraphPanel.h"
+#include "BenchmarkWindow.h"
 #include "ExecutiveStateStrip.h"
 #include "file_handler.h"
 
@@ -31,8 +32,8 @@
 
 #include "FileDropTarget.h"
 #include "ChatSessionDataViewModel.h"
+#include "ChatSessionRenderer.h"
 #include "ChatMessagePanel.h"
-
 #include <wx/clipbrd.h>
 
 using json = nlohmann::json;
@@ -257,7 +258,7 @@ void MainFrame::RefreshRagPanel() {
         setSlot(m_ragFileSlot2, m_ragDeleteBtn2, "", 2);
         setSlot(m_ragFileSlot3, m_ragDeleteBtn3, "", 3);
         setSlot(m_ragFileSlot4, m_ragDeleteBtn4, "", 4);
-        Layout();
+        m_auiManager.Update();
         return;
     }
 
@@ -269,7 +270,7 @@ void MainFrame::RefreshRagPanel() {
     setSlot(m_ragFileSlot3, m_ragDeleteBtn3, files.size() > 2 ? files[2] : "", 3);
     setSlot(m_ragFileSlot4, m_ragDeleteBtn4, files.size() > 3 ? files[3] : "", 4);
     
-    Layout();
+    m_auiManager.Update();
 }
 
 void MainFrame::RenderSession(std::size_t sessionIndex) {
@@ -291,7 +292,6 @@ void MainFrame::RenderSession(std::size_t sessionIndex) {
         m_chatSizer->Add(bubble, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 5);
     }
 
-    m_chatContainer->Layout();
     m_chatContainer->FitInside();
     m_chatContainer->Scroll(0, m_chatContainer->GetVirtualSize().y);
 }
@@ -357,6 +357,7 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
 MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "Thoth Control Panel", wxDefaultPosition, wxSize(1000, 700))
 {
+    SetMinSize(wxSize(800, 600));
     FileHandler fileHandler;
     m_chatSessionsPath = fileHandler.getAgentWorkspacePath("chat_sessions.json");
 
@@ -392,7 +393,8 @@ MainFrame::MainFrame()
             if (m_typingIndicator) {
                 m_typingIndicator->Hide();
             }
-            this->Layout();
+            if (m_graphPanel) m_graphPanel->UpdateControllerState("IDLE");
+            m_auiManager.Update();
 
             RefreshChatList();
 
@@ -426,8 +428,9 @@ MainFrame::MainFrame()
 
                 if (type == EventType::RETRIEVAL_DIAGNOSTICS) {
                     std::cerr << "[MainFrame] Received RETRIEVAL_DIAGNOSTICS event.\n";
-                    if (isActiveSession && this->m_gragPanel) {
-                        this->m_gragPanel->UpdateDiagnostics(metadata);
+                    if (isActiveSession) {
+                        if (this->m_gragPanel) this->m_gragPanel->UpdateDiagnostics(metadata);
+                        if (this->m_graphPanel) this->m_graphPanel->UpdateControllerState("EXECUTING_RETRIEVAL");
                     }
                 } else if (type == EventType::MODE_SWITCHED) {
                     if (isActiveSession && this->m_graphPanel) {
@@ -473,6 +476,13 @@ MainFrame::MainFrame()
                     if (isActiveSession) {
                         if (this->m_stateStrip) this->m_stateStrip->UpdateStepStatus(stepId, StepStatus::RUNNING);
                         if (this->m_planPanel) this->m_planPanel->UpdateStepStatus(stepId, "Running");
+                        
+                        if (this->m_graphPanel && metadata.contains("step_type")) {
+                            int st = metadata["step_type"].get<int>();
+                            if (st == 0) this->m_graphPanel->UpdateControllerState("EXECUTING_TOOL");      // StepType::TOOL
+                            else if (st == 1) this->m_graphPanel->UpdateControllerState("EXECUTING_RETRIEVAL"); // StepType::RETRIEVAL
+                            else if (st == 2) this->m_graphPanel->UpdateControllerState("EXECUTING_LLM");       // StepType::LLM
+                        }
                     }
                 } else if (type == EventType::STEP_COMPLETED) {
                     if (isActiveSession) {
@@ -522,12 +532,13 @@ MainFrame::MainFrame()
     wxPanel* pastChatsPane = new wxPanel(m_leftSidebar, wxID_ANY);
     wxBoxSizer* pastChatsSizer = new wxBoxSizer(wxVERTICAL);
 
-    m_chatList = new wxDataViewCtrl(pastChatsPane, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxDV_ROW_LINES | wxDV_VERT_RULES);
+    m_chatList = new wxDataViewCtrl(pastChatsPane, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxDV_NO_HEADER | wxDV_ROW_LINES);
     m_chatListModel = new ChatSessionDataViewModel(&m_sessions);
     m_chatList->AssociateModel(m_chatListModel.get());
 
-    m_chatList->AppendTextColumn("Date", 0, wxDATAVIEW_CELL_INERT, 80, wxALIGN_LEFT);
-    m_chatList->AppendTextColumn("Title", 1, wxDATAVIEW_CELL_INERT, 120, wxALIGN_LEFT);
+    auto renderer = new ChatSessionRenderer();
+    auto col = new wxDataViewColumn("Past Chats", renderer, ChatSessionDataViewModel::Col_Session, 200, wxALIGN_LEFT);
+    m_chatList->AppendColumn(col);
 
     pastChatsSizer->Add(m_chatList, 1, wxEXPAND | wxALL, 2);
 
@@ -578,26 +589,29 @@ MainFrame::MainFrame()
     m_typingIndicator->SetForegroundColour(wxColour(100, 100, 100));
     m_typingIndicator->Hide();
 
-    wxPanel* inputPanel = new wxPanel(centerPanel, wxID_ANY);
-    wxBoxSizer* inputSizer = new wxBoxSizer(wxHORIZONTAL);
-    m_inputCtrl = new wxTextCtrl(inputPanel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE);
-    m_sendButton = new wxButton(inputPanel, wxID_ANY, "Send", wxDefaultPosition, wxSize(80, -1));
+    // Input Control - spanning full width
+    m_inputCtrl = new wxTextCtrl(centerPanel, wxID_ANY, "", wxDefaultPosition, wxSize(-1, 80), wxTE_MULTILINE);
     
-    m_retrievalExplainBtn = new wxButton(inputPanel, wxID_ANY, "Explain Retrieval", wxDefaultPosition, wxSize(120, -1));
+    // Buttons in a horizontal sizer
+    wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
+    m_sendButton = new wxButton(centerPanel, wxID_ANY, "Send", wxDefaultPosition, wxSize(100, 30));
+    
+    m_retrievalExplainBtn = new wxButton(centerPanel, wxID_ANY, "Explain Retrieval", wxDefaultPosition, wxSize(140, 30));
     m_retrievalExplainBtn->SetToolTip("Show retrieval diagnostics for the last answer");
     
-    m_planExplainBtn = new wxButton(inputPanel, wxID_ANY, "Explain Plan", wxDefaultPosition, wxSize(100, -1));
+    m_planExplainBtn = new wxButton(centerPanel, wxID_ANY, "Explain Plan", wxDefaultPosition, wxSize(120, 30));
     m_planExplainBtn->SetToolTip("Show the full decision trace and plan reasoning");
 
-    inputSizer->Add(m_inputCtrl, 1, wxEXPAND | wxALL, 5);
-    inputSizer->Add(m_sendButton, 0, wxALIGN_BOTTOM | wxALL, 5);
-    inputSizer->Add(m_retrievalExplainBtn, 0, wxALIGN_BOTTOM | wxALL, 5);
-    inputSizer->Add(m_planExplainBtn, 0, wxALIGN_BOTTOM | wxALL, 5);
-    inputPanel->SetSizer(inputSizer);
+    buttonSizer->AddStretchSpacer(1); // Push buttons to the right
+    buttonSizer->Add(m_sendButton, 0, wxALL, 5);
+    buttonSizer->Add(m_retrievalExplainBtn, 0, wxALL, 5);
+    buttonSizer->Add(m_planExplainBtn, 0, wxALL, 5);
 
     centerSizer->Add(m_chatContainer, 1, wxEXPAND | wxALL, 0);
     centerSizer->Add(m_typingIndicator, 0, wxALIGN_LEFT | wxLEFT, 15);
-    centerSizer->Add(inputPanel, 0, wxEXPAND | wxALL, 0);
+    centerSizer->Add(m_inputCtrl, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
+    centerSizer->Add(buttonSizer, 0, wxEXPAND | wxBOTTOM, 5);
+    
     centerPanel->SetSizer(centerSizer);
 
     // --- Right Observability Panel ---
@@ -652,10 +666,12 @@ MainFrame::MainFrame()
         .Name("KnowledgeBase")
         .Layer(1)
         .BestSize(300, -1)
-        .MinSize(250, -1)
+        .MinSize(150, -1)
         .Caption("Knowledge Base")
         .CloseButton(false)
-        .MaximizeButton(false)
+        .MaximizeButton(true)
+        .Resizable(true)
+        .Dockable(true)
         .PaneBorder(true)
         .PinButton(true));
 
@@ -669,9 +685,11 @@ MainFrame::MainFrame()
         .Name("SystemState")
         .Layer(1)
         .BestSize(-1, 350)
-        .MinSize(-1, 250)
+        .MinSize(-1, 150)
         .Caption("System State")
         .CloseButton(true)
+        .Resizable(true)
+        .Dockable(true)
         .PinButton(true));
 
     m_auiManager.AddPane(m_rightSidebar, wxAuiPaneInfo()
@@ -680,9 +698,11 @@ MainFrame::MainFrame()
         .Caption("Observability")
         .Layer(1)
         .BestSize(350, -1)
-        .MinSize(300, -1)
+        .MinSize(150, -1)
         .CloseButton(false)
-        .MaximizeButton(false)
+        .MaximizeButton(true)
+        .Resizable(true)
+        .Dockable(true)
         .PaneBorder(true));
 
 
@@ -801,7 +821,11 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
     RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
 
     m_typingIndicator->Show();
-    this->Layout();
+    if (m_graphPanel) {
+        m_graphPanel->ResetNodes();
+        m_graphPanel->UpdateControllerState("CONVERSATIONAL");
+    }
+    m_auiManager.Update();
 
     SetStatusText("Message sent, awaiting response...");
 
@@ -1152,6 +1176,7 @@ void MainFrame::SetupMenuBar() {
     Bind(wxEVT_MENU, &MainFrame::OnMenuHelpDocumentation, this, ID_MENU_HELP_DOCUMENTATION);
     Bind(wxEVT_MENU, &MainFrame::OnMenuHelpArchitecture, this, ID_MENU_HELP_ARCH_OVERVIEW);
     Bind(wxEVT_MENU, &MainFrame::OnMenuHelpAbout, this, ID_MENU_HELP_ABOUT);
+    Bind(wxEVT_CLOSE_WINDOW, &MainFrame::OnClose, this);
 }
 
 void MainFrame::OnMenuAgentShowPlan(wxCommandEvent& WXUNUSED(evt)) {
@@ -1189,7 +1214,39 @@ void MainFrame::OnMenuToolsPromptTemplates(wxCommandEvent& WXUNUSED(evt)) {
 }
 
 void MainFrame::OnMenuBenchRunGrag(wxCommandEvent& WXUNUSED(evt)) {
-    ShowMenuStatus("Benchmarks → Run GRAG Benchmark", "Benchmark results will appear in the Experiments tab.");
+    if (m_isBenchmarkRunning) {
+        wxMessageBox("A benchmark is already in progress. Concurrent runs are disabled to prevent SQLite database locking.", 
+                     "Benchmark Busy", wxOK | wxICON_INFORMATION);
+        return;
+    }
+
+    wxString bin = AgentInterface::GetBenchmarkBinaryPath("run_grag_benchmark");
+    if (bin.IsEmpty()) {
+        wxMessageBox("Could not locate 'run_grag_benchmark' executable.", "Error", wxOK | wxICON_ERROR);
+        return;
+    }
+
+    // Determine project root (where agent_workspace/ is located)
+    FileHandler fh;
+    wxString projectRoot = wxString::FromUTF8(fh.getProjectRoot());
+    if (projectRoot.IsEmpty()) projectRoot = ".";
+    
+    std::cerr << "[MainFrame] projectRoot: " << projectRoot.ToStdString() << "\n";
+
+    m_isBenchmarkRunning = true;
+    m_activeBenchmarkWindow = new BenchmarkWindow(this, "GRAG Benchmark", "GRAG", "Sample (Standard)");
+    
+    // Bind the window's destruction to reset the flag
+    m_activeBenchmarkWindow->Bind(wxEVT_DESTROY, [this](wxWindowDestroyEvent& e) {
+        if (e.GetEventObject() == m_activeBenchmarkWindow) {
+            m_isBenchmarkRunning = false;
+            m_activeBenchmarkWindow = nullptr;
+        }
+        e.Skip();
+    });
+
+    m_activeBenchmarkWindow->Show();
+    m_activeBenchmarkWindow->Run(bin + " --sample", projectRoot);
 }
 
 void MainFrame::OnMenuBenchRetrievalComparison(wxCommandEvent& WXUNUSED(evt)) {
@@ -1201,7 +1258,34 @@ void MainFrame::OnMenuBenchStrategyLearning(wxCommandEvent& WXUNUSED(evt)) {
 }
 
 void MainFrame::OnMenuBenchFullSystem(wxCommandEvent& WXUNUSED(evt)) {
-    ShowMenuStatus("Benchmarks → Run Full System", "System benchmark is forthcoming.");
+    if (m_isBenchmarkRunning) {
+        wxMessageBox("A benchmark is already in progress.", "Benchmark Busy", wxOK | wxICON_INFORMATION);
+        return;
+    }
+
+    wxString bin = AgentInterface::GetBenchmarkBinaryPath("run_cognate_benchmark");
+    if (bin.IsEmpty()) {
+        wxMessageBox("Could not locate 'run_cognate_benchmark' executable.", "Error", wxOK | wxICON_ERROR);
+        return;
+    }
+
+    FileHandler fh;
+    wxString projectRoot = wxString::FromUTF8(fh.getProjectRoot());
+    if (projectRoot.IsEmpty()) projectRoot = ".";
+
+    m_isBenchmarkRunning = true;
+    m_activeBenchmarkWindow = new BenchmarkWindow(this, "Full System Benchmark", "Cognate", "Full System");
+    
+    m_activeBenchmarkWindow->Bind(wxEVT_DESTROY, [this](wxWindowDestroyEvent& e) {
+        if (e.GetEventObject() == m_activeBenchmarkWindow) {
+            m_isBenchmarkRunning = false;
+            m_activeBenchmarkWindow = nullptr;
+        }
+        e.Skip();
+    });
+
+    m_activeBenchmarkWindow->Show();
+    m_activeBenchmarkWindow->Run(bin, projectRoot);
 }
 
 void MainFrame::OnMenuViewShowGrag(wxCommandEvent& evt) {
@@ -1251,11 +1335,24 @@ void MainFrame::OnMenuHelpAbout(wxCommandEvent& WXUNUSED(evt)) {
     wxAboutBox(info);
 }
 
+void MainFrame::OnClose(wxCloseEvent& evt) {
+    if (m_isBenchmarkRunning && m_activeBenchmarkWindow) {
+        // We try to close the benchmark window first.
+        // It will prompt the user and Veto if they say NO.
+        if (!m_activeBenchmarkWindow->Close()) {
+            evt.Veto();
+            return;
+        }
+    }
+    
+    evt.Skip();
+}
+
 void MainFrame::RefreshGoalBanner() {
     if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) {
         std::cerr << "[MainFrame] RefreshGoalBanner: Invalid index " << m_activeSessionIndex << "\n";
         if (m_goalBanner) m_goalBanner->Hide();
-        this->Layout();
+        m_auiManager.Update();
         return;
     }
 
@@ -1267,7 +1364,7 @@ void MainFrame::RefreshGoalBanner() {
         if (m_goalText) m_goalText->SetLabel("Current Goal: " + wxString::FromUTF8(goal));
         if (m_goalBanner) m_goalBanner->Show();
     }
-    this->Layout();
+    m_auiManager.Update();
 }
 
 void MainFrame::ClearActiveGoal() {
@@ -1355,11 +1452,30 @@ wxCollapsiblePane* MainFrame::AddCollapsiblePane(wxScrolledWindow* parent, const
     paneSizer->Add(content, 1, wxEXPAND | wxALL, 0);
     pane->SetSizer(paneSizer);
 
-    coll->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED, [this, parent](wxCollapsiblePaneEvent&) {
+    coll->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED, [this, parent, coll](wxCollapsiblePaneEvent& evt) {
         parent->Layout();
         parent->FitInside();
-        this->Layout();
-        m_auiManager.Update();
+        
+        if (!evt.GetCollapsed()) {
+            wxTheApp->CallAfter([parent, coll]() {
+                // Ensure the newly expanded pane is visible
+                int x, y;
+                coll->GetPosition(&x, &y);
+                int ppuX, ppuY;
+                parent->GetScrollPixelsPerUnit(&ppuX, &ppuY);
+                
+                if (ppuY > 0) {
+                    int scrollY = y / ppuY;
+                    int maxScrollX, maxScrollY;
+                    parent->GetVirtualSize(&maxScrollX, &maxScrollY);
+                    
+                    // Safety: clamp to valid range
+                    if (scrollY >= 0) {
+                        parent->Scroll(-1, scrollY);
+                    }
+                }
+            });
+        }
     });
 
     if (parent->GetSizer()) {
