@@ -1,3 +1,4 @@
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -654,8 +655,10 @@ static bool testToolBatching() {
 class MockReflectionPlanner : public IPlanner {
 public:
     int call_count = 0;
+    std::vector<std::string> goals_requested;
     Plan create_plan(const std::string& goal) override {
         call_count++;
+        goals_requested.push_back(goal);
         Plan plan;
         plan.plan_id = "reflection-plan-" + std::to_string(call_count);
         plan.goal = goal;
@@ -664,8 +667,15 @@ public:
         PlanStep s1;
         s1.step_id = "step-1";
         s1.description = "Reflectable step";
-        s1.type = StepType::LLM;
-        s1.payload = {{"prompt", "test"}};
+        // First plan must finish with score < 0.6 to trigger reflection.
+        // LLM steps always succeed in WorkflowEngine's stub, so use NODE (not implemented).
+        if (call_count == 1) {
+            s1.type = StepType::NODE;
+            s1.payload = {{"node_id", "reflection-test-node"}};
+        } else {
+            s1.type = StepType::LLM;
+            s1.payload = {{"prompt", "test"}};
+        }
         plan.steps.push_back(s1);
         return plan;
     }
@@ -681,18 +691,61 @@ static bool testReflectionLoop() {
     auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx);
     auto planner = std::make_shared<MockReflectionPlanner>();
     auto registry = std::make_shared<ToolRegistry>();
-    
+
     Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    std::atomic<int> plan_created_events{0};
+    controller.set_event_callback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::PLAN_CREATED) {
+            plan_created_events.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
     controller.execute_goal("Reflection test goal");
 
     int timeout = 100;
-    while (planner->call_count < 2 && timeout > 0) {
+    while ((planner->call_count < 2 || plan_created_events.load() < 2) && timeout > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         --timeout;
     }
 
     if (planner->call_count < 2) {
-        std::cerr << "testReflectionLoop: failed to trigger reflection (call count: " << planner->call_count << ")\n";
+        std::cerr << "testReflectionLoop: failed to trigger reflection (call count: "
+                  << planner->call_count << ")\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    if (plan_created_events.load() < 2) {
+        std::cerr << "testReflectionLoop: expected at least 2 PLAN_CREATED events (got "
+                  << plan_created_events.load() << ")\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    if (planner->goals_requested.size() < 2 ||
+        planner->goals_requested[1].find("Reflection:") == std::string::npos) {
+        std::cerr << "testReflectionLoop: reflection replan goal missing Reflection context\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    timeout = 100;
+    while (controller.get_state() != Thoth::ControllerState::COMPLETED && timeout > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        --timeout;
+    }
+
+    if (controller.get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testReflectionLoop: expected COMPLETED after reflection replan (state: "
+                  << static_cast<int>(controller.get_state()) << ")\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const Plan final_plan = controller.get_current_plan();
+    if (final_plan.plan_id != "reflection-plan-2") {
+        std::cerr << "testReflectionLoop: expected active plan reflection-plan-2 (got "
+                  << final_plan.plan_id << ")\n";
         fs::remove(cfg.database_path);
         return false;
     }

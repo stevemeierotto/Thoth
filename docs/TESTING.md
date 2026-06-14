@@ -50,6 +50,29 @@ tests/
 - `testResumeFromTrace()` - Crash recovery
 - ExecutiveController state transitions
 - Plan revision logic
+- `testReflectionLoop()` - Reflection replan after low trajectory score (see below)
+
+##### Reflection loop testing (`testReflectionLoop`)
+
+The ExecutiveController reflection path runs when a plan finishes with **`calculate_trajectory_score() < 0.6`** (see `completed_improvements_log.md`, 2026-03-29). Up to **`MAX_REFLECTIONS` (2)** replans call `IPlanner::create_plan()` again with a goal suffix containing **`Reflection:`**.
+
+**Important for test authors:** `WorkflowEngine::executeLLM()` is a stub that **always succeeds**, which yields a trajectory score of **1.0** and **does not** trigger reflection. To test reflection in unit tests you must arrange a first plan that completes with a **low score**, for example:
+
+- A **`StepType::NODE`** step (not implemented — fails deterministically), or
+- A **`StepType::TOOL`** step that resolves to a missing tool, or
+- An empty plan (score 0.0 by definition)
+
+`testReflectionLoop` uses the NODE pattern on the first plan and an LLM step on the reflection replan. It asserts:
+
+1. `create_plan` is called at least twice
+2. The second goal string contains `Reflection:`
+3. At least two `PLAN_CREATED` events
+4. The controller reaches `COMPLETED` on the second plan
+5. The active plan id is `reflection-plan-2`
+
+Because `execute_goal()` returns before the background `run_loop` finishes, assertions must **poll** until both `create_plan` call count and `PLAN_CREATED` events reach 2 (use `std::atomic` for event counts).
+
+Do not use an all-LLM mock plan to test reflection unless you also mock failure at the workflow layer.
 
 #### 6. Integration Tests
 - `testAgentInterfaceLifecycle()` - Full agent initialization
@@ -258,6 +281,7 @@ int main() {
 - CommandProcessor commands
 - ExecutiveController state machine
 - GRAG event emission
+- Reflection replan loop (`testReflectionLoop`)
 
 ✅ **Security:**
 - Log redaction (API keys, emails)
@@ -267,12 +291,13 @@ int main() {
 ### Areas Needing More Tests
 
 📋 **Planned Test Expansion:**
-- ExecutiveController full lifecycle
-- Plan revision scenarios
-- Strategy engine pattern detection
-- Scientific execution mode
+- ExecutiveController full lifecycle (beyond reflection replan)
+- Plan revision scenarios (`revise_plan` mid-execution, distinct from reflection)
+- Strategy engine pattern detection (partial coverage exists)
+- Scientific execution mode (partial coverage exists)
 - Graph memory operations
 - Multi-threaded scenarios
+- Automated equivalents of `TEST_SUITE.md` TC-01–TC-07
 
 ---
 
