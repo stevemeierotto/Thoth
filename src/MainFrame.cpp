@@ -13,6 +13,7 @@
 #include "BenchmarkWindow.h"
 #include "ExecutiveStateStrip.h"
 #include "file_handler.h"
+#include "../external/basic_agent/include/memory_pruning_config.h"
 
 #include <json.hpp>
 #include <wx/notebook.h>
@@ -38,6 +39,20 @@
 
 using json = nlohmann::json;
 using namespace Thoth; // Bring ChatSession and ChatMessage into scope
+
+namespace {
+
+void TrimSessionMessagesForPersistence(Thoth::ChatSession& session) {
+    const std::size_t maxHot = Thoth::MemoryPruning::kMaxHotMessages;
+    if (session.messages.size() <= maxHot) {
+        return;
+    }
+    const std::size_t dropCount = session.messages.size() - maxHot;
+    session.messages.erase(session.messages.begin(),
+                           session.messages.begin() + static_cast<std::ptrdiff_t>(dropCount));
+}
+
+} // namespace
 
 std::int64_t MainFrame::NowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -147,14 +162,22 @@ void MainFrame::LoadChatSessions() {
 
             m_sessions.push_back(std::move(session));
         }
+
+        for (auto& session : m_sessions) {
+            TrimSessionMessagesForPersistence(session);
+        }
     } catch (...) {
         m_sessions.clear();
     }
 }
 
-void MainFrame::SaveChatSessions() const {
+void MainFrame::SaveChatSessions() {
     if (m_chatSessionsPath.empty()) {
         return;
+    }
+
+    for (auto& session : m_sessions) {
+        TrimSessionMessagesForPersistence(session);
     }
 
     const std::filesystem::path sessionsPath(m_chatSessionsPath);

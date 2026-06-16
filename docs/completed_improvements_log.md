@@ -9,6 +9,15 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
 
+### 2026-06-16 (P1.6 — Memory Pruning Integration + GUI Hot-Tier Trim)
+
+- **Goal**: Wire `MemoryPruner` into runtime and stop unbounded growth in SQLite + `chat_sessions.json`.
+- **Session scoping**: `Memory::setActiveSessionId()` / `getActiveSessionId()`; `BasicAgentPlugin::setSessionId()` now updates memory before controller/RAG.
+- **Auto-prune**: `MemoryPruner` constructed in `Memory` constructor; `maybePruneAfterWrite()` runs after each `addMessage()` (outside `mtx` lock).
+- **Shared limits**: `memory_pruning_config.h` — `kMaxHotMessages=50`, `kPruneBatchSize=10` (used by pruner, tests, and GUI).
+- **GUI**: `MainFrame` trims each session to hot-tier cap on load and before save (`TrimSessionMessagesForPersistence`).
+- **Tests**: `testMemoryPruningIntegration`, `testMemorySessionScoping` (added; not run in this pass).
+
 ### 2026-06-15 / 2026-06-16 (P1 Alignment: Security, Trajectory Config, Plan Reuse)
 
 - **Branch:** `cursor/p1-plan-reuse-security-observability` → merged to `main` (2026-06-16).

@@ -26,6 +26,7 @@
 #include "run_tests_tool.h"
 #include "code_modify_tool.h"
 #include "sqlite_memory_repository.h"
+#include "memory_pruning_config.h"
 #include "fact_store.h"
 #include "store_fact_tool.h"
 #include "flat_vector_store.h"
@@ -535,14 +536,77 @@ static bool testMemoryPruning() {
     }
 
     Thoth::PruningPolicy policy;
-    policy.max_hot_messages = 50;
-    policy.prune_batch_size = 10;
+    policy.max_hot_messages = Thoth::MemoryPruning::kMaxHotMessages;
+    policy.prune_batch_size = Thoth::MemoryPruning::kPruneBatchSize;
     
     Thoth::MemoryPruner pruner(*repo, policy);
     int archived = pruner.prune(sid);
 
-    if (archived != 10) {
-        std::cerr << "testMemoryPruning: expected 10 archived, got " << archived << "\n";
+    if (archived != static_cast<int>(Thoth::MemoryPruning::kPruneBatchSize)) {
+        std::cerr << "testMemoryPruning: expected " << Thoth::MemoryPruning::kPruneBatchSize
+                  << " archived, got " << archived << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testMemoryPruningIntegration() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_pruning_integration.db").string();
+    Memory memory(cfg);
+    memory.setActiveSessionId("integration-session");
+
+    for (int i = 0; i < 60; ++i) {
+        memory.addMessage("user", "msg " + std::to_string(i));
+    }
+
+    const auto hot = memory.getConversation();
+    if (hot.size() > Thoth::MemoryPruning::kMaxHotMessages) {
+        std::cerr << "testMemoryPruningIntegration: hot tier exceeded cap, got "
+                  << hot.size() << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto archived = memory.getArchivedTurns();
+    if (archived.size() < Thoth::MemoryPruning::kPruneBatchSize) {
+        std::cerr << "testMemoryPruningIntegration: expected at least "
+                  << Thoth::MemoryPruning::kPruneBatchSize << " archived turns, got "
+                  << archived.size() << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testMemorySessionScoping() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_session_scope.db").string();
+    Memory memory(cfg);
+
+    memory.setActiveSessionId("session-a");
+    memory.addMessage("user", "alpha");
+
+    memory.setActiveSessionId("session-b");
+    memory.addMessage("user", "beta");
+
+    memory.setActiveSessionId("session-a");
+    const auto convoA = memory.getConversation();
+    if (convoA.size() != 1 || convoA[0]["content"] != "alpha") {
+        std::cerr << "testMemorySessionScoping: session-a isolation failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    memory.setActiveSessionId("session-b");
+    const auto convoB = memory.getConversation();
+    if (convoB.size() != 1 || convoB[0]["content"] != "beta") {
+        std::cerr << "testMemorySessionScoping: session-b isolation failed\n";
         fs::remove(cfg.database_path);
         return false;
     }
@@ -1306,6 +1370,8 @@ int main() {
     if (!testAllowShellExecGate()) failures++;
     if (!testPastPlanRetrieval()) failures++;
     if (!testMemoryPruning()) failures++;
+    if (!testMemoryPruningIntegration()) failures++;
+    if (!testMemorySessionScoping()) failures++;
     if (!testFactStore()) failures++;
     if (!testStoreFactTool()) failures++;
     if (!testVectorStoreAbstraction()) failures++;

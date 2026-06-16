@@ -146,7 +146,7 @@ private:
     std::string BuildSessionTitle(const wxString& firstUserMessage) const;
     std::string BuildMemorySummary(const Thoth::ChatSession& session) const;
     void LoadChatSessions();
-    void SaveChatSessions() const;
+    void SaveChatSessions();
     void CreateNewSession(const std::string& title = "New Chat");
     void RefreshChatList();
     void RefreshRagPanel();
