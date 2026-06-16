@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 **NOTE ON DOCUMENTATION ACCURACY (2026-03-30)**: An internal audit revealed that some features listed as "complete" are actually in a prototype or stub state. This document is being updated to reflect the actual implementation status:
@@ -9,18 +9,21 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
 
-### 2026-06-15 (P1 Alignment: Security, Trajectory Config, Plan Reuse)
+### 2026-06-15 / 2026-06-16 (P1 Alignment: Security, Trajectory Config, Plan Reuse)
 
+- **Branch:** `cursor/p1-plan-reuse-security-observability` → merged to `main` (2026-06-16).
+- **Submodule:** `external/basic_agent` @ `2953068` (plan reuse, shell gating, observability).
 - **P1.1 — Trajectory weight activated**:
-    - Set `agent_workspace/retrieval_config.json` → `"trajectory": 0.2`.
+    - Set `agent_workspace/retrieval_config.json` → `"trajectory": 0.2` (local runtime file; gitignored).
     - Full GRAG benchmark: overall nDCG +0.042; trajectory case type −0.037 (documented in `docs/benchmark_results.md`).
 - **P1.5 — `allow_shell_exec` enforcement**:
     - `run_tests` and `code_modify build` gate on `Config::allow_shell_exec`; `ToolRegistry::setConfig()` wired from plugin; unit test `testAllowShellExecGate`.
 - **P1.3 — Plan history reuse**:
     - **Goal**: Make `retrieveSimilarPlans()` operational and observable across executive, planner, storage, and GUI.
     - **Implementation**: Cosine similarity over `past_plans` (v2) with tunable thresholds in `plan_reuse_config.h`; injection in `execute_goal` and reflection replan; events `PLAN_REUSE_INJECTION`, `REFLECTION_REPLAN`, `PLAN_HISTORY_STORED`; planner logs `PLANNER_CONTEXT_ASSEMBLY`, `COGNATE_PLAN_PERSISTED`.
-    - **Documentation**: `docs/plan_reuse_tuning.md` (thresholds, trajectory, observability map).
-    - **Tests**: `testPastPlanRetrieval`.
+    - **Deadlock fix (2026-06-16)**: Observability helpers no longer call `emit_event()` while holding `ExecutiveController::mutex_`; UI events deferred until after unlock.
+    - **Documentation**: `docs/plan_reuse_tuning.md` (thresholds, trajectory, observability map); `docs/cursor_list.md` updated for P1.1/P1.3/P1.5.
+    - **Tests**: `testPastPlanRetrieval`, `testAllowShellExecGate`; `ctest --output-on-failure` **100% green** (2026-06-16, ~78s).
 
 ### 2026-06-13 (Fresh-Start Alignment & Reflection Test Verification)
 

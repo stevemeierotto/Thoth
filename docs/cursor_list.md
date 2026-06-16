@@ -1,10 +1,10 @@
 # Thoth Alignment Checklist — Cursor Fresh Start
 
 **Created:** 2026-06-13  
-**Last updated:** 2026-06-13  
+**Last updated:** 2026-06-16  
 **Purpose:** Prioritized list of fixes needed so code, tests, and documentation match the claims made across `docs/`, thesis papers, and `AGENTS.md`. Use this as the working backlog when returning to the project.
 
-**Status:** Priority 0 items resolved. Next focus: Priority 1 (capability gaps) and Priority 2 (doc drift).
+**Status:** P0 and P1.1 / P1.3 / P1.5 resolved (2026-06-15–16). Next focus: P1.2, P1.6, P1.7, and Priority 2 doc drift.
 
 **How to use:**
 1. Work top-to-bottom by priority tier.
@@ -41,14 +41,13 @@
 
 These are features described as complete (or thesis-critical) but are stubbed, disabled, or not wired.
 
-### P1.1 — Trajectory-aware GRAG (`w_t`) disabled in production config
+### ✅ P1.1 — Trajectory-aware GRAG (`w_t`) (RESOLVED 2026-06-15, Option A)
 
 | | |
 |---|---|
-| **Claim** | `GRAG.md`, `MYPAPER.md`, `benchmark_results.md` (Mar 14 runs), `README.md`: trajectory term $w_t=0.2$ is part of the scoring model; Phase 4.5 in `improvements.md` describes trajectory-aware retrieval. |
-| **Reality** | `GragScorer::rescore()` supports `trajectory_embedding` and `config.wt`, but `agent_workspace/retrieval_config.json` sets `"trajectory": 0.0`. Default `Config` uses `wt=0.2` until overridden by that file. |
-| **Fix (choose one path)** | **A)** Activate: set `trajectory` to `0.2` in `retrieval_config.json`, verify with GRAG benchmark and unit tests. **B)** Defer: keep `0.0` but downgrade claims in `README.md`, `COGNATE_V2.md`, and benchmark notes that assume active $w_t$. |
-| **Doc fix** | Align `GRAG.md` §3 audit note with chosen path; update `AGENTS.md` “Current System Status” section. |
+| **Was** | `agent_workspace/retrieval_config.json` set `"trajectory": 0.0` despite code and docs assuming $w_t=0.2$. |
+| **Fix applied** | Activated `trajectory: 0.2` in local `retrieval_config.json` (gitignored runtime config). Full GRAG benchmark: overall nDCG **+0.042**; `TRAJECTORY_DISAMBIGUATES` bucket **−0.037** — see `benchmark_results.md` and `plan_reuse_tuning.md`. |
+| **Remaining doc fix** | Align `GRAG.md` §3 audit note and `AGENTS.md` status with active $w_t$; note mixed trajectory-case lift. |
 
 ### P1.2 — `code_modify` / `apply_diff` is a stub (Self-Building not real)
 
@@ -64,7 +63,7 @@ These are features described as complete (or thesis-critical) but are stubbed, d
 | | |
 |---|---|
 | **Was** | `Memory::retrieveSimilarPlans()` returned `{}`; injection never fired. |
-| **Fix applied** | Embedding-based retrieval over `past_plans` (v2); executive + reflection injection; observability events; `docs/plan_reuse_tuning.md`. |
+| **Fix applied** | Embedding-based retrieval over `past_plans` (v2); executive + reflection injection; observability events; `docs/plan_reuse_tuning.md`. Deadlock fix (2026-06-16): observability no longer calls `emit_event()` under `mutex_`. `ctest` 100% green (~78s). |
 
 ### P1.4 — Hierarchical subgoal trees not implemented
 
@@ -75,14 +74,13 @@ These are features described as complete (or thesis-critical) but are stubbed, d
 | **Fix** | Code: implement `GoalNode` tree per roadmap **or** doc-only: ensure all “complete” docs do not imply this exists. |
 | **Doc fix** | `cognate.md` §5 “Future Frontiers” is accurate; `README.md` “Planned” row is accurate; no change needed unless something claims it is done. |
 
-### P1.5 — `allow_shell_exec` bypass
+### ✅ P1.5 — `allow_shell_exec` bypass (RESOLVED 2026-06-15)
 
 | | |
 |---|---|
-| **Claim** | `AGENTS.md`, `audit.md`: known gap — config flag bypassed. |
-| **Reality** | `run_tests` and `code_modify build` use shell execution without checking `allow_shell_exec`. |
-| **Fix** | Enforce flag in tools before `popen` / build; add unit test. |
-| **Doc fix** | Move from “known gap” to “fixed” in `audit.md` and `architectural_facts.md` when done. |
+| **Was** | `run_tests` and `code_modify build` used `popen` without checking `Config::allow_shell_exec`. |
+| **Fix applied** | Tools gate on config via `ToolRegistry::setConfig()`; unit test `testAllowShellExecGate`. Default remains **deny** unless `config.json` enables shell. |
+| **Remaining doc fix** | Move from “known gap” to “fixed” in `audit.md` and `architectural_facts.md`. |
 
 ### P1.6 — Memory pruning not integrated into runtime
 
@@ -177,7 +175,7 @@ These confuse a fresh start. Either archive under `docs/archive/` or merge into 
 | File | Warning |
 |------|---------|
 | `embedding_engine.cpp` | Unused `path` in `saveState` / `loadState` |
-| `memory.cpp` | Unused params in `retrieveSimilarPlans` placeholder |
+| `memory.cpp` | ~~Unused params in `retrieveSimilarPlans` placeholder~~ — fixed in P1.3 |
 | `code_modify_tool.cpp` | Unused params in `applyDiff` stub |
 | `ChatSessionDataViewModel.cpp` | Unused params in read-only model methods |
 | `PlanExecutionPanel.cpp` | Sign compare; unused `stepId` |
@@ -211,7 +209,7 @@ Track in `improvements.md` only — do **not** mark complete until implemented:
 
 1. **Phase 3 completion** — pruning integration, archival restore path, vector store benchmark scaffold  
 2. **Phase 4.4** — hierarchical subgoal trees  
-3. **Phase 4.5** — activate trajectory weight end-to-end (config + diagnostics + benchmarks)  
+3. **Phase 4.5** — trajectory weight tuning (config active; refine $w_t$ / T embedding quality per benchmark)  
 4. **Phase 5** — real `apply_diff`, build/revert automation  
 5. **`new_corpus_tests.md`** — 30-case research-paper disambiguation benchmark  
 6. **Cross-agent / multi-agent** — mentioned in `PLAN.md`, not scoped in roadmap  
@@ -219,15 +217,18 @@ Track in `improvements.md` only — do **not** mark complete until implemented:
 
 ---
 
-## Suggested Session Order (updated 2026-06-13)
+## Suggested Session Order (updated 2026-06-16)
 
 ```
 Done    P0.1 + P0.2 — reflection test fixed; ctest green
+Done    P1.1 — trajectory wt=0.2 activated (local config); benchmark run archived
+Done    P1.3 — plan history reuse + observability + plan_reuse_tuning.md
+Done    P1.5 — allow_shell_exec enforced in shell tools
 Next 1  P2.1–P2.3 doc alignment (INDEX.md, improvements.md phase table, broken links)
-Next 2  Decide P1.1 trajectory weight: activate or doc downgrade
-Next 3  P1.3 plan history reuse OR remove from execute_goal
+Next 2  P1.6 memory pruning integration OR doc downgrade
+Next 3  P1.2 apply_diff OR formally defer Phase 5 with honest README
 Next 4  Re-run TEST_SUITE.md TC-01–TC-07 manually; update VERIFIED_BASELINE.md date
-Next 5  P1.2 apply_diff OR formally defer Phase 5 with honest README
+Next 5  P1.7 NODE harness OR doc-only deferral
 ```
 
 ---
@@ -244,21 +245,22 @@ Next 5  P1.2 apply_diff OR formally defer Phase 5 with honest README
 
 ## Quick Reference — Claim vs. Reality Matrix
 
-| Feature | Claimed | Actual (2026-06-13) |
+| Feature | Claimed | Actual (2026-06-16) |
 |---------|---------|---------------------|
 | GRAG directional core | ✅ Complete | ✅ Works |
 | GRAG graph learning | ✅ Complete | ✅ GraphRefiner active |
-| GRAG trajectory $w_t$ | ✅ In formula / benchmarks | 🔶 Code yes; config **0.0** |
+| GRAG trajectory $w_t$ | ✅ In formula / benchmarks | ✅ Config **0.2** (local); mixed lift on trajectory cases |
 | Cognate executive loop | ✅ Complete | ✅ Reflection loop verified via `testReflectionLoop` |
 | Scientific mode | ✅ Complete | ✅ Implemented (partial unit test coverage) |
 | Strategy promotion | ✅ Complete | ✅ Verified in benchmarks |
-| Plan history reuse | ✅ Described | ❌ Placeholder returns empty |
+| Plan history reuse | ✅ Described | ✅ `retrieveSimilarPlans` + injection + events |
+| Shell exec security | ✅ Config gate | ✅ `allow_shell_exec` enforced (P1.5) |
 | Crash resume | ✅ SQLite authoritative | ✅ Yes |
 | Trace log resume | ✅ Phase 10 | 🔶 Observability only |
 | Self-building / apply_diff | ✅ / 📋 Mixed | ❌ Stub |
 | Memory pruning | 📋 Planned | 🔶 Class only |
 | NODE harness | Described as active | ❌ Spec only |
-| Unit tests | ✅ Passing claimed | ✅ Full suite green (2026-06-13) |
+| Unit tests | ✅ Passing claimed | ✅ Full suite green (2026-06-16, ~78s) |
 
 ---
 
