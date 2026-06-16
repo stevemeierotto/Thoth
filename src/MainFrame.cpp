@@ -510,6 +510,33 @@ MainFrame::MainFrame()
                     if (isActiveSession && this->m_planPanel) this->m_planPanel->SetExecutionState("Failed");
                 } else if (type == EventType::PLAN_ABORTED) {
                     if (isActiveSession && this->m_planPanel) this->m_planPanel->SetExecutionState("Aborted");
+                } else if (type == EventType::PLAN_REUSE_INJECTION) {
+                    std::cerr << "[MainFrame] PLAN_REUSE_INJECTION source="
+                              << metadata.value("source", "unknown")
+                              << " count=" << metadata.value("plan_count", 0) << "\n";
+                    if (isActiveSession) {
+                        SetStatusText(wxString::Format(
+                            "Plan reuse: %d similar past plan(s) from %s",
+                            metadata.value("plan_count", 0),
+                            wxString::FromUTF8(metadata.value("source", "unknown"))));
+                    }
+                } else if (type == EventType::REFLECTION_REPLAN) {
+                    std::cerr << "[MainFrame] REFLECTION_REPLAN score="
+                              << metadata.value("trajectory_score", 0.0f)
+                              << " cycle=" << metadata.value("reflection_cycle", 0) << "\n";
+                    if (isActiveSession) {
+                        SetStatusText(wxString::Format(
+                            "Reflection replan (score %.2f, cycle %d)",
+                            metadata.value("trajectory_score", 0.0f),
+                            metadata.value("reflection_cycle", 0)));
+                    }
+                } else if (type == EventType::PLAN_HISTORY_STORED) {
+                    std::cerr << "[MainFrame] PLAN_HISTORY_STORED plan_id="
+                              << metadata.value("plan_id", "")
+                              << " score=" << metadata.value("success_score", 0.0f) << "\n";
+                    if (isActiveSession) {
+                        SetStatusText("Plan history saved to past_plans + cognate_plans");
+                    }
                 }
                 
                 // Periodically refresh panels during execution for live updates

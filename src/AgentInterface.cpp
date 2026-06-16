@@ -19,6 +19,13 @@ AgentInterface::AgentInterface() {
         plugin = std::make_unique<BasicAgentPlugin>();
         
         plugin->onEvent = [this](const ControllerEvent& ev) {
+            if (ev.type == EventType::PLAN_REUSE_INJECTION
+                || ev.type == EventType::REFLECTION_REPLAN
+                || ev.type == EventType::PLAN_HISTORY_STORED) {
+                std::cerr << "[AgentInterface] bridge event session=" << ev.session_id
+                          << " plan=" << ev.plan_id
+                          << " type=" << static_cast<int>(ev.type) << "\n";
+            }
             if (this->onEvent) this->onEvent(ev);
         };
 

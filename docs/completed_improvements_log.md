@@ -1,13 +1,40 @@
 # Completed Improvements Log
 
-Last updated: 2026-03-30
+Last updated: 2026-06-15
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 **NOTE ON DOCUMENTATION ACCURACY (2026-03-30)**: An internal audit revealed that some features listed as "complete" are actually in a prototype or stub state. This document is being updated to reflect the actual implementation status:
 - **Self-Building Capability**: The harness exists (analyzing, testing), but the `apply_diff` operation is currently a non-functional stub.
-- **Trajectory Awareness**: The infrastructure for trajectory-based retrieval is implemented, but the weight ($w_t$) is currently set to 0.0 in the configuration.
+- **Trajectory Awareness**: Infrastructure is implemented; production `retrieval_config.json` sets `trajectory: 0.2` (2026-06-15). Benchmark shows mixed lift on `TRAJECTORY_DISAMBIGUATES` cases — see `docs/plan_reuse_tuning.md`.
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
+
+### 2026-06-15 (P1 Alignment: Security, Trajectory Config, Plan Reuse)
+
+- **P1.1 — Trajectory weight activated**:
+    - Set `agent_workspace/retrieval_config.json` → `"trajectory": 0.2`.
+    - Full GRAG benchmark: overall nDCG +0.042; trajectory case type −0.037 (documented in `docs/benchmark_results.md`).
+- **P1.5 — `allow_shell_exec` enforcement**:
+    - `run_tests` and `code_modify build` gate on `Config::allow_shell_exec`; `ToolRegistry::setConfig()` wired from plugin; unit test `testAllowShellExecGate`.
+- **P1.3 — Plan history reuse**:
+    - **Goal**: Make `retrieveSimilarPlans()` operational and observable across executive, planner, storage, and GUI.
+    - **Implementation**: Cosine similarity over `past_plans` (v2) with tunable thresholds in `plan_reuse_config.h`; injection in `execute_goal` and reflection replan; events `PLAN_REUSE_INJECTION`, `REFLECTION_REPLAN`, `PLAN_HISTORY_STORED`; planner logs `PLANNER_CONTEXT_ASSEMBLY`, `COGNATE_PLAN_PERSISTED`.
+    - **Documentation**: `docs/plan_reuse_tuning.md` (thresholds, trajectory, observability map).
+    - **Tests**: `testPastPlanRetrieval`.
+
+### 2026-06-13 (Fresh-Start Alignment & Reflection Test Verification)
+
+- **Alignment Backlog (`docs/cursor_list.md`)**:
+    - **Goal**: Produce a prioritized, honest gap list between documentation claims and code/test reality after returning to the project.
+    - **Implementation Details**: Audited build, unit tests, specs, and roadmap docs; documented open items by priority (P1–P4). Priority 0 (reflection test + green ctest) marked resolved after verification below.
+- **Reflection Loop Unit Test (`testReflectionLoop`)**:
+    - **Goal**: Automate verification that low trajectory scores trigger a second `IPlanner::create_plan()` call (reflection replan).
+    - **Root Cause**: The test used an all-LLM mock plan; `WorkflowEngine::executeLLM()` stub always succeeds → score 1.0 → reflection never fired. This was a **test design issue**, not an ExecutiveController regression.
+    - **Fix**: First mock plan uses a failing `StepType::NODE` step; reflection replan uses `LLM`. Added assertions for `Reflection:` goal suffix, two `PLAN_CREATED` events (async-safe polling), terminal `COMPLETED` state, and active plan id `reflection-plan-2`.
+    - **Documentation**: Added reflection testing guidance to `docs/TESTING.md`.
+    - **Verification**: `ctest --output-on-failure` passes 100% on `main` (2026-06-13).
+- **Main Integration (merged to `main`)**:
+    - Consolidated pending GUI/benchmark work (`BenchmarkWindow`, `ChatSessionRenderer`, graph/session UI), thesis doc assets, `.editorconfig`, and `basic_agent` pointer update (`f5d5b37` reflection scoring hardening).
 
 ### 2026-03-29 (Cognitive Loop Stability & Score Accuracy)
 
@@ -17,7 +44,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
         - **Decoupled Scoring**: Refactored `calculate_trajectory_score` to use explicit success flags instead of relying on transient controller states, ensuring accurate scoring (1.0 for success) at the moment of plan completion.
         - **Empty Plan Guard**: Updated `decide_transition` to handle plans with 0 steps. These are now correctly scored as 0.0 and routed through the reflection loop for repair or marked as `FAILED` if unrecoverable.
         - **Terminal State Enforcement**: Guaranteed that plans with 0 steps cannot transition to `COMPLETED`, ensuring the "Success" status accurately reflects actual work performed.
-    - **Verification**: Successfully recompiled; verified logic via code review and integrated testing of the reflection cycle.
+    - **Verification**: Successfully recompiled; verified logic via code review. **Automated coverage completed 2026-06-13** via strengthened `testReflectionLoop` (see entry above).
 
 ### 2026-03-29 (Production-Grade Benchmark UI)
 

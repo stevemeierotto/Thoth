@@ -437,6 +437,92 @@ static bool testCodeModifyTool() {
     return true;
 }
 
+static bool testAllowShellExecGate() {
+    Config cfg;
+    cfg.allow_shell_exec = false;
+
+    unsetenv("THOTH_MOCK_TESTS");
+    RunTestsTool runTool(&cfg);
+    nlohmann::json runOut = runTool.execute({{"confirmed", true}});
+    if (runOut["status"] != "error") {
+        std::cerr << "testAllowShellExecGate: run_tests should fail when allow_shell_exec is false\n";
+        return false;
+    }
+    std::string runErr = runOut.value("error_message", "");
+    if (runErr.find("allow_shell_exec") == std::string::npos) {
+        std::cerr << "testAllowShellExecGate: unexpected run_tests error: " << runErr << "\n";
+        return false;
+    }
+
+    CodeModifyTool codeTool(&cfg);
+    nlohmann::json buildOut = codeTool.execute({{"operation", "build"}, {"confirmed", true}});
+    if (buildOut["status"] != "error") {
+        std::cerr << "testAllowShellExecGate: code_modify build should fail when allow_shell_exec is false\n";
+        return false;
+    }
+    std::string buildErr = buildOut.value("error_message", "");
+    if (buildErr.find("allow_shell_exec") == std::string::npos) {
+        std::cerr << "testAllowShellExecGate: unexpected build error: " << buildErr << "\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testPastPlanRetrieval() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_plan_reuse_test.db").string();
+    Memory memory(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+
+    auto embed = [&](const std::string& text) { return engine->embed(text); };
+
+    Memory::PastPlanRecord good;
+    good.plan_id = "plan-good";
+    good.goal = "optimize GRAG retrieval directional scoring";
+    good.outline = R"({"steps":[{"step_id":"s1"}]})";
+    good.success_score = 0.9f;
+    good.goal_embedding = embed("optimize GRAG retrieval directional scoring");
+    memory.storePastPlan(good);
+
+    Memory::PastPlanRecord low;
+    low.plan_id = "plan-low";
+    low.goal = "optimize GRAG retrieval directional scoring failed run";
+    low.outline = R"({"steps":[]})";
+    low.success_score = 0.3f;
+    low.goal_embedding = embed("optimize GRAG retrieval directional scoring failed run");
+    memory.storePastPlan(low);
+
+    Memory::PastPlanRecord unrelated;
+    unrelated.plan_id = "plan-other";
+    unrelated.goal = "email inbox classification pipeline";
+    unrelated.outline = R"({"steps":[]})";
+    unrelated.success_score = 0.95f;
+    unrelated.goal_embedding = embed("email inbox classification pipeline");
+    memory.storePastPlan(unrelated);
+
+    auto query = embed("improve GRAG directional retrieval scoring");
+    auto results = memory.retrieveSimilarPlans(query, 2);
+
+    if (results.empty() || results[0].plan_id != "plan-good") {
+        std::cerr << "testPastPlanRetrieval: expected plan-good first, got "
+                  << (results.empty() ? "none" : results[0].plan_id) << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    for (const auto& r : results) {
+        if (r.plan_id == "plan-low") {
+            std::cerr << "testPastPlanRetrieval: low-success plan should be filtered\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
 static bool testMemoryPruning() {
     Config cfg;
     cfg.database_path = makeTempPath("thoth_pruning_test.db").string();
@@ -1217,6 +1303,8 @@ int main() {
     if (!testProjectAnalyzeTool()) failures++;
     if (!testRunTestsTool()) failures++;
     if (!testCodeModifyTool()) failures++;
+    if (!testAllowShellExecGate()) failures++;
+    if (!testPastPlanRetrieval()) failures++;
     if (!testMemoryPruning()) failures++;
     if (!testFactStore()) failures++;
     if (!testStoreFactTool()) failures++;

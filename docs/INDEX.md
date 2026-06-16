@@ -1,6 +1,6 @@
 # Thoth Documentation Index
 
-**Last Updated:** 2026-03-10  
+**Last Updated:** 2026-06-13  
 **Purpose:** Central navigation for all Thoth documentation
 
 ---
@@ -14,9 +14,11 @@
 4. **[completed_improvements_log.md](completed_improvements_log.md)** — **Authoritative source of truth** for what's actually implemented
 
 ### For Active Development
+- **[cursor_list.md](cursor_list.md)** — **ALIGNMENT BACKLOG** — Claim vs. reality gaps by priority (start here after time away)
 - **[improvements.md](improvements.md)** — **ACTIVE ROADMAP** — Current work items (Phases 3-5 planned, Phases 9-12 complete)
 - **[AGENTS.md](../AGENTS.md)** — Architecture reference and coding guidelines
 - **[TESTING.md](TESTING.md)** — Test structure and how to run tests
+- **[plan_reuse_tuning.md](plan_reuse_tuning.md)** — Tunable plan reuse, trajectory, and reflection thresholds
 
 ---
 
@@ -42,6 +44,7 @@
 | Document | Purpose | Status |
 |----------|---------|--------|
 | **[improvements.md](improvements.md)** | **ACTIVE ROADMAP** — Current work (Phases 3-5) | ✅ Active |
+| **[cursor_list.md](cursor_list.md)** | **ALIGNMENT BACKLOG** — Doc/code/test gaps by priority | ✅ Active |
 | **[completed_improvements_log.md](completed_improvements_log.md)** | **AUTHORITATIVE** — Completed work log | ✅ Authoritative |
 | **[benchmark_results.md](benchmark_results.md)** | Auto-archived GRAG performance metrics | ✅ Auto-updated |
 
@@ -49,7 +52,8 @@
 | Document | Purpose | Status |
 |----------|---------|--------|
 | **[old_improvements.md](old_improvements.md)** | Historical roadmap entries | 📜 Archive |
-| **[basic_agent_design_goal.md](basic_agent_design_goal.md)** | Design philosophy for Basic Agent phase | 📜 Reference |
+| **[VERIFIED_BASELINE.md](VERIFIED_BASELINE.md)** | Locked behavioral baseline for the cognitive spine | 📜 Reference |
+| **[PLAN.md](PLAN.md)** | ExecutiveController design philosophy | 📜 Reference |
 
 **Note:** `next_steps.md` and `about_thoth.md` have been deleted. Their content was merged into `improvements.md` and `README.md` respectively.
 
@@ -97,6 +101,7 @@
 - `TESTING.md` — Test guide (always current)
 - `AGENTS.md` — Main guide (always current)
 - `README.md` — System overview (always current)
+- `cursor_list.md` — Alignment backlog
 - `improvements.md` — Active roadmap
 - `completed_improvements_log.md` — Completed work log
 - `GRAG.md`, `TOOLS.md`, `PLAN.md` — Architecture specs
@@ -104,11 +109,12 @@
 
 ### 📜 Historical / Archive
 - `old_improvements.md` — Historical roadmap
-- `basic_agent_design_goal.md` — Design philosophy reference
+- `VERIFIED_BASELINE.md`, `PLAN.md` — Design baseline and planning architecture reference
 
 ### 🗑️ Deleted (content merged)
 - ~~`next_steps.md`~~ — Merged into `improvements.md` (Phases 9-12 marked complete)
 - ~~`about_thoth.md`~~ — Superseded by `README.md`
+- ~~`basic_agent_design_goal.md`~~ — Superseded by `VERIFIED_BASELINE.md` and `PLAN.md`
 
 ### 📊 Auto-Generated
 - `benchmark_results.md` — Auto-archived from benchmark runs
