@@ -1,11 +1,14 @@
 # Thoth Documentation Index
 
-**Last Updated:** 2026-06-13  
+**Last Updated:** 2026-06-17  
 **Purpose:** Central navigation for all Thoth documentation
 
 ---
 
 ## 🎯 Start Here
+
+### For Users
+1. **[HOWTO.md](HOWTO.md)** — Using `/goal`, goal mode vs chat, confirmations, and what to expect from the agent
 
 ### For New Contributors
 1. **[GETTING_STARTED.md](GETTING_STARTED.md)** — **START HERE** — Setup instructions and first run
@@ -15,7 +18,7 @@
 
 ### For Active Development
 - **[cursor_list.md](cursor_list.md)** — **ALIGNMENT BACKLOG** — Claim vs. reality gaps by priority (start here after time away)
-- **[improvements.md](improvements.md)** — **ACTIVE ROADMAP** — Current work items (Phases 3-5 planned, Phases 9-12 complete)
+- **[improvements.md](improvements.md)** — **ACTIVE ROADMAP** — Phases 3–4 🔶 partial; Phase 5 optional future expansion; Phases 9–12 complete
 - **[AGENTS.md](../AGENTS.md)** — Architecture reference and coding guidelines
 - **[TESTING.md](TESTING.md)** — Test structure and how to run tests
 - **[plan_reuse_tuning.md](plan_reuse_tuning.md)** — Tunable plan reuse, trajectory, and reflection thresholds
@@ -28,7 +31,10 @@
 | Document | Purpose | Status |
 |----------|---------|--------|
 | **[GETTING_STARTED.md](GETTING_STARTED.md)** | Complete setup guide, build instructions, first run | ✅ Current |
-| **[TESTING.md](TESTING.md)** | Test structure, how to run tests, adding new tests | ✅ Current |
+| **[TESTING.md](TESTING.md)** | Unit tests (`ctest`), manual concurrency checks, pipeline tests | ✅ Current |
+| **[TEST_SUITE.md](TEST_SUITE.md)** | TC-01–TC-07 repeatable GUI/log pipeline tests | ✅ Current |
+| **[HOWTO.md](HOWTO.md)** | End-user guide: `/goal`, goal mode, tool confirmations | ✅ Current |
+| **[ui_improvements.md](ui_improvements.md)** | Research console UI status, GRAG troubleshooting, future UI | ✅ Current |
 
 ### Architecture & Design
 | Document | Purpose | Status |
@@ -38,15 +44,18 @@
 | **[GRAG.md](GRAG.md)** | GRAG retrieval architecture specification | ✅ Current |
 | **[TOOLS.md](TOOLS.md)** | Tool system specification (v1.0) | ✅ Current |
 | **[PLAN.md](PLAN.md)** | ExecutiveController and planning architecture | ✅ Current |
-| **[architectural_facts.md](architectural_facts.md)** | Implementation status, audits, known issues | ✅ Current |
+| **[cognate.md](cognate.md)** | Cognate V2 cognitive architecture (thesis reference) | ✅ Current |
+| **[memory_summary.md](memory_summary.md)** | Memory layers, strategy promotion, observability synthesis | ✅ Current |
+| **[architectural_facts.md](architectural_facts.md)** | Implementation status, audit notes; security in `audit.md` | ✅ Current |
 
 ### Roadmaps & Tracking
 | Document | Purpose | Status |
 |----------|---------|--------|
-| **[improvements.md](improvements.md)** | **ACTIVE ROADMAP** — Current work (Phases 3-5) | ✅ Active |
+| **[improvements.md](improvements.md)** | **ACTIVE ROADMAP** — Phases 3–4 partial; Phase 5 future expansion | ✅ Active |
 | **[cursor_list.md](cursor_list.md)** | **ALIGNMENT BACKLOG** — Doc/code/test gaps by priority | ✅ Active |
 | **[completed_improvements_log.md](completed_improvements_log.md)** | **AUTHORITATIVE** — Completed work log | ✅ Authoritative |
 | **[benchmark_results.md](benchmark_results.md)** | Auto-archived GRAG performance metrics | ✅ Auto-updated |
+| **[new_corpus_tests.md](new_corpus_tests.md)** | Research-paper corpus benchmark case design | ✅ Active |
 
 ### Historical / Reference
 | Document | Purpose | Status |
@@ -68,10 +77,15 @@
 → **[completed_improvements_log.md](completed_improvements_log.md)** — Authoritative source
 
 ### "What should I work on next?"
-→ **[improvements.md](improvements.md)** — Active roadmap (Phases 3-5)
+→ **[cursor_list.md](cursor_list.md)** — Alignment backlog by priority  
+→ **[improvements.md](improvements.md)** — Active roadmap (Phases 3–5; see phase table + `completed_improvements_log.md`)
 
 ### "How do I run tests?"
-→ **[TESTING.md](TESTING.md)** — Test guide
+→ **[TESTING.md](TESTING.md)** — Unit tests and manual concurrency checks  
+→ **[TEST_SUITE.md](TEST_SUITE.md)** — TC-01–TC-07 pipeline tests
+
+### "How do I use /goal and goal mode?"
+→ **[HOWTO.md](HOWTO.md)** — User-facing behavior guide
 
 ### "How do I add a tool?"
 → **[TOOLS.md](TOOLS.md)** — Tool specification  
@@ -97,14 +111,14 @@
 ## 📁 Document Categories
 
 ### ✅ Active / Current
-- `GETTING_STARTED.md` — Setup guide (always current)
-- `TESTING.md` — Test guide (always current)
+- `GETTING_STARTED.md`, `HOWTO.md`, `TESTING.md`, `TEST_SUITE.md` — Setup and verification
+- `ui_improvements.md` — Research console UI
 - `AGENTS.md` — Main guide (always current)
 - `README.md` — System overview (always current)
 - `cursor_list.md` — Alignment backlog
 - `improvements.md` — Active roadmap
 - `completed_improvements_log.md` — Completed work log
-- `GRAG.md`, `TOOLS.md`, `PLAN.md` — Architecture specs
+- `GRAG.md`, `TOOLS.md`, `PLAN.md`, `cognate.md`, `memory_summary.md` — Architecture specs
 - `architectural_facts.md` — Status audits
 
 ### 📜 Historical / Archive
@@ -129,6 +143,8 @@ AGENTS.md (overview)
   ├── GRAG.md (retrieval details)
   ├── TOOLS.md (tool system)
   ├── PLAN.md (planning/execution)
+  ├── cognate.md (Cognate V2 architecture)
+  ├── memory_summary.md (memory & learning synthesis)
   └── architectural_facts.md (implementation status)
 ```
 

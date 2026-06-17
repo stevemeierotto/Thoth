@@ -1,6 +1,6 @@
 # Testing Guide
 
-**Last Updated:** 2026-03-10  
+**Last Updated:** 2026-06-17  
 **Purpose:** Complete guide to Thoth's test structure and how to run tests
 
 ---
@@ -405,7 +405,62 @@ perf report
 
 ---
 
-## Test Best Practices
+## Manual Pipeline Tests (GUI + logs)
+
+Repeatable goal/chat pipeline checks with expected log signals: **[TEST_SUITE.md](TEST_SUITE.md)** (TC-01–TC-07). Use with [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md) for regression contract.
+
+**GRAG diagnostics show zero?** See [ui_improvements.md](ui_improvements.md) §10.
+
+---
+
+## Manual Integration Tests (Concurrency)
+
+Post–thread-safety hardening checks for `ExecutiveController` mutex integration. Run with `decision_trace.jsonl` and `grag_benchmark.jsonl` open.
+
+### Test 1 — Basic Goal Activation
+
+1. Start the application.
+2. Run: `/goal improve recommendation system relevance`
+3. While the plan is active, send: `What techniques exist for collaborative filtering?`
+
+**Verify in logs:**
+
+- `grag_benchmark.jsonl`: `goal_present: true`, `scoring_type: grag`
+- `decision_trace.jsonl`: `PLAN_CREATED`, `STEP_STARTED`, `STEP_COMPLETED` (if applicable), plan still active or `PLAN_COMPLETED`
+
+Confirms embedding lifecycle survived mutex integration.
+
+### Test 2 — Concurrent Interrupt
+
+Stress thread restart integrity:
+
+1. Issue a long-running goal (or simulate planner delay).
+2. Immediately issue: `/goal build fraud detection pipeline`
+
+**Expected:**
+
+- First controller thread stops cleanly; embeddings cleared; new `PLAN_CREATED`; no crash; no corrupted SQLite plan; no mixed GRAG state.
+3. Send a normal query and confirm GRAG scoring reflects the **new** goal.
+
+### Test 3 — Pause / Resume Visibility
+
+1. Start a multi-step goal.
+2. Call pause (Agent menu or equivalent).
+3. Confirm loop halts and state-change events appear in the trace.
+4. Call resume; confirm execution continues without duplicated steps.
+
+### What these verify
+
+- No deadlock under rapid goal switching
+- No lost embedding state
+- No partial plan mutation races
+- No stale callback invocation
+- No double `PLAN_COMPLETED` events
+- Consistent `current_index` in logs
+
+If all three pass, the controller is structurally stable for concurrent GUI use.
+
+---
 
 ### ✅ Do
 
@@ -460,4 +515,6 @@ genhtml coverage.info --output-directory coverage/
 **See Also:**
 - [GETTING_STARTED.md](GETTING_STARTED.md) - Build setup
 - [AGENTS.md](../AGENTS.md) - Architecture guide
-- [TEST_SUITE.md](TEST_SUITE.md) - Detailed test specifications (if exists)
+- [TEST_SUITE.md](TEST_SUITE.md) - Manual pipeline tests TC-01–TC-07
+- [ui_improvements.md](ui_improvements.md) - Research console UI status and troubleshooting
+- [HOWTO.md](HOWTO.md) - Using `/goal` and goal mode vs chat

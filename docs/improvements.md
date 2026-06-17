@@ -9,7 +9,7 @@
 
 1. Completed work must be moved to `docs/completed_improvements_log.md`.
 2. Architecture specifications live in: `PLAN.md`, `GRAG.md`, `NODE.md`, `cognate.md`.
-3. Implementation status lives in: `grag_summery.md`, `completed_improvements_log.md`, `architectural_facts.md`. Before implementing any work that touches GRAG or ExecutiveController, read both the relevant spec AND the relevant status file. Status takes precedence on what already exists — do not re-implement or regress completed work.
+3. Implementation status lives in: `GRAG.md` (spec + audit), `completed_improvements_log.md`, `architectural_facts.md`, and `benchmark_results.md`. Before implementing any work that touches GRAG or ExecutiveController, read both the relevant spec AND the relevant status file. Status takes precedence on what already exists — do not re-implement or regress completed work.
 4. Roadmap items must not contradict architecture documents.
 5. This roadmap progresses: core infrastructure → observability → capabilities → memory → research.
 6. **Gemini must pause for confirmation between every step and every phase.**
@@ -45,15 +45,19 @@ Before making any changes:
 
 ## Phase Order
 
+**Legend:** ✅ Complete · 🔶 Partial · 📋 Not started · 🚫 Stub
+
 | # | Phase | Priority | Status |
 |---|---|---|---|
-| 3 | Memory Stability | High | 📋 Planned |
-| 4 | Advanced Reasoning | High | 📋 Planned |
-| 5 | Self-Building Capability | Medium | 📋 Planned |
+| 3 | Memory Stability | High | 🔶 Partial |
+| 4 | Advanced Reasoning | High | 🔶 Partial |
+| 5 | Self-Building Capability | — | 📋 Future expansion (optional) |
 | 9 | LLM-Driven Step Generation | Critical | ✅ Complete (see completed_improvements_log.md) |
 | 10 | Resume Completeness | High | ✅ Complete (see completed_improvements_log.md) |
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
+
+**Active work:** Remaining Phase 3–4 items are listed below with per-step status. **Phase 5 (Self-Building)** is an optional future expansion the owner may revisit — not scheduled active work. Benchmark case design: [`new_corpus_tests.md`](new_corpus_tests.md). See `completed_improvements_log.md` and `cursor_list.md`.
 
 ---
 
@@ -61,13 +65,24 @@ Before making any changes:
 
 # Phase 3 — Memory Stability
 
-**Architecture references:** `GRAG.md`, `memory_summery.md`
+**Phase status:** 🔶 Partial
+
+| Step | Status | Notes |
+|------|--------|-------|
+| 3.1 Pruning design | ✅ | `PruningPolicy`, `archived_turns` schema in code |
+| 3.2 Pruning implementation | 🔶 | Runtime + GUI trim wired (2026-06-16); summarize/age/admin/range restore open |
+| 3.3 Fact Store | ✅ | `FactStore` + `store_fact` tool |
+| 3.4 IVectorStore | 🔶 | `IVectorStore` + `FlatVectorStore`; full benchmark contract tests not done |
+
+**Architecture references:** `GRAG.md`, `memory_summary.md`
 
 **Goal:** Prevent memory bloat, add structured world knowledge, and define the vector store scalability path.
 
 ---
 
-## Step 3.1 — Memory Pruning: Policy Design (NO CODE YET)
+## Step 3.1 — Memory Pruning: Policy Design
+
+**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-05 Memory Stability).
 
 **Description:**
 Design the pruning and archival policy before writing any implementation.
@@ -91,11 +106,11 @@ Preservation rules:
 - Proposed SQLite schema additions: `archived_turns` table
 - Proposed `PruningPolicy` struct definition (header only)
 
-> ⏸ **PAUSE — Wait for confirmation before Step 3.2**
-
 ---
 
 ## Step 3.2 — Memory Pruning: Implementation
+
+**Status:** 🔶 Partial — hot-tier auto-prune + session scoping + GUI trim (2026-06-16). Open: summarize-before-prune, age trigger, `/prune` admin command, range-based restore, full audit metadata.
 
 **Description:**
 Implement the pruning and archival pipeline based on the approved design from Step 3.1.
@@ -113,11 +128,11 @@ Requirements:
 - Updated `SQLiteMemoryRepository` to integrate pruning triggers
 - Unit tests: prune triggers at threshold, restore returns correct turns
 
-> ⏸ **PAUSE — Wait for confirmation before Step 3.3**
-
 ---
 
 ## Step 3.3 — Structured Fact Store
+
+**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-05 Memory Stability).
 
 **Description:**
 Implement a dedicated `facts` SQLite table for structured world knowledge.
@@ -147,11 +162,11 @@ Requirements:
 - `store_fact_tool.h` and `store_fact_tool.cpp`
 - Unit tests: upsert, retrieval, search
 
-> ⏸ **PAUSE — Wait for confirmation before Step 3.4**
-
 ---
 
 ## Step 3.4 — Vector Store Scalability Path
+
+**Status:** 🔶 Partial — `IVectorStore` and `FlatVectorStore` implemented; ingest/latency/memory benchmark contract tests and dual-write stub remain open.
 
 **Description:**
 Define and implement the abstraction layer allowing `IndexManager` to swap vector backends.
@@ -176,24 +191,22 @@ Requirements:
 - Benchmark test scaffold
 - Migration design notes (inline comments or small design doc)
 
-> ⏸ **PAUSE — Wait for confirmation before Phase 3 close-out**
-
 ---
 
 ## Phase 3 Close-Out
 
+**Status:** 🔶 Partial — not all steps complete. Historical checklist:
+
 Before moving to Phase 4:
-- Run full build and unit tests
-- Verify `step_metrics` SQLite table is populated after a goal execution
-- Verify `facts` table exists and `store_fact` tool is accessible via tool registry
-- Confirm `IVectorStore` builds cleanly and existing RAG behavior is unchanged
+- ✅ Run full build and unit tests
+- ✅ Verify `facts` table exists and `store_fact` tool is accessible via tool registry
+- ✅ Confirm `IVectorStore` builds cleanly and existing RAG behavior is unchanged
+- 🔶 Verify `step_metrics` populated after goal execution (infrastructure exists; manual verify optional)
+- 🔶 Pruning: summarize-before-archive, age policy, admin restore path
 
-**Summarize:**
-- Files created
-- Files modified
-- Any deferred items
+**Deferred:** Vector store benchmark contract suite; pruning warm-tier summarization.
 
-> ⏸ **PAUSE — Confirm Phase 3 complete before starting Phase 4**
+> Phase 3 remains **partial**. Remaining work tracked in Step 3.2 and 3.4 above.
 
 ---
 
@@ -201,13 +214,27 @@ Before moving to Phase 4:
 
 # Phase 4 — Advanced Reasoning
 
+**Phase status:** 🔶 Partial
+
+| Step | Status | Notes |
+|------|--------|-------|
+| 4.1 ProblemState design | ✅ | `problem_state.h` + loop design |
+| 4.2 Scientific execution mode | ✅ | `ScientificExecutionMode`; Cognate V2 (2026-03-28) |
+| 4.3 Strategy memory / hints | ✅ | `StrategyEngine` + planner injection (not separate `StrategyMemory` class) |
+| 4.4 Hierarchical subgoals | 📋 | Not implemented |
+| 4.5 Trajectory awareness | 🔶 | `TrajectoryBuilder` + scoring path; $w_t=0.2$ local; mixed benchmark lift |
+| 4.6 Adaptive graph learning | ✅ | `GraphRefiner` operational |
+| 4.7 Model upgrade path | 📋 | Design/doc step not closed out |
+
 **Architecture references:** `PLAN.md`, `GRAG.md`, `cognate.md`, `README.md`
 
 **Goal:** Implement structured scientific reasoning, strategy reuse, and advanced GRAG retrieval modes.
 
 ---
 
-## Step 4.1 — Scientific Reasoning Engine: ProblemState Design (NO CODE YET)
+## Step 4.1 — Scientific Reasoning Engine: ProblemState Design
+
+**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-28 Cognate V2).
 
 **Description:**
 Design the `ProblemState` structure and hypothesis lifecycle before writing implementation.
@@ -241,11 +268,11 @@ Define convergence criteria:
 - `problem_state.h` header (struct + enums only)
 - Written loop design (pseudocode or description)
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.2**
-
 ---
 
 ## Step 4.2 — Scientific Reasoning Engine: Implementation
+
+**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-28 Cognate V2).
 
 **Description:**
 Implement the scientific reasoning loop using the Strategy Pattern (per `PLAN.md`).
@@ -265,11 +292,11 @@ Requirements:
 - Updated `ExecutiveController` to activate `ScientificExecutionMode` on classification
 - Unit tests: loop runs minimum iterations, convergence halts loop
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.3**
-
 ---
 
 ## Step 4.3 — Strategy Memory & Tool Metrics
+
+**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-28 strategy promotion; planner injection).
 
 **Description:**
 Expand the Plan History system to prefer historically successful strategies.
@@ -288,11 +315,11 @@ Requirements:
 - Updated `IPlanner` interface to accept `StrategyHints`
 - Unit tests: verify strategy hints influence plan tool selection
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.4**
-
 ---
 
 ## Step 4.4 — GRAG Upgrade: Hierarchical Goals
+
+**Status:** 📋 Not started — see `GRAG.md` audit note; `cursor_list.md` P1.4.
 
 **Description:**
 Implement subgoal tree support per `grag_upgrade.md` Upgrade #1.
@@ -311,11 +338,11 @@ Requirements:
 - Updated `ExecutiveController` to manage subgoal activation
 - Unit tests: verify directional scoring uses active subgoal, not root goal
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.5**
-
 ---
 
 ## Step 4.5 — GRAG Upgrade: Trajectory Awareness
+
+**Status:** 🔶 Partial — infrastructure complete; $w_t=0.2$ in local `retrieval_config.json`; executive zeroes weight when trajectory empty. Tuning doc: `plan_reuse_tuning.md`.
 
 **Description:**
 Implement progress-aware retrieval per `grag_upgrade.md` Upgrade #2.
@@ -351,13 +378,11 @@ New SQLite table: `episode_steps`
 - Updated `GragDiagnostics` struct
 - Unit tests: verify trajectory shifts retrieval scores vs. baseline
 
-> ⏸ **PAUSE — Wait for confirmation before Step 4.6**
-
 ---
 
 ## Step 4.6 — GRAG Hardening: Adaptive Graph Learning
 
-**Status: [COMPLETE]**
+**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-05 GRAG Phase 8 / GraphRefiner).
 Dynamic graph edge learning is now fully operational. Edge weights are adjusted via `GraphRefiner` based on execution success/failure using a logistic learning rule (learning_rate=0.2).
 
 **Completed:**
@@ -372,6 +397,8 @@ Dynamic graph edge learning is now fully operational. Edge weights are adjusted 
 ---
 
 ## Step 4.7 — Model Upgrade Path
+
+**Status:** 📋 Not started — design/documentation step.
 
 **Description:**
 Define the abstraction layer and migration playbook for adopting larger models.
@@ -391,32 +418,41 @@ Requirements:
 - Updated `LLMInterface` with `ModelConfig` abstraction
 - Migration playbook as inline comments or a small `.md` file
 
-> ⏸ **PAUSE — Wait for confirmation before Phase 4 close-out**
-
 ---
 
 ## Phase 4 Close-Out
 
-Final validation before marking roadmap complete:
-- Run full build and unit tests
-- Run a scientific goal end-to-end: verify loop iterations and `ProblemState` persistence
-- Run a standard goal: verify subgoal tree is generated and GRAG uses active subgoal
-- Check `grag_benchmark.jsonl` — confirm trajectory weight field is present
-- Confirm strategy hints are visible in planner trace logs
+**Status:** 🔶 Partial — not all steps complete. Historical checklist:
 
-**Summarize:**
-- Files created
-- Files modified
-- Any deferred items
-- Recommended next roadmap additions
+Final validation:
+- ✅ Run full build and unit tests
+- ✅ Run scientific goal: loop iterations and `ProblemState` persistence (Cognate V2 tests)
+- ✅ Strategy hints visible in planner trace / injection events
+- ✅ `grag_benchmark.jsonl` includes graph and trajectory fields
+- 📋 Standard goal with subgoal tree (Step 4.4 not implemented)
+- 📋 Model upgrade playbook (Step 4.7)
 
-> ⏸ **PAUSE — Confirm Phase 4 complete. Roadmap cycle complete.**
+**Deferred:** Hierarchical subgoals (4.4); full trajectory tuning (4.5); model migration playbook (4.7).
 
----
+> Phase 4 remains **partial**. Core Cognate V2 reasoning path is operational.
 
 ---
 
-# Phase 5 — Self-Building Capability
+---
+
+# Phase 5 — Self-Building Capability *(optional future expansion)*
+
+**Phase status:** 📋 **Not scheduled** — possible expansion the owner may try later. Existing tools (`project_analyze`, `run_tests`, `code_modify` read) remain registered; **`apply_diff` is a stub** and is not on the active roadmap.
+
+> **Owner note (2026-06-17):** Self-building is an idea for later, not current development priority. Steps below are retained as a **reference spec** if this direction is picked up again.
+
+| Step | Status | Notes |
+|------|--------|-------|
+| 5.1 `project_analyze` | ✅ | Registered; unit tested |
+| 5.2 `run_tests` | ✅ | Registered; `allow_shell_exec` gate (P1.5) |
+| 5.3 `code_modify` read | ✅ | Read operation works |
+| 5.3 `apply_diff` | 🚫 Stub | Not planned until owner schedules Phase 5 |
+| 5.4 build + revert | 📋 | Future expansion only |
 
 **Architecture references:** `PLAN.md`, `TOOLS.md`
 
@@ -429,6 +465,8 @@ Final validation before marking roadmap complete:
 ---
 
 ## Step 5.1 — `project_analyze` Tool
+
+**Status:** ✅ Complete — see `completed_improvements_log.md` (Self-Building prototype).
 
 **Description:**
 Implement a tool that scans the Thoth source directory and returns a structured project graph.
@@ -448,11 +486,11 @@ Requirements:
 - Registration in `ToolRegistry`
 - Unit test: verify output schema on a known directory structure
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.2**
-
 ---
 
 ## Step 5.2 — `run_tests` Tool
+
+**Status:** ✅ Complete — see `completed_improvements_log.md`; shell gating in P1.5.
 
 **Description:**
 Implement a tool that executes the Thoth unit test suite and returns structured results.
@@ -470,11 +508,11 @@ Requirements:
 - Registration in `ToolRegistry`
 - Unit test: verify structured output parsing on a known test result
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.3**
-
 ---
 
 ## Step 5.3 — `code_modify` Tool (Read + Diff)
+
+**Status:** 🔶 Partial — **read** ✅; **apply_diff** 🚫 stub. Phase 5 is **optional future expansion** — not active work (`cursor_list.md` P1.2).
 
 **Description:**
 Implement the read and diff-application capability of the coding agent tool.
@@ -502,11 +540,11 @@ Requirements:
 - Registration in `ToolRegistry`
 - Unit tests for: read, valid diff apply, invalid diff rejection, path traversal rejection
 
-> ⏸ **PAUSE — Wait for confirmation before Step 5.4**
-
 ---
 
 ## Step 5.4 — `code_modify` Tool (Build + Revert)
+
+**Status:** 📋 Not started — depends on working `apply_diff` (Step 5.3).
 
 **Description:**
 Extend `code_modify` with build verification and automatic revert on failure.
@@ -525,24 +563,22 @@ Requirements:
 - Updated `code_modify_tool.cpp`
 - Unit test: verify revert behavior on a simulated build failure
 
-> ⏸ **PAUSE — Wait for confirmation before Phase 5 close-out**
-
 ---
 
 ## Phase 5 Close-Out
 
+**Status:** 🔶 Partial — not all steps complete. Historical checklist:
+
 Before moving to next Roadmap iteration:
-- Run full build and unit tests
-- Manually verify: ask agent to analyze the project — confirm structured output
-- Manually verify: ask agent to read a source file — confirm it returns contents
-- Confirm all tools registered in `ToolRegistry` and appear in system prompt
+- ✅ Run full build and unit tests
+- ✅ `project_analyze` and `run_tests` registered and in tool prompt
+- ✅ `code_modify` read verified
+- 🚫 `apply_diff` not functional (stub)
+- 📋 Build + revert automation (Step 5.4)
 
-**Summarize:**
-- Files created
-- Files modified
-- Any deferred items
+**Deferred:** Unified diff apply (P1.2 low priority); build/revert pipeline.
 
-> ⏸ **PAUSE — Confirm Phase 5 complete.**
+> Phase 5 is **optional future expansion**, not active roadmap work. Harness tools exist; code modification is not a current goal.
 
 ---
 
@@ -609,6 +645,6 @@ These tools can be implemented independently of the phase structure above. They 
 
 **Note:** This phase was completed. The implementation details are preserved below for reference, but work has been completed and moved to the completed log.
 
-**Architecture references:** `TOOLS.md`, `basic_agent_design_goal.md`, `PLAN.md`
+**Architecture references:** `TOOLS.md`, `PLAN.md`, `VERIFIED_BASELINE.md`
 
-**Goal:** Re-enable the tool system after the three Basic Agent criteria from `basic_agent_design_goal.md` are verified met. Introduce the first production-grade extended tools and validate the agent operates safely and correctly with tools active.
+**Goal:** Re-enable the tool system after the cognitive spine baseline criteria in `VERIFIED_BASELINE.md` are verified met. Introduce the first production-grade extended tools and validate the agent operates safely and correctly with tools active.

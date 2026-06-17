@@ -6,7 +6,7 @@
 
 ## Overview
 
-Thoth is an autonomous agent platform built on the **Cognate V2 Architecture** — a disciplined, industrial-grade framework for **Experience-Guided Autonomous Reasoning**. It separates the concerns of Planning, Execution, Memory, and Action into clean abstractions, then wires them together into a self-correcting, self-building cognitive loop.
+Thoth is an autonomous agent platform built on the **Cognate V2 Architecture** — a disciplined, industrial-grade framework for **Experience-Guided Autonomous Reasoning**. It separates the concerns of Planning, Execution, Memory, and Action into clean abstractions, then wires them into a self-correcting cognitive loop.
 
 The system has evolved into a **Scientific Research Console**, designed to provide empirical proof of autonomous learning, strategy adoption, and iterative problem-solving for advanced thesis validation.
 
@@ -60,6 +60,8 @@ A real-time directed graph visualization that highlights which part of the archi
 ### `run_cognate_benchmark`
 A dedicated research tool for performing comparative analysis (Standard vs. Scientific mode) and measuring the "Learning Curve" of strategy adoption.
 
+> **Benchmark caveat:** Cognate benchmark runs in `benchmark_results.md` report **0.00\*** task success rates in the mock environment. Metrics such as reasoning depth, SCR, and strategy promotion remain meaningful; end-to-end task completion is **not** implied by those runs.
+
 ### Explainable Retrieval (`ScoreBreakdown`)
 Every retrieved chunk carries a `ScoreBreakdown` providing "Why this document?" transparency across Query, Goal, Trajectory, Keyword, and Graph signals.
 
@@ -74,9 +76,23 @@ Every retrieved chunk carries a `ScoreBreakdown` providing "Why this document?" 
 | ✅ Complete | Cognitive Loop Graph & "Plan vs. Reality" Visualization |
 | ✅ Complete | Stable UI Sidebar Architecture & AddCollapsiblePane helper |
 | ✅ Complete | Adaptive Graph Learning & Multi-Index Routing |
-| 📋 Planned | Phase 3: Memory Stability (Pruning, Archiving) |
-| 📋 Planned | Phase 5: Self-Building Capability (Unified Diff Application) |
-| 📋 Planned | Subgoal Tree Trees (Hierarchical Decomposition) |
+| 🔶 Partial | Phase 3: Memory Stability (hot-tier prune wired; summarize/age restore open) |
+| 🔮 Future expansion | Phase 5: Self-Building (optional — owner may try later; `apply_diff` stub today) |
+| 📋 Planned | Subgoal Trees (Hierarchical Decomposition) |
+
+---
+
+## Known gaps
+
+Authoritative detail: [`GRAG.md`](GRAG.md) §1 audit box, [`audit.md`](audit.md), [`cursor_list.md`](cursor_list.md).
+
+| Area | Status |
+|------|--------|
+| Hierarchical subgoals | Not implemented |
+| Trajectory weight $w_t$ | Active locally (0.2); mixed lift on some benchmark buckets |
+| `code_modify` / `apply_diff` | Stub — self-building is optional future expansion, not scheduled |
+| NODE harness | Spec only (`NODE.md`) — not built in repo |
+| Trace-log resume | Observability only; SQLite is authoritative for crash resume |
 
 ---
 

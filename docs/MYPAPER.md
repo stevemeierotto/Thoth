@@ -126,21 +126,15 @@ score =
 
 This hybrid scoring allows the system to retrieve not only semantically similar documents but also documents connected through previously observed reasoning paths.
 
-3.4 Adaptive Graph Learning (Planned Extension)
+3.4 Adaptive Graph Learning (Implemented)
 
-While the current implementation uses static graph weights, the architecture is designed to support adaptive graph learning.
+Dynamic graph edge learning is operational via `GraphRefiner`. Edge weights are adjusted from execution trajectories using a logistic learning rule (learning rate 0.2). Graph density and contribution metrics are logged in `GragDiagnostics` and `grag_benchmark.jsonl` (see `completed_improvements_log.md`, 2026-03-12).
 
-Future versions of GRAG will dynamically update graph edge weights based on successful task trajectories.
-
-Successful retrieval sequences will increase the weight of edges linking relevant nodes, enabling the system to learn retrieval strategies from experience.
-
-This mechanism effectively allows the retrieval graph to evolve into a knowledge navigation map reflecting successful reasoning paths.
-
-Metrics for graph evolution, such as graph density and trajectory reinforcement strength, are planned for inclusion in GRAG evaluation logs.
+The retrieval graph therefore evolves toward paths that correlate with successful reasoning, complementing the static hybrid vector + graph score in §3.3.
 
 4 Experimental Evaluation
 
-A benchmark comparison was conducted between standard RAG retrieval and GRAG retrieval within a controlled sandbox corpus containing 563 document chunks.
+Benchmarks compared standard RAG and GRAG on progressively harder corpora (full archive: `benchmark_results.md` in the Thoth repository). The canonical evaluation uses a **311-chunk research-paper corpus** with a **100-case hardened test suite** (2026-03-14), designed to stress goal-disambiguation and distractor noise.
 
 The evaluation measured:
 
@@ -150,15 +144,15 @@ Mean Reciprocal Rank
 
 nDCG@5
 
-Results indicate consistent improvements in retrieval performance for tasks where goal context disambiguates the query.
+Results indicate consistent improvements in retrieval performance for tasks where goal context disambiguates the query. Mean nDCG@5 deltas shrink as corpus size and case difficulty increase; the strongest signal is on **goal-disambiguation** cases, not the corpus-wide mean alone.
 
-Benchmark Summary
-Metric	RAG	GRAG
-Precision@5	0.227	0.307
-MRR	0.241	0.332
-nDCG@5	0.210	0.266
+Benchmark Summary (canonical — 311 chunks, 100 hardened cases, 2026-03-14)
+Metric	RAG	GRAG	Delta
+Precision@5	0.510	0.546	+0.036
+MRR	0.608	0.679	+0.071
+nDCG@5	0.516	0.557	+0.041
 
-Performance gains were particularly strong in goal-disambiguation tasks, where GRAG achieved a +0.220 improvement in nDCG.
+Performance gains were particularly strong in goal-disambiguation tasks, where GRAG achieved a **+0.202 nDCG@5** improvement over baseline RAG on that case bucket (same run). An early 100-chunk sandbox (2026-03-09) showed +0.200 mean nDCG@5 — useful for prototype validation but not representative of hardened suites.
 
 These results support the hypothesis that goal-aware retrieval improves information relevance in multi-step reasoning contexts.
 
@@ -184,8 +178,7 @@ This suggests that goal-aware retrieval may be particularly valuable for autonom
 
 Several extensions to GRAG remain under development:
 
-Adaptive Graph Learning
-Dynamic reinforcement of graph edges based on successful reasoning trajectories.
+~~Adaptive Graph Learning~~ — **Implemented** (2026-03; `GraphRefiner`, see §3.4)
 
 Trajectory-Based Retrieval Metrics
 Measuring retrieval contribution to goal completion.

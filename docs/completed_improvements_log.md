@@ -1,13 +1,42 @@
 # Completed Improvements Log
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 **NOTE ON DOCUMENTATION ACCURACY (2026-03-30)**: An internal audit revealed that some features listed as "complete" are actually in a prototype or stub state. This document is being updated to reflect the actual implementation status:
-- **Self-Building Capability**: The harness exists (analyzing, testing), but the `apply_diff` operation is currently a non-functional stub.
+- **Self-Building Capability**: Harness tools exist (`project_analyze`, `run_tests`, `code_modify` read); **`apply_diff` is a stub**. Treated as **optional future expansion** — not scheduled active work (2026-06-17).
 - **Trajectory Awareness**: Infrastructure is implemented; production `retrieval_config.json` sets `trajectory: 0.2` (2026-06-15). Benchmark shows mixed lift on `TRAJECTORY_DISAMBIGUATES` cases — see `docs/plan_reuse_tuning.md`.
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
+
+### 2026-06-17 (P2.6 — Benchmark Interpretation)
+
+- **`benchmark_results.md`:** “How to Read These Runs” guide (corpus / case mix / when to cite which delta).
+- **`GRAG.md`:** Validation status corpus-qualified; §5 split canonical (100-case, +0.041 / +0.202) vs early sandbox (+0.200); trajectory audit → PARTIAL; self-building → optional future expansion.
+- **`MYPAPER.md` (Zenodo):** §4 table and claims aligned to Mar 14 hardened 100-case run; removed stale 563-chunk figures.
+- **`AGENTS.md`:** GRAG empirical validation line updated to match canonical benchmark.
+
+### 2026-06-17 (P2.5 — Scratch Doc Cleanup)
+
+- Merged UI scratch notes into `ui_improvements.md` §9–§12; merged `TEST.md` concurrency protocol into `TESTING.md`.
+- Deleted: `tmp.md`, `tmp2.md`, `tmp_ui.md`, `tmp_tools.md`, `tmp_science.md`, `qwen_reply.md`, `TEST.md`, `gemini_thoughts.md`.
+- Linked `HOWTO.md`, `new_corpus_tests.md`; banner on `old_improvements.md`.
+
+### 2026-06-17 (P2.4 — Narrative Doc Honesty)
+
+- **`README.md`**: Known gaps table; Cognate benchmark caveat; Phase 3 partial.
+- **`COGNATE_V2.md`**: Typo fix; mock-environment footnote for 51× reasoning depth.
+- **`MYPAPER.md`**: §3.4 Adaptive Graph Learning marked implemented; §4 benchmark table aligned to hardened 100-case run (P2.6).
+- **`cognate.md`**: §5 future frontiers aligned with graph learning complete and self-building as optional expansion.
+- **Removed** `gemini_thoughts.md` (superseded by `README.md`, `audit.md`, `cursor_list.md`).
+
+### 2026-06-17 (P2.3 — Roadmap Phase Table Alignment)
+
+- **Goal**: Align `improvements.md` Phase 3–5 table and step headers with `completed_improvements_log.md` reality.
+- **Phase Order table**: Phases 3–5 marked 🔶 Partial with status legend.
+- **Per-phase rollups**: Step-level ✅ / 🔶 / 📋 / 🚫 status tables added for Phases 3, 4, 5.
+- **Step headers**: Completed steps point to log entries; pause gates removed from finished work.
+- **Close-outs**: Phase 3–5 close-out checklists updated to show what passes vs. deferred today.
 
 ### 2026-06-16 (P1.6 — Memory Pruning Integration + GUI Hot-Tier Trim)
 

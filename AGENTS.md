@@ -4,8 +4,8 @@
 
 This document describes the architecture, conventions, and critical rules for this project. Following these guidelines ensures changes integrate cleanly and preserve the system's design integrity.
 
-**Last Updated**: 2026-03-10  
-**Status**: Current — reflects completed work through Phase 12 and Memory Stability improvements
+**Last Updated**: 2026-06-17  
+**Status**: Current — reflects completed work through P1.6 and Cognate V2
 
 ---
 
@@ -111,6 +111,7 @@ This document describes the architecture, conventions, and critical rules for th
 ### Data Flow
 
 **Goal Execution Flow:**
+
 ```
 User Input
   ↓
@@ -131,6 +132,7 @@ Plan Completion → Memory Persistence
 ```
 
 **Retrieval Flow (GRAG):**
+
 ```
 Query/Goal
   ↓
@@ -202,6 +204,7 @@ Thoth/
 **⚠️ NEVER manually edit memory files. They are managed by the memory system.**
 
 **Key Features**:
+
 - **Crash Recovery & Resumability**: Full execution state persisted in real-time. Agent can resume any goal after crash via `resume_from_plan()`
 - **FactStore**: Persistent store for structured world knowledge (separate from episodic memory)
 - **Plan History Reuse**: `MemoryRepository` retrieves past successful plans by directional similarity
@@ -209,9 +212,10 @@ Thoth/
 ### GRAG (Goal-Relative Adaptive Graph Retrieval)
 
 **Status**: ✅ Fully operational — Core scoring, multi-index routing, graph memory prototype  
-**Empirical Validation**: +0.200 nDCG@5 improvement over baseline RAG (verified 2026-03-10)
+**Empirical Validation**: +0.041 mean nDCG@5 on hardened 100-case research corpus (2026-03-14); +0.202 on goal-disambiguation bucket. Early 100-chunk sandbox showed +0.200 mean (2026-03-09) — see `docs/benchmark_results.md`
 
 **Core Files**:
+
 - `rag.cpp` / `rag.h` — Orchestrates GRAG retrieval pipeline
 - `grag_scorer.cpp` — Implements directional scoring (`D = G - C`)
 - `vector_store.cpp` / `i_vector_store.h` — Vector store abstraction (enables future migration to production databases)
@@ -219,6 +223,7 @@ Thoth/
 - `embedding_engine.cpp` — Generates embeddings via Ollama REST API (`nomic-embed-text`)
 
 **Key Features**:
+
 - **Directional Retrieval**: Scores documents by alignment with `D = G - C` (Goal minus Current State)
 - **Adaptive Blending**: Dynamically adjusts balance between semantic similarity and goal-directed retrieval
 - **Multi-Index Routing**: Three modes (`PLAN_AWARE`, `GOAL_ONLY`, `CONVERSATIONAL`) with automated fallback
@@ -229,10 +234,12 @@ Thoth/
 **⚠️ Changes here affect retrieval quality. Tread carefully and verify with tests.**
 
 **Planned Upgrades** (not yet implemented):
-- Trajectory Awareness activation (`w_t = 0.2` currently stubbed to 0.0)
+
 - Hierarchical Subgoal Trees (active subgoal embedding per subgoal)
 
 **Completed Upgrades**:
+
+- Trajectory-aware retrieval: $w_t = 0.2$ active in local `retrieval_config.json` (gitignored runtime file); executive zeroes weight when trajectory embedding is empty
 - Dynamic Graph Edge Learning: Edge weights are now dynamically adjusted via `GraphRefiner` based on execution success/failure. Graph density metrics are logged in retrieval diagnostics.
 
 ### Tool System
@@ -242,11 +249,13 @@ Thoth/
 **Specification**: See `docs/TOOLS.md v1.0` for complete contract
 
 **Key Files**:
+
 - `tools.cpp` / `tools.h` — `ToolRegistry` implementation
 - `itool.h` — Base interface (`ITool`) with `requires_confirmation()` support
 - Individual tool implementations in `*_tool.h` / `*_tool.cpp`
 
 **Registered Tools** (9 total):
+
 1. `summarize_text` — Text summarization
 2. `gmail_read_labels` — Gmail label reading
 3. `gmail_read_messages` — Gmail message reading
@@ -258,6 +267,7 @@ Thoth/
 9. `self_correct` — In-step self-correction reasoning (requires `LLMInterface` initialization)
 
 **Critical Rules**:
+
 - All tools must be registered through `ToolRegistry`
 - **Never** add hardcoded virtual methods to a base class
 - Tools use JSON in, JSON out interfaces
@@ -265,6 +275,7 @@ Thoth/
 - Tools must never access memory/database directly — all access goes through runtime
 
 **Adding a New Tool**:
+
 1. Implement `ITool` interface (see `itool.h`)
 2. Create tool class inheriting from `ITool`
 3. Register in `ToolRegistry::ToolRegistry()` constructor or `initialize()` method
@@ -276,6 +287,7 @@ Thoth/
 **Status**: ✅ Fully operational — Thread-safe, resumable, observable state machine
 
 **Core Files**:
+
 - `executive_controller.cpp` / `executive_controller.h` — Main orchestration engine
 - `plan.h` / `plan.cpp` — Plan data structures with JSON serialization
 - `iplanner.h` — Planner interface (implemented by `LLMPlanner`)
@@ -284,6 +296,7 @@ Thoth/
 - `scientific_execution_mode.cpp` — Scientific hypothesis testing mode
 
 **Key Features**:
+
 - **Full Lifecycle Management**: `PLANNING → EXECUTING_STEP → OBSERVING_RESULT → REVISING_PLAN → COMPLETED`
 - **Thread-Safe**: Protected via `std::mutex` with `std::lock_guard` across all shared state
 - **Structured Event Emission**: All events logged to `decision_trace.jsonl` via `DecisionTraceLogger` with schema versioning
@@ -294,6 +307,7 @@ Thoth/
 - **GRAG Integration**: Updates goal/current/trajectory embeddings for directional retrieval
 
 **State Machine**:
+
 ```
 IDLE → PLANNING → EXECUTING_STEP → OBSERVING_RESULT → [REVISING_PLAN] → COMPLETED
                                                       ↓
@@ -306,6 +320,7 @@ IDLE → PLANNING → EXECUTING_STEP → OBSERVING_RESULT → [REVISING_PLAN] �
 **Security**: `ConstraintChecker` enforces global security policies
 
 **Pipeline Stages** (see `logs/decision_trace.jsonl`):
+
 1. Input processing
 2. Memory retrieval (GRAG with directional scoring)
 3. Prompt assembly (includes available tools if enabled)
@@ -320,6 +335,7 @@ IDLE → PLANNING → EXECUTING_STEP → OBSERVING_RESULT → [REVISING_PLAN] �
 **File**: `prompt_factory.cpp`
 
 Assembles the final prompt sent to the model, including:
+
 - System instructions
 - Retrieved context from GRAG (with explainable `ScoreBreakdown`)
 - Available tools (from `ToolRegistry::getAvailableTools()` when `Config::enable_tools` is true)
@@ -343,11 +359,13 @@ Abstracts the model backend. Currently supports Ollama local models.
 **Status**: ✅ Implemented — Analyzes execution trajectories to surface reusable patterns
 
 **Core Files**:
+
 - `strategy_engine.cpp` / `strategy_engine.h` — Pattern detection and strategy promotion
 - `trajectory_builder.cpp` / `trajectory_builder.h` — Builds semantic trajectory embeddings
 - `step_metrics_repository.cpp` — Tracks tool success rates and latency
 
 **Key Features**:
+
 - **TrajectoryBuilder**: Summarizes last N execution steps into semantic vector `T` (currently stubbed in scoring)
 - **StrategyEngine**: Analyzes trajectories to surface repeating successful patterns (e.g., `search → parse → summarize`)
 - **Strategy Hints**: Informs planner to prefer high-success tools when multiple options exist
@@ -357,10 +375,12 @@ Abstracts the model backend. Currently supports Ollama local models.
 **Status**: ✅ Implemented — Global security enforcement with confirmation gates
 
 **Core Files**:
+
 - `constraint_checker.cpp` / `constraint_checker.h` — Global security policy enforcement
 - Integrated into `CommandProcessor` for both standard interaction and goal execution
 
 **Key Features**:
+
 - **Tool Confirmation System**: `requires_confirmation()` enforced across all risky operations
 - **Sandbox Boundaries**: `IndexManager` hard-rejects requests outside `agent_workspace/`
 - **Constraint Checking**: Validates operations before execution
@@ -460,18 +480,18 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 1. Locate the correct component (see Architecture section)
 2. Follow coding conventions
 3. If adding a tool:
-   - Implement `ITool` interface
-   - Register in `ToolRegistry`
-   - Follow `docs/TOOLS.md v1.0` specification
-   - Add `requires_confirmation()` if operation is risky
+  - Implement `ITool` interface
+  - Register in `ToolRegistry`
+  - Follow `docs/TOOLS.md v1.0` specification
+  - Add `requires_confirmation()` if operation is risky
 4. If modifying GRAG pipeline:
-   - Verify retrieval quality with benchmarks
-   - Update `retrieval_config.json` if weights change
-   - Check `docs/GRAG.md` for scoring formula
+  - Verify retrieval quality with benchmarks
+  - Update `retrieval_config.json` if weights change
+  - Check `docs/GRAG.md` for scoring formula
 5. If modifying ExecutiveController:
-   - Maintain thread-safety (use `std::lock_guard`)
-   - Emit events via `DecisionTraceLogger`
-   - Preserve resumability (ensure state is persisted)
+  - Maintain thread-safety (use `std::lock_guard`)
+  - Emit events via `DecisionTraceLogger`
+  - Preserve resumability (ensure state is persisted)
 6. Update tests in `tests/unit_tests.cpp` if interfaces change
 
 ### After Making Changes
@@ -487,6 +507,7 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 ## Reference Files
 
 ### Architecture & Design
+
 - **GRAG Specification**: `docs/GRAG.md` — Complete GRAG architecture and scoring formula
 - **Tool System Spec**: `docs/TOOLS.md` — Tool contract and implementation requirements
 - **Planning Architecture**: `docs/PLAN.md` — ExecutiveController design principles
@@ -494,11 +515,13 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 - **Architectural Facts**: `docs/architectural_facts.md` — Implementation status and audit results
 
 ### Build & Configuration
+
 - **Build Configuration**: `CMakeLists.txt`, `CMakePresets.json`
 - **Dependencies**: `DEPENDENCIES.md`
 - **Retrieval Config**: `agent_workspace/retrieval_config.json` — Locked GRAG weights
 
 ### Tracking & Logs
+
 - **Active Roadmap**: `docs/improvements.md` — Current improvement phases
 - **Completed Work**: `docs/completed_improvements_log.md` — **Authoritative source of truth for completed features**
 - **Benchmark Results**: `docs/benchmark_results.md` — Auto-archived performance metrics
@@ -506,6 +529,7 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 - **GRAG Metrics**: `logs/grag_benchmark.jsonl` — Retrieval math performance monitoring
 
 ### Core Implementation
+
 - **Core Agent Library**: `external/basic_agent/src/`, `external/basic_agent/include/`
 - **GUI Bridge**: `src/AgentInterface.cpp` — Interface between GUI and core library
 
@@ -514,32 +538,43 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 ## Current System Status
 
 ### ✅ Fully Implemented
+
 - GRAG retrieval with directional scoring and graph memory
 - ExecutiveController with thread-safety and crash recovery
 - Dynamic planning and plan revision
+- Reflection replan loop (verified via `testReflectionLoop`)
+- Plan history reuse with observability events
 - 9-tool system with confirmation gates
+- `allow_shell_exec` config gate on shell-backed tools
 - FactStore for structured knowledge
 - Strategy Engine and trajectory learning infrastructure
 - Scientific execution mode
+- Memory pruning (hot-tier auto-archive + GUI session trim)
 - Security enforcement (ConstraintChecker, sandbox boundaries)
 
 ### 🔬 Prototype / Partial
-- Self-building capabilities: infrastructure for project analysis and test execution is active, but code modification (`apply_diff`) is a stub.
-- Trajectory Awareness: infrastructure is implemented, but the trajectory weight (`w_t`) is currently set to 0.0 in the default configuration.
+
+- Memory pruning: summarize-before-archive, age-based trigger, and range restore not yet implemented.
+- Trajectory retrieval: $w_t$ active locally; mixed lift on trajectory-disambiguation benchmark cases (see `plan_reuse_tuning.md`).
 
 ### 📋 Planned
+
 - Hierarchical Subgoal Trees (active subgoal embedding per subgoal)
-- Trajectory Awareness activation (enabling non-zero weights in retrieval)
-- Memory Pruning and Archival policies
+
+### 🔮 Future expansion (optional — not scheduled)
+
+- **Self-building:** `project_analyze`, `run_tests`, and `code_modify` read exist as tools; `**apply_diff` is a stub**. Owner may revisit unified diff / build automation later — not active roadmap work.
 
 ### 🚫 Stub / Not Implemented
-- `code_modify` tool's `apply_diff` operation (currently returns a prototype error)
+
+- `code_modify` tool's `apply_diff` operation (prototype error only; see Future expansion above)
 
 ---
 
 ## Questions or Clarifications?
 
 If you're unsure about any architectural decision or coding convention:
+
 1. Refer to `docs/completed_improvements_log.md` for what's actually implemented
 2. Check `docs/architectural_facts.md` for implementation status and known issues
 3. Review relevant architecture docs (`GRAG.md`, `TOOLS.md`, `PLAN.md`)

@@ -3,6 +3,13 @@
 # Date: 2026-03-12
 # Status: LOCKED — Do not modify without running all tests in TEST_SUITE.md
 
+> **Supersession note (2026-06-17):** This baseline remains the regression contract for
+> TC-01–TC-06 pipeline behavior below. **Cognate V2** work (scientific mode, strategy
+> injection, reflection replan, LLM planner, plan reuse, etc.) post-dates this lock.
+> Re-run `TEST_SUITE.md` TC-01–TC-07 and full `ctest` before treating pass dates as current.
+> Baseline §1 references `DefaultPlanner`; production may use `LLMPlanner` — re-verify
+> TC-02 plan structure on the next manual baseline pass.
+
 ---
 
 ## What This Document Is
@@ -141,13 +148,14 @@ These are known gaps that are NOT failures — they are documented future work:
 
 1. Resume from trace log is incomplete (authoritative resume uses SQLite).
 2. plan.updated_at_ms is not updated before event emission (cosmetic).
-3. Scientific mode is not implemented (strategy pattern scaffolded only).
+3. Scientific mode is **implemented** (2026-03-28; see `make_cognate.md` and
+   `completed_improvements_log.md`) but **not covered** by this baseline's TC suite.
 
 ---
 
 ## 5. Baseline Test Results
 
-Confirmed passing on: 2026-03-12
+Confirmed passing on: **2026-03-12 (pre–Cognate V2 — historical record)**
 
 | Test | Result | Log Signal |
 |------|--------|-----------|

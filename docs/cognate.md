@@ -84,11 +84,11 @@ The NODE system provides a modular wiring layer. Eventually, the `WorkflowEngine
 
 ## 5. Future Frontiers (Not Yet Built)
 
-While the "Spine" is verified, the following upgrades are on the immediate roadmap:
+While the "Spine" is verified, the following upgrades remain open:
 
 1.  **Hierarchical Goal Trees:** Transitioning from flat plan lists to nested `GoalNode` trees for massive, multi-day engineering tasks.
-2.  **Adaptive Graph Learning:** Moving beyond the prototype graph memory to dynamic edge-weighting that learns from execution success.
-3.  **Autonomous Tool Self-Building:** Leveraging the complete cognitive loop to allow Thoth to generate and test its own new tools.
+2.  **Cross-Agent Collaboration:** Sharing strategies and trajectories across Thoth instances.
+3.  **Self-Building (optional future expansion):** Owner may revisit unified diff / build automation; `apply_diff` is a stub today — not scheduled active work.
 
 ---
 

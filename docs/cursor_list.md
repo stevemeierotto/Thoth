@@ -1,16 +1,16 @@
 # Thoth Alignment Checklist — Cursor Fresh Start
 
 **Created:** 2026-06-13  
-**Last updated:** 2026-06-16  
+**Last updated:** 2026-06-17  
 **Purpose:** Prioritized list of fixes needed so code, tests, and documentation match the claims made across `docs/`, thesis papers, and `AGENTS.md`. Use this as the working backlog when returning to the project.
 
-**Status:** P0 and P1.1 / P1.3 / P1.5 / **P1.6** resolved (2026-06-16). Next focus: P1.7 and Priority 2 doc drift. **P1.2 deferred (low priority).**
+**Status:** P0 and P1 resolved; P2.1–P2.6 doc alignment done (2026-06-17). **Phase 5 self-building = optional future expansion.**
 
 **How to use:**
 1. Work top-to-bottom by priority tier.
 2. After each code fix: `cmake --build --preset build-debug` and `ctest --output-on-failure`.
 3. After each doc fix: update `completed_improvements_log.md` only when work is actually done (do not mark complete prematurely).
-4. Treat `completed_improvements_log.md` + `audit.md` as the honesty layer; marketing docs (`README.md`, `gemini_thoughts.md`) lag behind reality.
+4. Treat `completed_improvements_log.md` + `audit.md` as the honesty layer; narrative docs (`README.md`, Zenodo papers) may lag — check `cursor_list.md` first.
 
 ---
 
@@ -49,15 +49,14 @@ These are features described as complete (or thesis-critical) but are stubbed, d
 | **Fix applied** | Activated `trajectory: 0.2` in local `retrieval_config.json` (gitignored runtime config). Full GRAG benchmark: overall nDCG **+0.042**; `TRAJECTORY_DISAMBIGUATES` bucket **−0.037** — see `benchmark_results.md` and `plan_reuse_tuning.md`. |
 | **Remaining doc fix** | Align `GRAG.md` §3 audit note and `AGENTS.md` status with active $w_t$; note mixed trajectory-case lift. |
 
-### P1.2 — `code_modify` / `apply_diff` is a stub (Self-Building not real) — **LOW PRIORITY / DEFERRED**
+### P1.2 — `code_modify` / `apply_diff` stub — **FUTURE EXPANSION (not scheduled)**
 
 | | |
 |---|---|
-| **Priority** | **Low** — owner deferred; no action until Phase 5 is explicitly scheduled. |
-| **Claim** | `README.md` roadmap, `improvements.md` Phase 5, early `completed_improvements_log.md` entries: self-building / diff application. |
-| **Reality** | `code_modify_tool.cpp` returns `"Unified diff application not fully implemented in v1.0 prototype."` |
-| **Fix (when resumed)** | Implement unified diff apply with temp-file atomic write (per `improvements.md` Step 5.3) **or** clearly mark Phase 5 as blocked/stub everywhere. |
-| **Doc fix (optional)** | `audit.md` is already accurate; `README.md` lists Phase 5 as planned — sufficient for now. |
+| **Priority** | **None for now** — Self-building is an optional idea the owner may try later; not on the active roadmap. |
+| **Reality** | `code_modify_tool.cpp` returns `"Unified diff application not fully implemented in v1.0 prototype."` Read + `project_analyze` + `run_tests` work. |
+| **If resumed later** | Implement unified diff apply per `improvements.md` Phase 5 spec, or keep stub and document as experimental only. |
+| **Doc stance** | Mark Phase 5 as future expansion everywhere; do not imply self-building is in progress. |
 
 ### ✅ P1.3 — Plan history reuse (RESOLVED 2026-06-15)
 
@@ -98,7 +97,7 @@ These are features described as complete (or thesis-critical) but are stubbed, d
 | **Claim** | `NODE.md`, `build_node.md`, `AGENTS.md`: NODE as execution harness / future PlanStep type. |
 | **Reality** | Specification and build guide only; no `/core/node` implementation in repo. |
 | **Fix** | Either start `build_node.md` Phase 1 **or** keep as future work and ensure no doc says NODE is operational. |
-| **Doc fix** | `README.md` and `gemini_thoughts.md` describe NODE as existing harness — soften to “specified, not implemented.” |
+| **Doc fix** | `README.md` describes NODE accurately; `NODE.md` is spec only. |
 
 ---
 
@@ -106,65 +105,57 @@ These are features described as complete (or thesis-critical) but are stubbed, d
 
 Fix doc drift so the next session does not read conflicting sources.
 
-### P2.1 — Broken / missing doc references
+### ✅ P2.1 — Broken / missing doc references (RESOLVED 2026-06-17)
 
-| File | Problem | Fix |
-|------|---------|-----|
-| `improvements.md` | References `grag_summery.md` — **file does not exist** | Create `grag_summery.md` as a short status companion to `GRAG.md`, **or** replace all references with `GRAG.md` + `architectural_facts.md` |
-| `INDEX.md`, `improvements.md` | Reference `basic_agent_design_goal.md` — **deleted** (per git status) | Remove links; point to `VERIFIED_BASELINE.md` + `PLAN.md` instead |
-| User/docs convention | `COGNATE.md` expected; actual file is `cognate.md` (case-sensitive on Linux) | Add `docs/COGNATE.md` symlink or one-line stub pointing to `cognate.md`; update `INDEX.md` |
-| `memory_summery.md` | Filename typo (“summery”) | Rename to `memory_summary.md` when convenient; update links |
+| | |
+|---|---|
+| **`grag_summery.md`** | Removed broken reference; `improvements.md` rule 3 now points to `GRAG.md`, `architectural_facts.md`, `completed_improvements_log.md`, `benchmark_results.md`. |
+| **`basic_agent_design_goal.md`** | Phase 12 in `improvements.md` now references `VERIFIED_BASELINE.md` + `PLAN.md`. |
+| **`COGNATE.md` / `cognate.md`** | No stub added — canonical filename is `cognate.md`; listed in `INDEX.md`. |
+| **`memory_summery.md`** | Renamed to `memory_summary.md`; link updated in `improvements.md`. |
 
-### P2.2 — Stale “verified” documents
+### ✅ P2.2 — Stale “verified” documents (RESOLVED 2026-06-17)
 
-| File | Stale content | Fix |
-|------|---------------|-----|
-| `VERIFIED_BASELINE.md` | §4 item 3: “Scientific mode is not implemented” | Update: Scientific mode was implemented March 28 2026 (`make_cognate.md`, `completed_improvements_log.md`); add note that baseline TC tests are pre–Cognate V2 |
-| `VERIFIED_BASELINE.md` | “Confirmed passing on 2026-03-12” | Add “superseded by Cognate V2 work; re-run TC-01–TC-07 + full unit tests” banner |
-| `architectural_facts.md` | §2 reads as **pre-fix** thread-safety audit with inline “I will now update…” agent notes | Replace with current status (mutex added per completed log 2026-03-22) or move raw audit to `docs/audit.md` appendix |
-| `AGENTS.md` | Last updated 2026-03-10 | Refresh “Current System Status”, Cognate V2 completion, reflection/scientific/strategy sections |
-| `INDEX.md` | Last updated 2026-03-10 | Refresh phase table, add `cursor_list.md`, fix deleted-file links |
+| | |
+|---|---|
+| **`VERIFIED_BASELINE.md`** | Supersession banner; §4 scientific mode updated; §5 marked pre–Cognate V2 historical. |
+| **`architectural_facts.md`** | Rewritten: current thread-safety status, removed agent monologue; kept audit facts §1–§8. |
+| **`AGENTS.md`** | Last updated 2026-06-17; GRAG trajectory + Current System Status refreshed (P1, Cognate V2). |
+| **`INDEX.md`** | Roadmap wording updated; points to `cursor_list.md` for next-work priority. |
 
-### P2.3 — `improvements.md` phase table contradicts `completed_improvements_log.md`
+### ✅ P2.3 — `improvements.md` phase table vs `completed_improvements_log.md` (RESOLVED 2026-06-17)
 
-| Phase | Table says | Log says |
-|-------|------------|----------|
-| 3 Memory Stability | 📋 Planned | FactStore, IVectorStore, MemoryPruner **partially** implemented |
-| 4 Advanced Reasoning | 📋 Planned | Scientific mode, Strategy Engine, GraphRefiner **complete**; subgoals & $w_t$ **not** |
-| 5 Self-Building | 📋 Planned | Tools exist; `apply_diff` stub |
+| | |
+|---|---|
+| **Was** | Phases 3–5 all 📋 Planned despite substantial completion. |
+| **Fix applied** | Phase table + per-step rollups; status headers on each step; close-outs marked partial with ✅/🔶/📋 checklist. |
 
-**Fix:** Rewrite Phase 3–5 table with substates: ✅ Complete / 🔶 Partial / 📋 Not started. Move finished Phase 4 items to `completed_improvements_log.md` and trim duplicate step text from `improvements.md`.
+### ✅ P2.4 — Overclaiming in narrative docs (RESOLVED 2026-06-17)
 
-### P2.4 — Overclaiming in narrative docs
+| | |
+|---|---|
+| **`README.md`** | Known gaps table; Cognate benchmark 0.00\* caveat; Phase 3 partial; removed "self-building loop" wording. |
+| **`COGNATE_V2.md`** | Fixed "depeloth" → "depth"; mock-environment footnote for 51× metric (Zenodo — owner approved). |
+| **`MYPAPER.md`** | §3.4 Adaptive Graph Learning marked **Implemented** (`GraphRefiner`). |
+| **`cognate.md`** | §5 updated: graph learning done; self-building = optional future expansion. |
+| **`gemini_thoughts.md`** | Removed in P2.5 (was briefly updated in P2.4). |
 
-| File | Issue | Fix |
-|------|-------|-----|
-| `gemini_thoughts.md` | States self-building “Phase 3 Roadmap complete”, NODE operational, all Phases 1–12 complete without stub caveats | Add “as of” date and link to `audit.md` / this file |
-| `README.md` | Strong Cognate V2 / learning claims — mostly fair | Add short “Known gaps” footnote linking `GRAG.md` audit box |
-| `COGNATE_V2.md` | Typo: “depeloth” → “depth” in §7 Conclusion | Fix typo |
-| `COGNATE_V2.md` | Presents SCR / 51× depth as established fact | Add footnote: mock benchmark environment (`benchmark_results.md` notes 0.00 success rate in mock runs) |
-| `cognate.md` | §2 says Scientific mode in strategy pattern — OK | §5 future items accurate |
-| `MYPAPER.md` | §3.4 “Adaptive Graph Learning (Planned Extension)” | Mark **Complete** per `GRAG.md` §6 item 3 |
+### ✅ P2.5 — Scratch / duplicate docs (RESOLVED 2026-06-17)
 
-### P2.5 — Scratch / duplicate docs (cleanup)
+| | |
+|---|---|
+| **Deleted** | `tmp.md`, `tmp2.md`, `tmp_ui.md`, `tmp_tools.md`, `tmp_science.md`, `qwen_reply.md`, `TEST.md`, `gemini_thoughts.md` — unique content merged first. |
+| **Merged into** | `ui_improvements.md` §9–§12 (research console, GRAG troubleshooting, future UI, priorities); `TESTING.md` (manual concurrency tests + `TEST_SUITE.md` pointer). |
+| **Linked** | `HOWTO.md` and `new_corpus_tests.md` from `INDEX.md`; `benchmark_results.md` / `improvements.md`. |
+| **Kept** | `old_improvements.md` with supersession banner. |
 
-These confuse a fresh start. Either archive under `docs/archive/` or merge into authoritative files:
-
-| File | Recommendation |
-|------|------------------|
-| `tmp.md`, `tmp2.md`, `tmp_ui.md`, `tmp_tools.md`, `tmp_science.md` | Archive or delete after extracting any unique requirements into `ui_improvements.md` / `improvements.md` |
-| `old_improvements.md` | Keep as archive; add banner “superseded by improvements.md” |
-| `qwen_reply.md` | External LLM review notes — move to `docs/archive/` or delete |
-| `new_corpus_tests.md` | Active benchmark design — keep, link from `improvements.md` or `benchmark_results.md` |
-| `HOWTO.md` | User-facing; good — link from `INDEX.md` under “For users” |
-| `TEST.md` | Overlaps `TEST_SUITE.md` / `TESTING.md` | Merge manual concurrency protocol into `TESTING.md`; deprecate `TEST.md` |
-
-### P2.6 — `benchmark_results.md` interpretation
+### ✅ P2.6 — `benchmark_results.md` interpretation (RESOLVED 2026-06-17)
 
 | Issue | Fix |
 |-------|-----|
-| Early Mar 9 run shows +0.200 nDCG; later corpus runs show +0.019–0.060 | Docs should cite **which corpus / case mix** when claiming “+0.200 lift” — `GRAG.md` §5 should note early sandbox vs hardened 100-case suite |
-| Cognate benchmark `Success Rate 0.00*` | Already footnoted — ensure `COGNATE_V2.md` and `README.md` do not imply end-to-end task success without that caveat |
+| Early Mar 9 run shows +0.200 nDCG; later corpus runs show +0.019–0.060 | **`benchmark_results.md`:** “How to Read These Runs” table; **`GRAG.md` §5:** canonical vs sandbox; **`AGENTS.md`:** corpus-qualified claims |
+| **`MYPAPER.md` (Zenodo):** stale 563-chunk table / +0.220 | §4 aligned to Mar 14 hardened 100-case run (+0.041 mean, +0.202 goal-disambiguation); re-upload Zenodo when ready |
+| Cognate benchmark `Success Rate 0.00*` | Already footnoted in P2.4 (`COGNATE_V2.md`, `README.md`) |
 
 ---
 
@@ -210,10 +201,10 @@ Track in `improvements.md` only — do **not** mark complete until implemented:
 1. **Phase 3 completion** — pruning integration, archival restore path, vector store benchmark scaffold  
 2. **Phase 4.4** — hierarchical subgoal trees  
 3. **Phase 4.5** — trajectory weight tuning (config active; refine $w_t$ / T embedding quality per benchmark)  
-4. **Phase 5** — real `apply_diff`, build/revert automation *(low priority — P1.2 deferred)*  
+4. **Phase 5 Self-Building** — optional future expansion *(not scheduled)*  
 5. **`new_corpus_tests.md`** — 30-case research-paper disambiguation benchmark  
 6. **Cross-agent / multi-agent** — mentioned in `PLAN.md`, not scoped in roadmap  
-7. **GUI polish** — `tmp_ui.md` research console menu items (Step Execution debug mode, etc.)
+7. **GUI polish** — future items in `ui_improvements.md` §11–§12 (step debug mode, tool renderers, etc.)
 
 ---
 
@@ -225,10 +216,15 @@ Done    P1.1 — trajectory wt=0.2 activated (local config); benchmark run archi
 Done    P1.3 — plan history reuse + observability + plan_reuse_tuning.md
 Done    P1.5 — allow_shell_exec enforced in shell tools
 Done    P1.6 — memory pruning + session scoping + chat_sessions.json hot-tier trim
-Next 1  P2.1–P2.3 doc alignment (INDEX.md, improvements.md phase table, broken links)
-Next 2  Re-run TEST_SUITE.md TC-01–TC-07 manually; update VERIFIED_BASELINE.md date
-Next 3  P1.7 NODE harness OR doc-only deferral
-Backlog P1.2 apply_diff (low priority — deferred)
+Done    P2.1 — broken doc references fixed (no COGNATE.md stub)
+Done    P2.2 — VERIFIED_BASELINE, architectural_facts, AGENTS, INDEX refreshed
+Done    P2.3 — improvements.md phase table aligned with completed log
+Done    P2.4 — narrative doc honesty (README, COGNATE_V2, MYPAPER, cognate; gemini_thoughts removed)
+Done    P2.5 — scratch docs deleted; content merged into ui_improvements + TESTING
+Done    P2.6 — benchmark interpretation (benchmark_results, GRAG.md, MYPAPER.md, AGENTS.md)
+Next 1  Re-run TEST_SUITE.md TC-01–TC-07 manually; update VERIFIED_BASELINE.md date
+Next 2  P1.7 NODE harness OR doc-only deferral
+Backlog  Phase 5 self-building / `apply_diff` (future expansion — owner may try later)
 ```
 
 ---
@@ -237,9 +233,10 @@ Backlog P1.2 apply_diff (low priority — deferred)
 
 1. **Code** — always wins  
 2. **`audit.md`** + **`completed_improvements_log.md`** (2026-03-30 audit note)  
-3. **Specs:** `GRAG.md`, `PLAN.md`, `TOOLS.md`, `cognate.md`  
-4. **Roadmap:** `improvements.md`  
-5. **Marketing / thesis narrative:** `README.md`, `COGNATE_V2.md`, `MYPAPER.md`, `gemini_thoughts.md`  
+3. **Specs:** `GRAG.md` (live implementation spec), `PLAN.md`, `TOOLS.md`, `cognate.md`
+4. **Roadmap:** `improvements.md`
+5. **Zenodo / thesis narrative:** `MYPAPER.md` (GRAG paper), `COGNATE_V2.md` (Cognate paper) — edit locally; re-upload Zenodo when changed
+6. **Marketing:** `README.md`
 
 ---
 
@@ -257,7 +254,7 @@ Backlog P1.2 apply_diff (low priority — deferred)
 | Shell exec security | ✅ Config gate | ✅ `allow_shell_exec` enforced (P1.5) |
 | Crash resume | ✅ SQLite authoritative | ✅ Yes |
 | Trace log resume | ✅ Phase 10 | 🔶 Observability only |
-| Self-building / apply_diff | ✅ / 📋 Mixed | ❌ Stub |
+| Self-building / apply_diff | 📋 Future expansion | 🚫 Stub; harness only (`project_analyze`, read) |
 | Memory pruning | 📋 Planned | ✅ Hot-tier auto-prune + GUI trim (P1.6) |
 | NODE harness | Described as active | ❌ Spec only |
 | Unit tests | ✅ Passing claimed | ✅ Full suite green (2026-06-16, ~78s) |

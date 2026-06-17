@@ -1,4 +1,28 @@
 
+> **Related:** Research-paper corpus benchmark design — [`new_corpus_tests.md`](new_corpus_tests.md).
+
+## How to Read These Runs
+
+Mean nDCG@5 deltas **shrink as the corpus and test suite harden**. Always cite **run date + corpus size + case mix** when quoting a number.
+
+| Run date | Corpus | Cases | Mean nDCG@5 Δ | Goal-disambiguation Δ | When to cite |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| 2026-03-09 | 100 chunks (early sandbox) | small | **+0.200** | — | Directional prototype smoke test only |
+| 2026-03-12 | 563 chunks (docs corpus) | — | +0.023 | — | Larger-corpus sanity check |
+| 2026-03-14 | 311 chunks (research papers) | mixed | +0.060 | +0.214 | Research corpus, pre-hardened suite |
+| 2026-03-14 | 311 chunks (research papers) | **100 hardened** | **+0.041** | **+0.202** | **Canonical overall + disambiguation claims** |
+| 2026-03-23 | 311 chunks | — | +0.019 | — | Regression / stability check |
+
+**Rules of thumb**
+
+- **Overall retrieval lift:** cite the **2026-03-14 hardened 100-case** run (+0.041 mean nDCG@5).
+- **Goal-disambiguation lift:** cite the **goal-disambiguation bucket** from the same run (+0.202 nDCG@5), not the mean alone.
+- **Do not** use the Mar 9 +0.200 figure as a general GRAG claim — it reflects a 100-chunk sandbox only.
+
+Authoritative implementation spec: [`GRAG.md`](GRAG.md). Zenodo paper draft: [`MYPAPER.md`](MYPAPER.md) (update Zenodo deposit when that file changes).
+
+---
+
 ## Benchmark Run: Mon Mar  9 20:26:29 2026
 - **Embedding Model:** nomic-embed-text
 - **Corpus Size:** 100 chunks

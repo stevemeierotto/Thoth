@@ -1,5 +1,8 @@
 # Thoth Improvements (Active)
 
+> **Superseded by [`improvements.md`](improvements.md)** — historical roadmap snapshot from 2026-03-04.
+> Finished work is recorded in [`completed_improvements_log.md`](completed_improvements_log.md).
+
 Last reset: 2026-03-04
 
 Finished work has been archived in `docs/completed_improvements_log.md`.

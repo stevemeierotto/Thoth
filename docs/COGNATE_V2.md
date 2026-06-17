@@ -88,6 +88,10 @@ Results: Strategy promotion led to a 43% increase in planning thoroughness and a
 
 6.3 Iterative Reasoning Stability (Scientific Mode)
 
+> **Environment note:** `run_cognate_benchmark` reports **0.00\*** end-to-end success rates in the mock setup
+> (see `benchmark_results.md`). The **51× reasoning depth** figure below reflects iteration count to
+> convergence ($\Delta < 0.05$), not verified task completion in production.
+
 Stability was audited across 10 tasks involving the diagnosis of conflicting architectural documentation and retrieval math failures. Reasoning depth is measured by iterations to reach convergence ($\Delta < 0.05$).
 
 | Metric | Audited Value | Significance |
@@ -100,4 +104,4 @@ The low coefficient of variation indicates that Cognate provides a robust, itera
 
 7. Conclusion
 
-Cognate represents a shift from reactive agents to architecture-driven cognitive systems. The empirical results—specifically the automated promotion of successful strategies and the stable 51x increase in reasoning depeloth—provide evidence that Cognate can amplify and stabilize LLM performance on the evaluated task class. This provides a rigorous foundation for building reliable, experience-driven self-improving AI systems.
+Cognate represents a shift from reactive agents to architecture-driven cognitive systems. The empirical results—specifically the automated promotion of successful strategies and the stable 51× increase in reasoning **depth** (iteration count under the mock benchmark setup described above)—provide evidence that Cognate can amplify and stabilize LLM performance on the evaluated task class. This provides a rigorous foundation for building reliable, experience-driven self-improving AI systems.
