@@ -134,7 +134,7 @@ The retrieval graph therefore evolves toward paths that correlate with successfu
 
 4 Experimental Evaluation
 
-Benchmarks compared standard RAG and GRAG on progressively harder corpora (full archive: `benchmark_results.md` in the Thoth repository). The canonical evaluation uses a **311-chunk research-paper corpus** with a **100-case hardened test suite** (2026-03-14), designed to stress goal-disambiguation and distractor noise.
+Benchmarks compared standard RAG and GRAG on progressively harder corpora (full run archive: `benchmark_results.md`). The canonical evaluation uses a **311-chunk research-paper corpus** with a **100-case hardened test suite** (2026-03-14), designed to stress goal-disambiguation and distractor noise.
 
 The evaluation measured:
 
