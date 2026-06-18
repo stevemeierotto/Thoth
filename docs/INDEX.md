@@ -17,7 +17,7 @@
 4. **[completed_improvements_log.md](completed_improvements_log.md)** — **Authoritative source of truth** for what's actually implemented
 
 ### For Active Development
-- **[cursor_list.md](cursor_list.md)** — **ALIGNMENT BACKLOG** — Claim vs. reality gaps by priority (start here after time away)
+- **[cursor_list.md](cursor_list.md)** — **WORKING BACKLOG** — Active todo list by priority (start here after time away)
 - **[improvements.md](improvements.md)** — **ACTIVE ROADMAP** — Phases 3–4 🔶 partial; Phase 5 optional future expansion; Phases 9–12 complete
 - **[AGENTS.md](../AGENTS.md)** — Architecture reference and coding guidelines
 - **[TESTING.md](TESTING.md)** — Test structure and how to run tests
@@ -52,7 +52,7 @@
 | Document | Purpose | Status |
 |----------|---------|--------|
 | **[improvements.md](improvements.md)** | **ACTIVE ROADMAP** — Phases 3–4 partial; Phase 5 future expansion | ✅ Active |
-| **[cursor_list.md](cursor_list.md)** | **ALIGNMENT BACKLOG** — Doc/code/test gaps by priority | ✅ Active |
+| **[cursor_list.md](cursor_list.md)** | **WORKING BACKLOG** — Active todo list by priority | ✅ Active |
 | **[completed_improvements_log.md](completed_improvements_log.md)** | **AUTHORITATIVE** — Completed work log | ✅ Authoritative |
 | **[benchmark_results.md](benchmark_results.md)** | Auto-archived GRAG performance metrics | ✅ Auto-updated |
 | **[new_corpus_tests.md](new_corpus_tests.md)** | Research-paper corpus benchmark case design | ✅ Active |
@@ -77,7 +77,7 @@
 → **[completed_improvements_log.md](completed_improvements_log.md)** — Authoritative source
 
 ### "What should I work on next?"
-→ **[cursor_list.md](cursor_list.md)** — Alignment backlog by priority  
+→ **[cursor_list.md](cursor_list.md)** — Working backlog by priority  
 → **[improvements.md](improvements.md)** — Active roadmap (Phases 3–5; see phase table + `completed_improvements_log.md`)
 
 ### "How do I run tests?"
@@ -115,7 +115,7 @@
 - `ui_improvements.md` — Research console UI
 - `AGENTS.md` — Main guide (always current)
 - `README.md` — System overview (always current)
-- `cursor_list.md` — Alignment backlog
+- `cursor_list.md` — Working backlog
 - `improvements.md` — Active roadmap
 - `completed_improvements_log.md` — Completed work log
 - `GRAG.md`, `TOOLS.md`, `PLAN.md`, `cognate.md`, `memory_summary.md` — Architecture specs

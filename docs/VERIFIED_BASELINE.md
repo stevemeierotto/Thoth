@@ -4,11 +4,12 @@
 # Status: LOCKED — Do not modify without running all tests in TEST_SUITE.md
 
 > **Supersession note (2026-06-17):** This baseline remains the regression contract for
-> TC-01–TC-06 pipeline behavior below. **Cognate V2** work (scientific mode, strategy
-> injection, reflection replan, LLM planner, plan reuse, etc.) post-dates this lock.
-> Re-run `TEST_SUITE.md` TC-01–TC-07 and full `ctest` before treating pass dates as current.
+> TC-01–TC-07 pipeline behavior below. **Cognate V2** work post-dates the 2026-03-12 lock.
+> **Automated check (2026-06-18):** `ctest` 100% pass; audit grep checklist pass — see `audit.md`.
+> **Manual TC-01–TC-07:** not re-run 2026-06-18 (requires GUI + Ollama). Re-run before the next
+> major merge or benchmark score campaign; record date in §5 below.
 > Baseline §1 references `DefaultPlanner`; production may use `LLMPlanner` — re-verify
-> TC-02 plan structure on the next manual baseline pass.
+> TC-02 plan structure on the next manual pass.
 
 ---
 
@@ -155,7 +156,16 @@ These are known gaps that are NOT failures — they are documented future work:
 
 ## 5. Baseline Test Results
 
-Confirmed passing on: **2026-03-12 (pre–Cognate V2 — historical record)**
+### 5.1 Automated verification — 2026-06-18
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| `ctest --output-on-failure` | **PASS** | ~100s, all unit tests green |
+| `audit.md` §7 grep checklist | **PASS** | confirmation, ConstraintChecker, sandbox, shell gate, stub |
+
+### 5.2 Manual TEST_SUITE — historical (2026-03-12)
+
+Last full manual pass (GUI + logs). **Pending refresh** — run TC-01–TC-07 per `TEST_SUITE.md` before next merge.
 
 | Test | Result | Log Signal |
 |------|--------|-----------|
@@ -165,6 +175,7 @@ Confirmed passing on: **2026-03-12 (pre–Cognate V2 — historical record)**
 | TC-04: Chat during active goal | PASS | routing_mode=PLAN_AWARE in routing log |
 | TC-05: UI scores panel updates | PASS | RETRIEVAL_DIAGNOSTICS event received |
 | TC-06: No tool hallucination | PASS | No tool_call JSON in response |
+| TC-07: Goal persistence after PLAN_COMPLETED | *(not recorded in original table)* | Re-verify on next manual pass |
 
 ---
 

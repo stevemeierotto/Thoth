@@ -384,7 +384,7 @@ Abstracts the model backend. Currently supports Ollama local models.
 - **Tool Confirmation System**: `requires_confirmation()` enforced across all risky operations
 - **Sandbox Boundaries**: `IndexManager` hard-rejects requests outside `agent_workspace/`
 - **Constraint Checking**: Validates operations before execution
-- **Known Gap**: The `allow_shell_exec` configuration flag is currently bypassed by tools using `popen` (e.g., `run_tests`, `code_modify build`).
+- **Shell execution**: `run_tests` and `code_modify build` require `allow_shell_exec=true` in config (default deny; enforced P1.5)
 
 ### JSON Library
 

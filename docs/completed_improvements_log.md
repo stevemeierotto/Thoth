@@ -9,6 +9,13 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
 
+### 2026-06-18 (Tier 1 — Audit refresh + automated verification)
+
+- **`audit.md`:** Full refresh — `allow_shell_exec` marked fixed (P1.5); portable `FileHandler` path wording; 2026-06-18 verification run documented.
+- **`VERIFIED_BASELINE.md`:** §5 split automated (ctest + grep, 2026-06-18) vs historical manual TC pass (2026-03-12).
+- **`AGENTS.md`:** Removed stale `allow_shell_exec` bypass note.
+- **`ctest`:** 100% pass (~100s). Manual TC-01–TC-07 deferred to GUI session.
+
 ### 2026-06-17 (P2.6 — Benchmark Interpretation)
 
 - **`benchmark_results.md`:** “How to Read These Runs” guide (corpus / case mix / when to cite which delta).
