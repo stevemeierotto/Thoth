@@ -24,6 +24,9 @@ public:
 
     void ResetPlan(const nlohmann::json& planJson);
     void UpdateStepStatus(const std::string& stepId, StepStatus status);
+    /** Shown when there is no plan yet but background work is in progress. */
+    void SetActivityMessage(const wxString& message);
+    void ClearActivityMessage();
 
 private:
     struct VisualStep {
@@ -33,7 +36,8 @@ private:
     };
 
     std::vector<VisualStep> m_steps;
-    
+    wxString m_activityMessage;
+
     void OnPaint(wxPaintEvent& event);
     void OnSize(wxSizeEvent& event);
     

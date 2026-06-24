@@ -37,8 +37,8 @@ ChatMessagePanel::ChatMessagePanel(wxWindow* parent, const wxString& message, bo
     } catch (...) {}
 
     // Use a read-only text control to allow selection and copying
-    m_textCtrl = new wxTextCtrl(this, wxID_ANY, m_message, wxDefaultPosition, wxDefaultSize, 
-                                 wxTE_MULTILINE | wxTE_READONLY | wxNO_BORDER | wxTE_RICH2 | wxTE_NO_VSCROLL);
+    m_textCtrl = new wxTextCtrl(this, wxID_ANY, m_message, wxDefaultPosition, wxDefaultSize,
+                                 wxTE_MULTILINE | wxTE_READONLY | wxNO_BORDER | wxTE_RICH2);
     
     if (isStructured) {
         RenderStructuredContent(toolJson);
@@ -47,14 +47,15 @@ ChatMessagePanel::ChatMessagePanel(wxWindow* parent, const wxString& message, bo
         m_textCtrl->SetBackgroundColour(m_isUser ? wxColour(0, 120, 215) : wxColour(240, 240, 240));
         m_textCtrl->SetForegroundColour(m_isUser ? *wxWHITE : *wxBLACK);
         
-        // Estimate height more safely. 
         std::string stdMsg = m_message.ToStdString();
-        int lineCount = std::count(stdMsg.begin(), stdMsg.end(), '\n') + 1;
+        int lineCount = static_cast<int>(std::count(stdMsg.begin(), stdMsg.end(), '\n')) + 1;
         if (m_message.Length() > 60 && lineCount == 1) {
-            lineCount = (m_message.Length() / 50) + 1;
+            lineCount = static_cast<int>(m_message.Length() / 50) + 1;
         }
         int height = m_textCtrl->GetCharHeight() * (lineCount + 1) + 20;
+        height = std::min(height, MAX_BUBBLE_HEIGHT);
         m_textCtrl->SetMinSize(wxSize(-1, height));
+        m_textCtrl->SetMaxSize(wxSize(-1, MAX_BUBBLE_HEIGHT));
         sizer->Add(m_textCtrl, 0, wxALL | wxEXPAND, BUBBLE_PADDING + MARGIN);
     }
 

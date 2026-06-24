@@ -19,9 +19,23 @@ ExecutiveStateStrip::ExecutiveStateStrip(wxWindow* parent)
     Bind(wxEVT_SIZE, &ExecutiveStateStrip::OnSize, this);
 }
 
+void ExecutiveStateStrip::SetActivityMessage(const wxString& message) {
+    m_activityMessage = message;
+    Refresh();
+}
+
+void ExecutiveStateStrip::ClearActivityMessage() {
+    if (m_activityMessage.empty()) {
+        return;
+    }
+    m_activityMessage.clear();
+    Refresh();
+}
+
 void ExecutiveStateStrip::ResetPlan(const nlohmann::json& planJson) {
     std::cerr << "[ExecutiveStateStrip] ResetPlan called.\n";
     m_steps.clear();
+    m_activityMessage.clear();
     try {
         if (planJson.contains("steps") && planJson["steps"].is_array()) {
             std::cerr << "[ExecutiveStateStrip] Found " << planJson["steps"].size() << " steps.\n";
@@ -74,7 +88,12 @@ void ExecutiveStateStrip::OnPaint(wxPaintEvent& WXUNUSED(event)) {
     gc->SetFont(font, *wxBLACK);
 
     if (m_steps.empty()) {
-        gc->DrawText("No active plan execution", MARGIN, MARGIN);
+        if (!m_activityMessage.empty()) {
+            gc->SetFont(font, wxColour(80, 80, 160));
+            gc->DrawText(m_activityMessage, MARGIN, MARGIN);
+        } else {
+            gc->DrawText("No active plan execution", MARGIN, MARGIN);
+        }
         return;
     }
 

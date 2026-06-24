@@ -15,3 +15,9 @@ target_link_libraries(thoth-unit-tests PRIVATE
 )
 
 add_test(NAME thoth-unit-tests COMMAND thoth-unit-tests)
+
+add_executable(run_test_suite run_test_suite.cpp)
+target_include_directories(run_test_suite PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+)
+target_link_libraries(run_test_suite PRIVATE basic_agent)

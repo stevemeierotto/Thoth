@@ -86,6 +86,7 @@ private:
     wxButton* m_deleteChatButton = nullptr;
     wxButton* m_copyChatButton = nullptr;
     wxScrolledWindow* m_chatContainer = nullptr;
+    wxPanel* m_chatInnerPanel = nullptr;
     wxBoxSizer* m_chatSizer = nullptr;
     GragDiagnosticsPanel* m_gragPanel = nullptr;
     StrategyPanel* m_strategyPanel = nullptr;
@@ -153,12 +154,14 @@ private:
     void UpdateRagSlotLabel(const std::string& path, const std::string& label);
     void MigrateFilesToSandbox(std::vector<std::string>& paths);
     void RenderSession(std::size_t sessionIndex);
+    void ScrollChatToBottom();
     void ActivateSession(std::size_t sessionIndex);
-    bool SyncAgentMemoryFromActiveSession();
+    bool SyncAgentMemoryFromActiveSession(bool includeRagFiles = true);
     void RefreshAllPanels();
 
     // Event handlers
     void OnSend(wxCommandEvent& evt);
+    void OnChatContainerSize(wxSizeEvent& evt);
     void OnShowDecisionTrace(wxCommandEvent& evt);
     void OnChatSelected(wxDataViewEvent& evt);
     void OnNewChat(wxCommandEvent& evt);
@@ -197,6 +200,11 @@ private:
     void RefreshGoalBanner();
     void ClearActiveGoal();
     void SetSessionGoal(const std::string& sessionId, const std::string& goal);
+    void RefreshExecutiveStripActivity();
+    static bool InputStartsGoal(const wxString& input);
+
+    int m_ragIndexingCount = 0;
+    bool m_goalPlanningPending = false;
 
     void SetupMenuBar();
     void ShowMenuStatus(const wxString& title, const wxString& message);

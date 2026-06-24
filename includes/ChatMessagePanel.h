@@ -22,4 +22,5 @@ private:
     static constexpr int BUBBLE_PADDING = 8;
     static constexpr int BUBBLE_RADIUS = 10;
     static constexpr int MARGIN = 5;
+    static constexpr int MAX_BUBBLE_HEIGHT = 280;
 };
