@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-06-17
+Last updated: 2026-06-27
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 **NOTE ON DOCUMENTATION ACCURACY (2026-03-30)**: An internal audit revealed that some features listed as "complete" are actually in a prototype or stub state. This document is being updated to reflect the actual implementation status:
@@ -8,6 +8,119 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - **Trajectory Awareness**: Infrastructure is implemented; production `retrieval_config.json` sets `trajectory: 0.2` (2026-06-15). Benchmark shows mixed lift on `TRAJECTORY_DISAMBIGUATES` cases — see `docs/plan_reuse_tuning.md`.
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
+
+### 2026-06-27 (C2 Phase 0 — Chat RAG observability)
+
+- **Goal**: Instrument the conversation (`processQuery`) pipeline only — no retrieval, prompt, truncation, or tool-injection behavior changes. Make chat diagnosable the same way C1 made the planner diagnosable.
+- **Log sink**: `logs/chat_rag.jsonl` (append-only, one `CHAT_RAG_CONTEXT` + one `CHAT_RAG_RESPONSE` per turn, linked by `request_id`).
+
+#### Events and metrics
+
+- **`CHAT_RAG_CONTEXT`** (before `llm.query()`): query, ranked documents (file, rank, chunk_id, score, chars, line range), `top_k`, byte counts (retrieved, tool_schema, conversation_history, memory_context, system_prompt), `final_prompt_chars`, truncation before/after + `truncated_section`, derived ratios (`grounding_ratio`, `tool_ratio`, `history_ratio`, `memory_ratio`), `llm_model`, `grounding_mode`.
+- **`CHAT_RAG_RESPONSE`** (after LLM): `answer_chars`, `retrieved_doc_count`, `grounding_mode`, `fallback_used` (always false for chat today).
+
+#### Code locations
+
+| Metric / event | Collected in |
+|--------------|--------------|
+| Retrieval scores + ranked docs | `RAGPipeline::retrieveRelevant` → `GragDiagnostics*` out-param → `command_processor.cpp` `buildDocumentMetrics()` |
+| Prompt section byte counts | `PromptFactory::buildConversationPrompt` → `ConversationPromptMetrics` |
+| Truncation before/after + section | `PromptFactory::inferTruncatedSection()` (reports only; truncation policy unchanged) |
+| Final prompt + grounding ratios | `command_processor.cpp` `buildChatRagContextRecord()` |
+| JSONL persistence | `ChatRagLogger` (`chat_rag_logger.cpp`) |
+| Structured log + decision trace stages | `StructuredLogger` + `DecisionTraceLogger` stages `chat_rag_context` / `chat_rag_response` |
+
+- **Verification**: `cmake --build build/debug --target thoth-control-panel` ✅. Run a GUI chat query and inspect `logs/chat_rag.jsonl`.
+
+### 2026-06-27 (C6 Phase 1 — Per-goal cognitive metrics logging)
+
+- **Goal**: One unified append-only metrics row per goal execution for time-series analysis (feeds C3, C4, C7, benchmarks).
+- **Log sink**: `logs/cognitive_metrics.jsonl` — event `GOAL_COGNITIVE_METRICS`.
+- **Emit points**: `PLAN_COMPLETED`, `PLAN_FAILED`, `PLAN_ABORTED` in `ExecutiveController`.
+- **Fields**: `plan_id`, `session_id`, `goal`, `outcome`, `total_wall_clock_ms`, `planning_time_ms`, `retrieval_time_ms`, `llm_synthesis_time_ms`, `step_count`, `retrieved_chunk_count`, `grag_alpha`, `grag_routing_mode`, `trajectory_score`, `final_success_score`, `reflection_count`, `revisions_count`, `plan_reused`, `total_tokens` (reserved, 0).
+- **Files**: `cognitive_metrics.h`, `cognitive_metrics_logger.cpp`; wired in `executive_controller.cpp`, `workflow_engine.cpp` (GRAG diagnostics on RETRIEVAL steps).
+- **Verify**: Run a goal; inspect `logs/cognitive_metrics.jsonl` for one row with non-zero latencies.
+
+### 2026-06-27 (C2 Phase 3 — Chat pipeline fixes — user validated)
+
+- **User validation (2026-06-27):** GUI “Explain GRAG” returns accurate grounded answer (no fabricated acronyms).
+- See prior C2 Phase 3 entry below for implementation details.
+
+### 2026-06-27 (C2 Phase 3 — Chat pipeline fixes)
+
+- **Goal**: Fix chat answer quality after Phase 2 retrieval — grounding instructions, tool schema gating for Q&A, section-protected prompt assembly (replacing tail truncation), observability metric fixes.
+- **Changes**:
+  - **`chat_prompt_config.h`**: Grounding rules injected when RAG context is present.
+  - **`chat_query_utils.h/cpp`**: `looksLikeToolIntent()` — tool schemas omitted for plain Q&A; included only when user message requests tool execution.
+  - **`prompt_factory.cpp`**: `buildChatPrompt()` unified budget (RAG + conversation); core sections (grounding rules, system prompt, user query) never tail-truncated; optional sections dropped in order: tools → memory → history → RAG tail.
+  - **`command_processor.cpp`**: Uses `buildChatPrompt()`; `llm_model` falls back to `config->llm_model`; `grounding_ratio` uses RAG + grounding rules bytes; `tool_ratio` uses bytes actually in final prompt.
+- **Litmus test**: “Explain GRAG” in GUI — expect GRAG.md chunks, high `grounding_ratio`, `tool_schema_chars: 0`, grounded answer citing source.
+
+### 2026-06-27 (C2 Phase 2 — Conversational retrieval tuning)
+
+- **Goal**: Fix chat retrieval ranking without changing goal-execution GRAG path. Evidence-driven from Phase 0 logs (AGENTS.md fragments, 5.5% grounding) and Phase 1 baseline (2/5 hit@1).
+- **Scope**: Conversational mode only (`activeGoal.empty()` in `RAGPipeline::retrieveRelevant`).
+- **Changes**:
+  - **`chat_retrieval_config.h` / `chat_retrieval_boost.cpp`**: Filename token extraction (including `*.md` in query); conversational score boosts; tiny-chunk deprioritization (≥80 chars); filename coverage recall supplementation; quote-query prefers early line chunks; usage-query boost for HOWTO.md.
+  - **`index_manager`**: `setActiveCorpusFiles()` + session-scoped `retrieveChunks()` filter (wired from `BasicAgentPlugin::setRagFiles`).
+  - **`rag.cpp`**: Higher conversational recallK; filename coverage before rescore; boost + min-chunk top-K selection for chat only.
+  - **`command_processor.cpp`**: Injection-time chunk metadata (`Document:`, `Lines:`) via `formatChunkForPrompt()`.
+- **Benchmark (2026-06-27):** hit@1 **5/5**, mean nDCG@1 **1.00**, mean MRR **1.00** (up from 2/5 baseline).
+- **Note**: Answer quality in live chat still depends on **C2 Phase 3** (grounding instructions, tool gating, truncation policy).
+
+### 2026-06-27 (C2 Phase 1 — Golden chat-RAG retrieval benchmark)
+
+- **Goal**: Measure document-level retrieval quality for the conversation pipeline **before** tuning weights or changing chat behavior. Complements Phase 0 per-turn logs with a repeatable headless benchmark.
+- **Tool**: `./build/debug/external/basic_agent/run_chat_rag_benchmark` (requires Ollama for embeddings).
+- **Corpus**: `agent_workspace/rag/` — `GRAG.md`, `cognate.md` (stand-in for `docs/COGNATE_V2.md`; sandbox indexing), `HOWTO.md`, `AGENTS.md`. Clean index (4 files only).
+- **Golden queries (5):** Explain GRAG → GRAG.md; What is Cognate → cognate.md; How do I use Thoth → HOWTO.md; agent conventions → AGENTS.md; quote GRAG first sentence → GRAG.md.
+- **Metrics per case:** ranked documents + scores, hit@1, nDCG@1, MRR@5.
+- **Log sink:** `logs/chat_rag_benchmark.jsonl` (`CHAT_RAG_BENCHMARK_CASE`, `CHAT_RAG_BENCHMARK_SUMMARY`).
+- **Files:** `chat_rag_golden_cases.h/cpp`, `run_chat_rag_benchmark.cpp`.
+- **Baseline (2026-06-27):** hit@1 **2/5**, mean nDCG@1 **0.40**, mean MRR **0.40**. AGENTS.md ranks #1 on “Explain GRAG” and “What is Cognate?” — confirms retrieval ranking problem for C2 Phase 2.
+- **Exit code:** 0 if all hit@1, 2 otherwise (diagnostic, not CI gate yet).
+
+### 2026-06-27 (C2 Phase 0 — Chat RAG observability)
+
+- **Goal**: Fix planning quality constrained by context assembly — polluted memory injection, tail truncation dropping rules/schema, missing semantic validation, and unfiltered strategy blast. Expert-reviewed priority: prompt assembly → PlanValidator → memory hygiene → scored strategies → instrumentation.
+- **Branch / scope**: `external/basic_agent` (uncommitted at time of log entry); `docs/cursor_list.md` § C1 updated.
+
+#### Phase 1 — Structured prompt assembly (memory budgets)
+
+- **`prompt_factory.cpp`**: Planner prompts assembled as fixed sections — **Rules → Schema → Goal → optional experience**. Core sections never tail-truncated; experience competes for remainder and is dropped first when over budget.
+- **`planner_injection_config.h`**: Formal budgets — rules 4 KB, schema 2 KB, goal 1 KB, plan reuse 1 KB, strategy 512 B, trajectory 512 B; minimum total budget 8 KB.
+- **Default template reorder**: `plan_generation.tmpl` and bundled defaults put Rules/Schema before Goal.
+- **`PlannerPromptMetrics`**: Byte counts per section for observability.
+
+#### Phase 2 — PlanValidator (reject + limited repair + C++ fallback)
+
+- **`plan_validator.h` / `plan_validator.cpp`**: New validation layer between JSON parse and execution.
+  - **Parser** (`PlanParser`): valid JSON syntax.
+  - **Validator** (`PlanValidator`): valid Thoth corpus Q&A plan — requires RETRIEVAL + LLM, rejects TOOL steps, enforces RETRIEVAL-first order.
+  - **Limited repair**: wire missing LLM `depends_on` to prior RETRIEVAL only (deterministic).
+  - **No semantic repair**: does not insert missing steps or convert step types.
+  - **`createFallbackPlan()`**: programmatic RETRIEVAL → LLM plan in C++ after one LLM retry (no third LLM call).
+- **`llm_planner.cpp`**: Wired LLM → parse → validate → execute path; logs `plan_generated`, `plan_validation_failed`, `plan_fallback_used`, `depends_on_repaired`.
+
+#### Phase 3 — Memory hygiene
+
+- **`goal_text_utils.h`**: `cleanGoalForStorage()` strips nested `[RELEVANT PAST APPROACHES…]` markers; `sanitizePlanOutline()` emits step-type summaries only.
+- **`plan_reuse_config.h`**: Similarity floor 0.55; retrieve limit 1 (one similar plan); `PlannerTrajectory::kMinSimilarityFloor`.
+- **`memory.cpp`**: `retrieveSimilarPlans` / `retrieveSimilarTrajectories` apply similarity floor — inject nothing below threshold.
+- **`executive_controller.cpp`**: Store clean goals in `past_plans`; sanitized outlines in plan-reuse injection; reflection replan gets failure summary only (no plan-reuse re-injection).
+
+#### Phase 4 — Strategy scoring (not disable)
+
+- **`llm_planner.cpp`**: Top-1 promoted strategy selected by goal-embedding cosine similarity to strategy description + pattern (floor 0.40); replaces `getAllStrategies()` blast.
+
+#### Phase 5 — Planner instrumentation
+
+- **`PLANNER_CONTEXT_ASSEMBLY`**: Logs `rules_bytes`, `schema_bytes`, `goal_bytes`, `strategy_bytes`, `trajectory_bytes`, `plan_reuse_bytes`, `total_bytes`, `experience_dropped`, `strategy_similarity`.
+- **`PLANNER_REVISION_CONTEXT`**: Same byte metrics for revision prompts.
+- Feeds **C6** cognitive metrics roadmap.
+
+- **Verification**: `cmake --build build/debug --target thoth-control-panel run_test_suite` ✅ (2026-06-27). Full headless `run_test_suite` TC-01–TC-07 regression after C1 changes: pending.
+- **Operator note**: Existing `agent_workspace/prompt_templates/plan_generation.tmpl` is only written when missing — delete or update manually for Rules-first template in an existing workspace. Existing `memory.db` may retain polluted goals until new runs overwrite history.
 
 ### 2026-06-18 (Tier 1 — Audit refresh + automated verification)
 
