@@ -766,6 +766,7 @@ public:
 };
 
 static bool testToolBatching() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
     Config cfg;
     cfg.database_path = makeTempPath("thoth_batch_test.db").string();
     auto memory = std::make_shared<Memory>(cfg);
@@ -799,6 +800,7 @@ static bool testToolBatching() {
     }
 
     fs::remove(cfg.database_path);
+    unsetenv("THOTH_MOCK_LLM");
     return true;
 }
 
@@ -818,7 +820,7 @@ public:
         s1.step_id = "step-1";
         s1.description = "Reflectable step";
         // First plan must finish with score < 0.6 to trigger reflection.
-        // LLM steps always succeed in WorkflowEngine's stub, so use NODE (not implemented).
+        // Use NODE (not implemented) so the first attempt fails deterministically.
         if (call_count == 1) {
             s1.type = StepType::NODE;
             s1.payload = {{"node_id", "reflection-test-node"}};
@@ -833,6 +835,7 @@ public:
 };
 
 static bool testReflectionLoop() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
     Config cfg;
     cfg.database_path = makeTempPath("thoth_reflection_test.db").string();
     auto memory = std::make_shared<Memory>(cfg);
@@ -901,6 +904,7 @@ static bool testReflectionLoop() {
     }
 
     fs::remove(cfg.database_path);
+    unsetenv("THOTH_MOCK_LLM");
     return true;
 }
 

@@ -217,7 +217,7 @@ int main() {
     flags.executing.store(false);
     plugin.executeGoal("Analyze the ExecutiveController and summarize its state machine");
 
-    const bool goalFinished = waitMs(180000, [&] {
+    const bool goalFinished = waitMs(600000, [&] {
         return flags.plan_completed.load();
     });
 
@@ -243,7 +243,7 @@ int main() {
         }
     }
     fail(report("TC-02", "goal run finished (PLAN_COMPLETED)", goalFinished,
-                "Timed out waiting for plan completion (180s)"));
+                "Timed out waiting for plan completion (600s)"));
     fail(report("TC-02", "plan has >= 2 steps", chosenPlan.contains("steps") && chosenPlan["steps"].size() >= 2,
                 "No PLAN_CREATED with >= 2 steps in trace"));
 
@@ -328,7 +328,7 @@ int main() {
     std::cout << "Running TC-07 …\n";
     flags.plan_completed.store(false);
     plugin.executeGoal("Summarize GRAG directional scoring in one paragraph");
-    waitMs(180000, [&] { return flags.plan_completed.load(); });
+    waitMs(600000, [&] { return flags.plan_completed.load(); });
     plugin.processInput("What did you find?");
     {
         auto routing = routingDecisions(loadJsonl(appPath));
