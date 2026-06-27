@@ -5,6 +5,9 @@ build/
 bin/
 lib/
 
+# Runtime logs (test output)
+logs/
+
 # Agent Workspace (Runtime data, DBs, Indices)
 agent_workspace/
 
