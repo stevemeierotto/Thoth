@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-06-27 (C2 validated; C6 Phase 1 started)  
+**Last updated:** 2026-06-27 (C1/C2/C6 shipped; pushed to GitHub)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
@@ -26,6 +26,9 @@
 | Headless `run_test_suite` TC-01–TC-07 | ✅ 2026-06-27 (~40 min; Ollama required) |
 | Production plan templates (RETRIEVAL → LLM) + plan-reuse strip | ✅ 2026-06-27 |
 | Plan history reuse + observability events | ✅ |
+| Chat RAG pipeline (observability + 5/5 benchmark + grounded Q&A) | ✅ 2026-06-27 |
+| Per-goal cognitive metrics (`logs/cognitive_metrics.jsonl`) | ✅ 2026-06-27 |
+| C1 planner context management (budgets, validator, memory hygiene) | ✅ 2026-06-27 |
 | `allow_shell_exec` tool gating | ✅ |
 | Memory hot-tier prune + session scoping + GUI trim | 🔶 core wired; warm/cold tier open |
 | Trajectory $w_t$ in scoring path | 🔶 config 0.2; mixed lift on trajectory-disambiguation cases |
@@ -42,9 +45,9 @@ End-to-end goal execution works; next focus is **quality, speed, and evidence** 
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
-| **C1** | **Improve planning quality** | 🔶 | Context management, not planner capability. See **§ C1** below. |
+| **C1** | **Improve planning quality** | ✅ | Phases 1–5 shipped — see **§ C1**. Goal execution only; chat path separate (**C2**). |
 | **C2** | **Improve retrieval ranking** | ✅ | Phase 0–3 complete — see **§ C2**. |
-| **C3** | **Measure reflection outcomes** | 📋 | Reflection fires on low trajectory score — prove it helps. Compare success rate / answer quality with reflection on vs off (or max cycles 0 vs 2); log before/after metrics; avoid infinite replan on LLM timeout failures. |
+| **C3** | **Measure reflection outcomes** | ✅ | Headless A/B harness — see **§ C3**. `max_reflections` 0 vs 2; timeout skip; `logs/reflection_ab_benchmark.jsonl`. |
 | **C4** | **Developer & CI latency** | 📋 | Fast feedback for engineers — see **§ C4/C7**. ~40 min `run_test_suite` is the signal. Mock LLM, tiny corpus, cached embeddings, skip re-index, dev vs full regression tiers. |
 | **C5** | **Robustness & failure tests** | 📋 | Unusual/failure scenarios: Ollama unreachable, empty RAG corpus, malformed plan JSON, step timeout, reflection exhaustion, plan parse retry, concurrent goals. Add to `unit_tests.cpp` or a `run_robustness_suite` with `THOTH_MOCK_*` gates. |
 | **C6** | **Cognitive metrics** | 🔶 | Phase 1 ✅ — `logs/cognitive_metrics.jsonl`. Phase 2 (plots/tokens) pending. |
@@ -58,11 +61,11 @@ Planning quality is constrained by **context assembly**, not the planner templat
 
 | Phase | Task | Status |
 |-------|------|--------|
-| **1** | **Structured prompt assembly** — Rules → Schema → Goal → optional experience. Core sections never tail-truncated; experience competes for remainder. Memory budgets: rules 4 KB, schema 2 KB, goal 1 KB, plan reuse 1 KB, strategy 512 B, trajectory 512 B. | 🔶 |
-| **2** | **PlanValidator** — Separate from JSON parser. Pipeline: LLM → Parser → Validator → Execute. Reject invalid semantics (TOOL steps, missing RETRIEVAL/LLM, wrong order). **Limited repair:** wire missing `depends_on` only. **No semantic repair** (never insert steps or convert TOOL→RETRIEVAL). Programmatic C++ fallback (RETRIEVAL→LLM) after one retry. | 🔶 |
-| **3** | **Memory hygiene** — Store clean goals (strip `[RELEVANT PAST APPROACHES…]`). Similarity floor on plan reuse and trajectories (inject nothing vs weak matches). Sanitized reuse outlines (step-type summary only). Top-1 similar plan. Reflection channel gets failure summary only — no plan-reuse re-injection. | 🔶 |
-| **4** | **Strategy scoring** — Top-1 promoted strategy by goal-embedding similarity (do not disable; do not inject all). | 🔶 |
-| **5** | **Planner instrumentation** — Log rules/schema/goal/reuse/strategy/trajectory bytes, `experience_dropped`, `depends_on_repaired`, `fallback_used`. Feeds **C6**. | 🔶 |
+| **1** | **Structured prompt assembly** — Rules → Schema → Goal → optional experience. Core sections never tail-truncated; experience competes for remainder. Memory budgets: rules 4 KB, schema 2 KB, goal 1 KB, plan reuse 1 KB, strategy 512 B, trajectory 512 B. | ✅ |
+| **2** | **PlanValidator** — Separate from JSON parser. Pipeline: LLM → Parser → Validator → Execute. Reject invalid semantics (TOOL steps, missing RETRIEVAL/LLM, wrong order). **Limited repair:** wire missing `depends_on` only. **No semantic repair** (never insert steps or convert TOOL→RETRIEVAL). Programmatic C++ fallback (RETRIEVAL→LLM) after one retry. | ✅ |
+| **3** | **Memory hygiene** — Store clean goals (strip `[RELEVANT PAST APPROACHES…]`). Similarity floor on plan reuse and trajectories (inject nothing vs weak matches). Sanitized reuse outlines (step-type summary only). Top-1 similar plan. Reflection channel gets failure summary only — no plan-reuse re-injection. | ✅ |
+| **4** | **Strategy scoring** — Top-1 promoted strategy by goal-embedding similarity (do not disable; do not inject all). | ✅ |
+| **5** | **Planner instrumentation** — Log rules/schema/goal/reuse/strategy/trajectory bytes, `experience_dropped`, `depends_on_repaired`, `fallback_used`. Feeds **C6**. | ✅ |
 
 **Memory channel separation (target architecture):**
 
@@ -78,7 +81,7 @@ Planning quality is constrained by **context assembly**, not the planner templat
 
 #### C2 — Retrieval ranking & chat RAG observability
 
-Two pipelines: goal execution (C1 hardened) vs conversation (`processQuery`). C2 Phase 0 instruments chat only — **no retrieval, prompt, or truncation behavior changes**.
+Two pipelines: goal execution (**C1** hardened) vs conversation (`processQuery`, **C2** complete).
 
 | Phase | Task | Status |
 |-------|------|--------|
@@ -95,6 +98,21 @@ Two pipelines: goal execution (C1 hardened) vs conversation (`processQuery`). C2
 
 **Litmus test (manual):** “Quote the first sentence of GRAG.md” — check `logs/chat_rag.jsonl` for rank/score/grounding_ratio.
 
+#### C3 — Reflection A/B measurement
+
+Prove reflection replan helps recoverable failures and does **not** loop on timeouts.
+
+| Phase | Task | Status |
+|-------|------|--------|
+| **1** | **Policy helpers** — `trajectoryHasTimeoutFailure()`, `reflectionSkipReason()`; configurable `max_reflections` (default 2, env `THOTH_MAX_REFLECTIONS`). | ✅ |
+| **2** | **Golden cases + harness** — `run_reflection_ab_benchmark`: C3-01 recoverable NODE→LLM rescue; C3-02 timeout skip. Log → `logs/reflection_ab_benchmark.jsonl`. Mock-only (`THOTH_MOCK_LLM`, `THOTH_MOCK_STEP_TIMEOUT`). | ✅ |
+
+**Run benchmark:** `./build/debug/external/basic_agent/run_reflection_ab_benchmark` (no Ollama).
+
+**Results (2026-06-26):** 2/2 cases pass; mean reflection lift **0.5** (C3-01 FAILED→COMPLETED with reflection on; C3-02 both arms FAILED, planner_calls=1).
+
+**Key files:** `reflection_utils.*`, `reflection_ab_cases.*`, `run_reflection_ab_benchmark.cpp`, `executive_controller.cpp` (`set_max_reflections`), `cognitive_metrics.h` (`max_reflections`, `reflection_skip_reason`).
+
 #### C4 & C7 — Latency (developer vs runtime)
 
 Two different engineering problems; separate solutions and success criteria.
@@ -110,7 +128,12 @@ Two different engineering problems; separate solutions and success criteria.
 
 Move beyond pass/fail: record **quantitative metrics for every goal execution**, persist them append-only, and aggregate over hundreds of runs.
 
-**Per-goal fields (target schema):**
+| Phase | Task | Status |
+|-------|------|--------|
+| **1** | **Append-only per-goal logging** — `GOAL_COGNITIVE_METRICS` → `logs/cognitive_metrics.jsonl` on `PLAN_COMPLETED` / `PLAN_FAILED` / `PLAN_ABORTED`. | ✅ |
+| **2** | **Analysis tooling** — `scripts/plot_cognitive_metrics.py`, token counts from `LLMInterface`, GUI export. | 📋 |
+
+**Per-goal fields (Phase 1 schema):**
 
 | Metric | Purpose |
 |--------|---------|
@@ -121,6 +144,8 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | `grag_alpha` | Directional blend at retrieval (from GRAG diagnostics) |
 | `trajectory_score` | ExecutiveController outcome score |
 | `reflection_count` | Reflection replan cycles consumed |
+| `max_reflections` | Configured reflection limit for the goal |
+| `reflection_skip_reason` | Why reflection was suppressed (`timeout_failure`, `reflection_disabled`, etc.) |
 | `final_success_score` | Plan history / past_plans success signal |
 | `total_tokens` | LLM token usage (plan + synthesis; embed if available) |
 | `total_wall_clock_ms` | Goal start → PLAN_COMPLETED/FAILED |
@@ -262,19 +287,22 @@ Done    C2 Phase 0 — chat RAG observability (logs/chat_rag.jsonl)
 Done    C2 Phase 1 — golden corpus benchmark (run_chat_rag_benchmark)
 Done    C2 Phase 2 — conversational retrieval tuning (5/5 hit@1)
 Done    C2 Phase 3 — chat pipeline fixes (grounding, tool gating, truncation) — user validated ✅
+Done    C1 phases 1–5 — planner context management (pushed 379c0c5)
 Done    C6 Phase 1 — cognitive metrics logging (`logs/cognitive_metrics.jsonl`)
-Next 1  C3 — reflection A/B measurement (does replan improve outcomes?)
-Next 3  C4 — developer & CI latency (fast test path, mocks, slim corpus)
-Next 4  C7 — runtime latency (production execution hot paths)
-Next 5  C5 — robustness / failure scenario tests
-Next 6  V1 manual GUI pass (TC-05 scores panel, chat UX)
-Next 7  M1–M4 — finish memory pruning pipeline
-Next 8  G1 / G2 — trajectory tuning or subgoal trees
+Done    C3 — reflection A/B measurement (2/2 cases, mean lift 0.5)
+Next 1  C4 — developer & CI latency (fast test path, mocks, slim corpus)
+Next 2  C7 — runtime latency (production execution hot paths)
+Next 3  C5 — robustness / failure scenario tests
+Next 4  V1 manual GUI pass (TC-05 scores panel, chat UX)
+Next 5  M1–M4 — finish memory pruning pipeline
+Next 6  G1 / G2 — trajectory tuning or subgoal trees
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)
 Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
-External V3 — Zenodo MYPAPER re-upload when C2 benchmark stable
+External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 ```
+
+**GitHub (2026-06-27):** Thoth `b4b6adf`, Basic_agent `379c0c5` on `main`.
 
 ---
 
@@ -289,8 +317,10 @@ External V3 — Zenodo MYPAPER re-upload when C2 benchmark stable
 | Golden chat retrieval benchmark (C2 Phase 1) | ✅ `run_chat_rag_benchmark` — baseline 2/5 hit@1 |
 | Conversational retrieval tuning (C2 Phase 2) | ✅ 5/5 hit@1 on golden corpus |
 | Chat pipeline fixes (C2 Phase 3) | ✅ user-validated grounded Q&A |
-| Planning / retrieval / reflection quality | 🔶 **C1** phases 1–5; **C2** complete |
+| Planning quality (C1) | ✅ phases 1–5 shipped |
+| Chat / retrieval quality (C2) | ✅ phases 0–3; user-validated grounded Q&A |
 | Per-goal cognitive metrics (C6 Phase 1) | ✅ `logs/cognitive_metrics.jsonl` |
+| Reflection A/B measurement (C3) | ✅ `run_reflection_ab_benchmark` — 2/2 cases |
 | Developer / CI latency (fast tests) | 📋 **C4** |
 | Runtime latency (production goals) | 📋 **C7** |
 | Robustness test coverage | 📋 **C5** |
