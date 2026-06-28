@@ -358,7 +358,7 @@ Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
 External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 ```
 
-**GitHub (2026-06-27):** Thoth `b4b6adf`, Basic_agent `379c0c5` on `main`.
+**GitHub (2026-06-28):** Thoth `539d3b6`, Basic_agent `2397385` on `main`.
 
 ---
 
