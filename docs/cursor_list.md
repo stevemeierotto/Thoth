@@ -23,7 +23,7 @@
 | GRAG directional core + graph learning | ✅ |
 | Executive loop, reflection, scientific mode, strategy promotion | ✅ |
 | `executeLLM` (real synthesis, not stub) | ✅ 2026-06-27 |
-| Headless `run_test_suite` TC-01–TC-07 | ✅ 2026-06-27 (~40 min; Ollama required) |
+| Headless `run_test_suite` TC-01–TC-07 | ✅ full ~40 min (2026-06-27); **dev ~10s** (2026-06-26) |
 | Production plan templates (RETRIEVAL → LLM) + plan-reuse strip | ✅ 2026-06-27 |
 | Plan history reuse + observability events | ✅ |
 | Chat RAG pipeline (observability + 5/5 benchmark + grounded Q&A) | ✅ 2026-06-27 |
@@ -48,10 +48,10 @@ End-to-end goal execution works; next focus is **quality, speed, and evidence** 
 | **C1** | **Improve planning quality** | ✅ | Phases 1–5 shipped — see **§ C1**. Goal execution only; chat path separate (**C2**). |
 | **C2** | **Improve retrieval ranking** | ✅ | Phase 0–3 complete — see **§ C2**. |
 | **C3** | **Measure reflection outcomes** | ✅ | Headless A/B harness — see **§ C3**. `max_reflections` 0 vs 2; timeout skip; `logs/reflection_ab_benchmark.jsonl`. |
-| **C4** | **Developer & CI latency** | 📋 | Fast feedback for engineers — see **§ C4/C7**. ~40 min `run_test_suite` is the signal. Mock LLM, tiny corpus, cached embeddings, skip re-index, dev vs full regression tiers. |
-| **C5** | **Robustness & failure tests** | 📋 | Unusual/failure scenarios: Ollama unreachable, empty RAG corpus, malformed plan JSON, step timeout, reflection exhaustion, plan parse retry, concurrent goals. Add to `unit_tests.cpp` or a `run_robustness_suite` with `THOTH_MOCK_*` gates. |
+| **C4** | **Developer & CI latency** | ✅ | Dev tier + CI wiring — see **§ C4**. PR: `ctest -L fast` (~2 min). Nightly: `test-suite-full` with Ollama. |
+| **C5** | **Robustness & failure tests** | ✅ | `run_robustness_suite` — 10 mock cases; `logs/robustness_suite.jsonl`. See **§ C5**. |
 | **C6** | **Cognitive metrics** | 🔶 | Phase 1 ✅ — `logs/cognitive_metrics.jsonl`. Phase 2 (plots/tokens) pending. |
-| **C7** | **Runtime latency** | 📋 | Production goal execution speed — see **§ C4/C7**. Parallel retrieval, prompt size, batching, inference settings, plan scheduling, LLM step timeouts vs hardware. |
+| **C7** | **Runtime latency** | ✅ | Phase 1–3 complete — batch embeddings, synthesis cap, parallel RETRIEVAL + prefetch. See **§ C7**. |
 
 **Dependencies:** C3 benefits from C1/C2 (reflection currently retriggers on failed LLM/timeouts, not just bad answers). **C4** and **C7** are independent — do not mix mock-fast-CI work with runtime optimization. **C6** should start early (append-only logging) and deepen as C1–C7 land — metrics make every subsequent tuning iteration measurable.
 
@@ -112,6 +112,61 @@ Prove reflection replan helps recoverable failures and does **not** loop on time
 **Results (2026-06-26):** 2/2 cases pass; mean reflection lift **0.5** (C3-01 FAILED→COMPLETED with reflection on; C3-02 both arms FAILED, planner_calls=1).
 
 **Key files:** `reflection_utils.*`, `reflection_ab_cases.*`, `run_reflection_ab_benchmark.cpp`, `executive_controller.cpp` (`set_max_reflections`), `cognitive_metrics.h` (`max_reflections`, `reflection_skip_reason`).
+
+#### C5 — Robustness & failure tests
+
+Mock-only harness for planning, retrieval, execution, reflection, and lifecycle edge cases. Asserts **observable behavior** (terminal state, bounded retries, structurally valid plans) — not internal mechanism names.
+
+| Category | Cases |
+|----------|-------|
+| **Retrieval** | C5-01 empty index; C5-02 empty retrieval result → LLM empty-context message |
+| **Planning** | C5-03 invalid JSON→retry→valid plan; C5-04 invalid step order; C5-05 missing `depends_on` repair |
+| **Reflection** | C5-06 reflection budget exhausted (bounded terminal state) |
+| **Execution** | C5-07 step timeout; C5-08 `THOTH_MOCK_LLM_UNAVAILABLE`; C5-09 concurrent goals |
+| **Lifecycle** | C5-10 controller teardown (no crash) |
+
+**Run:** `./build/debug/external/basic_agent/run_robustness_suite` (~40s, no Ollama)  
+**Log:** `logs/robustness_suite.jsonl` — per-case `terminal_state`, `failure_reason`, `reflection_cycles`, `pass_reason`, `duration_ms`
+
+**Mock gates:** `THOTH_MOCK_LLM`, `THOTH_MOCK_LLM_UNAVAILABLE`, `THOTH_MOCK_STEP_TIMEOUT`, `THOTH_MOCK_LLM_DELAY_MS`, `RobustnessMockResponses` queue (scripted planner JSON).
+
+#### C4 — Developer & CI latency
+
+Fast feedback while coding; keep full Ollama path for regression.
+
+| Phase | Task | Status |
+|-------|------|--------|
+| **1** | **`run_test_suite --dev`** — TfIdf embeddings, mock LLM (`test_suite_dev`), tiny `test_suite_corpus`, cached `test_suite.rag_index.bin`, skip re-index. ~10s vs ~40 min full. | ✅ |
+| **2** | **CI tiers** — PR: `ctest -L pr` (unit + dev TEST_SUITE + reflection A/B). Dev loop: `ctest -L fast` (~25s). Nightly: Ollama `test-suite-full`. | ✅ |
+
+**Run:**
+```bash
+./build/debug/tests/run_test_suite --dev    # default; no Ollama
+./build/debug/tests/run_test_suite --full   # Ollama regression (~40 min)
+```
+
+**CI (GitHub Actions):** `.github/workflows/ci-security.yml` — PR/push runs `ctest -L pr`; scheduled nightly runs full Ollama `test-suite-full`.
+
+**Local CTest labels:** `fast` (cognitive mocks ~25s), `pr` (unit + cognitive), `nightly` (configure with `-DTHOTH_TEST_SUITE_FULL=ON`).
+
+**Dev vs full TC-03:** dev checks goal-scoped GRAG row (`goal_present`); full requires `alpha > 0` and `direction_magnitude > 0`.
+
+#### C7 — Runtime latency (production goals)
+
+Optimize real goal execution without touching the C4 mock/CI path.
+
+| Phase | Task | Status |
+|-------|------|--------|
+| **1** | **Hot-path wins** — batch TF-IDF keyword rescoring; `embedBatch` for goal+state G/C; cap synthesis context (`synthesis_max_context_chars`); Ollama `options.num_predict` for synthesis (`synthesis_num_predict`); log `synthesis_prompt_chars` in C6. | ✅ |
+| **2** | **Analysis + tuning loop** — `scripts/summarize_cognitive_metrics.py`; tune config from p50/p95 wall-clock. | ✅ |
+| **3** | **Parallel prefetch / scheduling** — overlap independent RETRIEVAL where plan DAG allows; snapshot G/C/T at dispatch; prefetch cache for single RUNNING dependency. | ✅ |
+
+**Config** (`agent_workspace/config.json`): `synthesis_max_context_chars` (default 8192), `synthesis_num_predict` (default 512), `max_parallel_retrieval` (default 4), `enable_retrieval_prefetch` (default true). Planner still uses `max_tokens`.
+
+**Analyze latencies:**
+```bash
+python3 scripts/summarize_cognitive_metrics.py --log logs/cognitive_metrics.jsonl
+```
 
 #### C4 & C7 — Latency (developer vs runtime)
 
@@ -290,10 +345,11 @@ Done    C2 Phase 3 — chat pipeline fixes (grounding, tool gating, truncation) 
 Done    C1 phases 1–5 — planner context management (pushed 379c0c5)
 Done    C6 Phase 1 — cognitive metrics logging (`logs/cognitive_metrics.jsonl`)
 Done    C3 — reflection A/B measurement (2/2 cases, mean lift 0.5)
-Next 1  C4 — developer & CI latency (fast test path, mocks, slim corpus)
-Next 2  C7 — runtime latency (production execution hot paths)
-Next 3  C5 — robustness / failure scenario tests
-Next 4  V1 manual GUI pass (TC-05 scores panel, chat UX)
+Done    C4 Phase 1 — run_test_suite --dev (~10s, mock LLM + TfIdf + cached index)
+Done    C4 Phase 2 — CI tiers (PR fast / nightly full Ollama)
+Done    C7 Phase 3 — parallel RETRIEVAL dispatch + dependency prefetch
+Done    C5 — robustness suite (10 cases, logs/robustness_suite.jsonl)
+Next 1  V1 manual GUI pass (TC-05 scores panel, chat UX)
 Next 5  M1–M4 — finish memory pruning pipeline
 Next 6  G1 / G2 — trajectory tuning or subgoal trees
 Later   Tier 6 UI polish
@@ -321,9 +377,10 @@ External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 | Chat / retrieval quality (C2) | ✅ phases 0–3; user-validated grounded Q&A |
 | Per-goal cognitive metrics (C6 Phase 1) | ✅ `logs/cognitive_metrics.jsonl` |
 | Reflection A/B measurement (C3) | ✅ `run_reflection_ab_benchmark` — 2/2 cases |
-| Developer / CI latency (fast tests) | 📋 **C4** |
-| Runtime latency (production goals) | 📋 **C7** |
-| Robustness test coverage | 📋 **C5** |
+| Developer / CI latency (C4) | ✅ `ctest -L fast` ~25s; PR `ctest -L pr`; nightly `--full` |
+| Runtime latency (C7 Phase 1–2) | ✅ batch embed + synthesis cap + metrics script |
+| Runtime latency (C7 Phase 3 prefetch) | ✅ |
+| Robustness test coverage | ✅ **C5** — `run_robustness_suite` 10/10 |
 | Future cognitive expansion (F1–F8) | 📋 research horizon — §8 |
 
 ---

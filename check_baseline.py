@@ -8,7 +8,9 @@ Usage:
         --bench agent_workspace/grag_benchmark.jsonl \\
         --applog agent_workspace/app_log.jsonl
 
-Prefer headless run: ./build/debug/tests/run_test_suite
+Prefer headless run:
+  ./build/debug/tests/run_test_suite --dev   # fast (~10s)
+  ./build/debug/tests/run_test_suite --full  # Ollama regression
 """
 
 import argparse
@@ -41,7 +43,7 @@ def bench_row(entry):
 
 
 def is_grag_scoring(scoring_type):
-    return scoring_type in ("grag", "grag_hybrid", "cosine")
+    return scoring_type in ("grag", "grag_hybrid", "rag_hybrid", "grag_blended_hybrid")
 
 
 def diagnostics_rows(bench_entries):
@@ -58,7 +60,7 @@ def chat_retrieval_diagnostics(bench_entries):
     matches = []
     for d in diagnostics_rows(bench_entries):
         st = d.get("scoring_type", "")
-        if st not in ("grag", "grag_hybrid"):
+        if st not in ("grag", "grag_hybrid", "rag_hybrid", "grag_blended_hybrid"):
             continue
         if float(d.get("alpha", 0.0)) <= 0.0:
             continue

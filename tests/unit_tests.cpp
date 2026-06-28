@@ -834,6 +834,110 @@ public:
     Plan revise_plan(const Plan& p, const nlohmann::json&) override { return p; }
 };
 
+class MockParallelRetrievalPlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "parallel-retrieval-plan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+
+        PlanStep r1;
+        r1.step_id = "retrieve-a";
+        r1.description = "Retrieve GRAG alpha documentation";
+        r1.type = StepType::RETRIEVAL;
+        r1.payload = {{"query", "GRAG alpha directional scoring"}, {"top_k", 3}};
+
+        PlanStep r2;
+        r2.step_id = "retrieve-b";
+        r2.description = "Retrieve ExecutiveController documentation";
+        r2.type = StepType::RETRIEVAL;
+        r2.payload = {{"query", "ExecutiveController state machine"}, {"top_k", 3}};
+
+        PlanStep synth;
+        synth.step_id = "synthesize";
+        synth.description = "Summarize retrieved context";
+        synth.type = StepType::LLM;
+        synth.payload = {{"prompt", "Summarize findings"}};
+        synth.depends_on = {"retrieve-a", "retrieve-b"};
+
+        plan.steps.push_back(r1);
+        plan.steps.push_back(r2);
+        plan.steps.push_back(synth);
+        return plan;
+    }
+    Plan revise_plan(const Plan& p, const nlohmann::json&) override { return p; }
+};
+
+static bool testParallelRetrieval() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_parallel_retrieval_test.db").string();
+    cfg.enable_retrieval_prefetch = true;
+    cfg.max_parallel_retrieval = 4;
+
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto idx = new IndexManager(engine.get());
+
+    CodeChunk chunkA;
+    chunkA.code = "GRAG alpha blends query similarity with directional scoring D = G - C.";
+    chunkA.fileName = "grag.md";
+    chunkA.embedding = engine->embed(chunkA.code);
+    idx->addChunkToIndex(std::move(chunkA));
+
+    CodeChunk chunkB;
+    chunkB.code = "ExecutiveController states include IDLE, PLANNING, EXECUTING_STEP, and COMPLETED.";
+    chunkB.fileName = "controller.md";
+    chunkB.embedding = engine->embed(chunkB.code);
+    idx->addChunkToIndex(std::move(chunkB));
+
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+    auto planner = std::make_shared<MockParallelRetrievalPlanner>();
+    auto registry = std::make_shared<ToolRegistry>();
+
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    controller.set_config(&cfg);
+
+    std::atomic<int> active_retrievals{0};
+    std::atomic<int> max_concurrent{0};
+    std::atomic<bool> completed{false};
+
+    controller.set_event_callback([&](const ControllerEvent& ev) {
+        const bool isRetrievalStep =
+            ev.step_id == "retrieve-a" || ev.step_id == "retrieve-b";
+        if (ev.type == EventType::STEP_STARTED && isRetrievalStep) {
+            const int now = ++active_retrievals;
+            int observed = max_concurrent.load();
+            while (now > observed && !max_concurrent.compare_exchange_weak(observed, now)) {
+            }
+        } else if ((ev.type == EventType::STEP_COMPLETED || ev.type == EventType::STEP_FAILED) &&
+                   isRetrievalStep) {
+            --active_retrievals;
+        } else if (ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_FAILED) {
+            completed.store(true);
+        }
+    });
+
+    controller.execute_goal("Parallel retrieval test");
+
+    int timeout = 100;
+    while (!completed.load() && timeout > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        --timeout;
+    }
+
+    const bool ok = completed.load() && max_concurrent.load() >= 2;
+    if (!ok) {
+        std::cerr << "testParallelRetrieval: expected concurrent retrievals (max="
+                  << max_concurrent.load() << ", completed=" << completed.load() << ")\n";
+    }
+
+    fs::remove(cfg.database_path);
+    unsetenv("THOTH_MOCK_LLM");
+    return ok;
+}
+
 static bool testReflectionLoop() {
     setenv("THOTH_MOCK_LLM", "true", 1);
     Config cfg;
@@ -1381,6 +1485,7 @@ int main() {
     if (!testVectorStoreAbstraction()) failures++;
     if (!testWebScrapeTool()) failures++;
     if (!testToolBatching()) failures++;
+    if (!testParallelRetrieval()) failures++;
     if (!testSelfCorrectTool()) failures++;
     if (!testConstraintChecker()) failures++;
     if (!testReflectionLoop()) failures++;

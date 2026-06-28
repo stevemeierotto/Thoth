@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install build dependencies
         run: |
@@ -35,14 +37,16 @@ jobs:
       - name: Build
         run: cmake --build --preset build-debug --parallel
 
-      - name: Run tests
-        run: ctest --test-dir build/debug --output-on-failure
+      - name: Run PR tests (unit + dev TEST_SUITE + reflection A/B)
+        run: ctest --test-dir build/debug -L pr --output-on-failure
 
   static-analysis:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install static analysis tools
         run: |
@@ -126,5 +130,52 @@ jobs:
       - name: Build ASan
         run: cmake --build --preset build-asan --parallel
 
-      - name: Run ASan tests
-        run: ctest --test-dir build/asan --output-on-failure
+      - name: Run ASan PR tests
+        run: ctest --test-dir build/asan -L pr --output-on-failure
+
+  cognitive-regression-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            g++ \
+            make \
+            curl \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libwxgtk3.2-dev
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama and pull models
+        run: |
+          ollama serve &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5:3b
+          ollama pull nomic-embed-text
+
+      - name: Configure (with full TEST_SUITE)
+        run: cmake --preset debug -DTHOTH_TEST_SUITE_FULL=ON
+
+      - name: Build
+        run: cmake --build --preset build-debug --parallel
+
+      - name: Run full Ollama TEST_SUITE
+        env:
+          OLLAMA_MODEL: qwen2.5:3b
+        run: ctest --test-dir build/debug -R test-suite-full --output-on-failure --timeout 3600

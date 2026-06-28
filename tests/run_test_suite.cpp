@@ -1,6 +1,10 @@
 /*
  * Headless driver for docs/TEST_SUITE.md (TC-01–TC-07).
- * Uses BasicAgentPlugin — no GUI. Requires Ollama + indexed RAG corpus.
+ * Uses BasicAgentPlugin — no GUI.
+ *
+ * Tiers:
+ *   --dev   Fast path: TfIdf embeddings, mock LLM, tiny corpus, cached index (no Ollama).
+ *   --full  Production regression: real Ollama LLM + external embeddings (~40 min).
  */
 #include "basic_agent_plugin.h"
 #include "file_handler.h"
@@ -21,6 +25,35 @@
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
+
+enum class SuiteTier { Dev, Full };
+
+static SuiteTier parseTier(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg(argv[i]);
+        if (arg == "--dev") return SuiteTier::Dev;
+        if (arg == "--full") return SuiteTier::Full;
+        if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: run_test_suite [--dev|--full]\n"
+                      << "  --dev   Fast mock path (default; no Ollama)\n"
+                      << "  --full  Full Ollama regression\n";
+            std::exit(0);
+        }
+    }
+    return SuiteTier::Dev;
+}
+
+static void configureDevTier(const std::string& indexPath) {
+    setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    setenv("THOTH_TEST_SUITE_INDEX", indexPath.c_str(), 1);
+}
+
+static void configureFullTier() {
+    unsetenv("THOTH_TEST_SUITE_DEV");
+    unsetenv("THOTH_MOCK_LLM");
+    unsetenv("THOTH_TEST_SUITE_INDEX");
+}
 
 static bool ollamaReachable() {
     const int code = std::system("curl -sf http://localhost:11434/api/tags >/dev/null 2>&1");
@@ -52,11 +85,49 @@ static json benchDiagnostics(const json& entry) {
     return entry;
 }
 
+static double jsonDouble(const json& obj, const char* key, double fallback = 0.0) {
+    if (!obj.is_object() || !obj.contains(key) || obj[key].is_null()) {
+        return fallback;
+    }
+    try {
+        return obj[key].get<double>();
+    } catch (...) {
+        return fallback;
+    }
+}
+
+static bool isGragScoringType(const std::string& scoringType) {
+    return scoringType == "grag" || scoringType == "grag_hybrid" ||
+           scoringType == "rag_hybrid" || scoringType == "grag_blended_hybrid";
+}
+
+static json latestGragDiagnostics(const std::vector<json>& bench, bool requireGoalPresent) {
+    for (auto it = bench.rbegin(); it != bench.rend(); ++it) {
+        const json d = benchDiagnostics(*it);
+        if (!d.is_object()) {
+            continue;
+        }
+        std::string st;
+        if (d.contains("scoring_type") && d["scoring_type"].is_string()) {
+            st = d["scoring_type"].get<std::string>();
+        }
+        if (!isGragScoringType(st)) {
+            continue;
+        }
+        if (requireGoalPresent && !d.value("goal_present", false)) {
+            continue;
+        }
+        return d;
+    }
+    return json();
+}
+
 static bool chatRetrievalDiagnosticsPresent(const std::vector<json>& bench) {
     for (auto it = bench.rbegin(); it != bench.rend(); ++it) {
         const json d = benchDiagnostics(*it);
-        const std::string st = d.value("scoring_type", "");
-        if (st != "grag" && st != "grag_hybrid") {
+        const std::string st = d.contains("scoring_type") && d["scoring_type"].is_string()
+            ? d["scoring_type"].get<std::string>() : "";
+        if (!isGragScoringType(st)) {
             continue;
         }
         if (d.value("alpha", 0.0) <= 0.0) {
@@ -165,17 +236,29 @@ static void resetPlanTemplatesForTestRun() {
     }
 }
 
-int main() {
-    if (!ollamaReachable()) {
-        std::cerr << "TEST_SUITE: Ollama not reachable at http://localhost:11434 — start Ollama first.\n";
-        return 2;
-    }
+int main(int argc, char** argv) {
+    const SuiteTier tier = parseTier(argc, argv);
+    const bool devTier = tier == SuiteTier::Dev;
 
     writeTestCorpus();
     resetPlanTemplatesForTestRun();
 
     FileHandler fh;
     const std::string corpusPath = fh.getAgentWorkspacePath("rag/test_suite_corpus");
+    const std::string indexPath = (fs::path(corpusPath) / "test_suite.rag_index.bin").string();
+
+    if (devTier) {
+        configureDevTier(indexPath);
+        std::cout << "TEST_SUITE tier: dev (mock LLM, TfIdf, cached index)\n";
+    } else {
+        configureFullTier();
+        if (!ollamaReachable()) {
+            std::cerr << "TEST_SUITE: Ollama not reachable at http://localhost:11434 — start Ollama first.\n";
+            return 2;
+        }
+        std::cout << "TEST_SUITE tier: full (Ollama required)\n";
+    }
+
     const std::string tracePath = fh.getAgentWorkspacePath("decision_trace.jsonl");
     const std::string benchPath = fh.getAgentWorkspacePath("grag_benchmark.jsonl");
     const std::string appPath = fh.getAgentWorkspacePath("app_log.jsonl");
@@ -184,6 +267,10 @@ int main() {
     truncateLog(benchPath);
     // Keep app_log history minimal — truncate for clean routing_decision reads
     truncateLog(appPath);
+
+    const int goalWaitMs = devTier ? 120000 : 600000;
+    const int chatWaitMs = devTier ? 30000 : 120000;
+    const int execWaitMs = devTier ? 15000 : 60000;
 
     RunFlags flags;
     BasicAgentPlugin plugin;
@@ -217,7 +304,7 @@ int main() {
     flags.executing.store(false);
     plugin.executeGoal("Analyze the ExecutiveController and summarize its state machine");
 
-    const bool goalFinished = waitMs(600000, [&] {
+    const bool goalFinished = waitMs(goalWaitMs, [&] {
         return flags.plan_completed.load();
     });
 
@@ -260,22 +347,22 @@ int main() {
                 "RETRIEVAL/LLM step order wrong in trace"));
 
     const auto bench = loadJsonl(benchPath);
-    json latestGrag;
-    for (auto it = bench.rbegin(); it != bench.rend(); ++it) {
-        const auto d = benchDiagnostics(*it);
-        const std::string st = d.value("scoring_type", "");
-        if (st == "grag" || st == "grag_hybrid") {
-            latestGrag = d;
-            break;
-        }
+    const json latestGrag = latestGragDiagnostics(bench, true);
+    const json latestGragAny = latestGrag.is_object() ? latestGrag : latestGragDiagnostics(bench, false);
+    const json& gragRow = latestGrag.is_object() ? latestGrag : latestGragAny;
+    const double alpha = jsonDouble(gragRow, "alpha");
+    const double magnitude = jsonDouble(gragRow, "direction_magnitude");
+    const bool goalGrag = gragRow.value("goal_present", false);
+    fail(report("TC-03", "grag scoring entry present", gragRow.is_object(),
+                "No grag/rag_hybrid entry in grag_benchmark.jsonl"));
+    if (devTier) {
+        fail(report("TC-03", "goal-scoped retrieval logged (goal_present)", goalGrag,
+                    "No goal-scoped GRAG row after executeGoal"));
+    } else {
+        fail(report("TC-03", "alpha > 0", alpha > 0.0, "Direction blend collapsed"));
+        fail(report("TC-03", "direction_magnitude > 0", magnitude > 0.0,
+                    "Goal and state embeddings may be identical"));
     }
-    const double alpha = latestGrag.value("alpha", 0.0);
-    const double magnitude = latestGrag.value("direction_magnitude", 0.0);
-    fail(report("TC-03", "grag scoring entry present", !latestGrag.is_null(),
-                "No grag/grag_hybrid entry in grag_benchmark.jsonl"));
-    fail(report("TC-03", "alpha > 0", alpha > 0.0, "Direction blend collapsed"));
-    fail(report("TC-03", "direction_magnitude > 0", magnitude > 0.0,
-                "Goal and state embeddings may be identical"));
 
     // ── TC-04 / TC-05: chat during active goal ─────────────────────────────
     std::cout << "Running TC-04 / TC-05 …\n";
@@ -283,9 +370,9 @@ int main() {
     flags.executing.store(false);
     flags.retrieval_diagnostics.store(false);
     plugin.executeGoal("Review the GRAG retrieval implementation");
-    waitMs(60000, [&] { return flags.executing.load(); });
+    waitMs(execWaitMs, [&] { return flags.executing.load(); });
     plugin.processInput("What indexes does GRAG use?");
-    waitMs(120000, [] { return true; }); // allow retrieval + LLM to finish
+    waitMs(chatWaitMs, [] { return true; }); // allow retrieval + LLM to finish
 
     {
         auto routing = routingDecisions(loadJsonl(appPath));
@@ -328,7 +415,7 @@ int main() {
     std::cout << "Running TC-07 …\n";
     flags.plan_completed.store(false);
     plugin.executeGoal("Summarize GRAG directional scoring in one paragraph");
-    waitMs(600000, [&] { return flags.plan_completed.load(); });
+    waitMs(goalWaitMs, [&] { return flags.plan_completed.load(); });
     plugin.processInput("What did you find?");
     {
         auto routing = routingDecisions(loadJsonl(appPath));
@@ -346,7 +433,11 @@ int main() {
 
     std::cout << "\n══════════════════════════════════════════════\n";
     if (failures == 0) {
-        std::cout << "  TEST_SUITE: ALL 7 CASES PASSED\n";
+        std::cout << "  TEST_SUITE: ALL 7 CASES PASSED";
+        if (devTier) {
+            std::cout << " (dev tier)";
+        }
+        std::cout << "\n";
     } else {
         std::cout << "  TEST_SUITE: " << failures << " CHECK(S) FAILED\n";
         std::cout << "  Logs: " << tracePath << "\n";

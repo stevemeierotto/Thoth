@@ -142,10 +142,21 @@ make -j$(sysctl -n hw.ncpu)  # macOS
 ls -lh build/debug/thoth-control-panel
 
 # Run unit tests
-cd build/debug
-ctest --output-on-failure
-# or directly:
-./tests/thoth-unit-tests
+# Quick dev loop (~70s, no Ollama): dev TEST_SUITE + reflection A/B + robustness suite
+ctest --test-dir build/debug -L fast --output-on-failure
+
+# Individual cognitive harnesses (optional):
+# ./build/debug/tests/run_test_suite --dev
+# ./build/debug/external/basic_agent/run_reflection_ab_benchmark
+# ./build/debug/external/basic_agent/run_robustness_suite
+
+# PR-equivalent (unit + cognitive):
+ctest --test-dir build/debug -L pr --output-on-failure
+
+# Full Ollama regression (~40 min; nightly / manual only)
+cmake --preset debug -DTHOTH_TEST_SUITE_FULL=ON
+cmake --build --preset build-debug
+ctest --test-dir build/debug -R test-suite-full --output-on-failure --timeout 3600
 ```
 
 ---
