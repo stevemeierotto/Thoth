@@ -6,10 +6,8 @@
 > **Supersession note (2026-06-17):** This baseline remains the regression contract for
 > TC-01–TC-07 pipeline behavior below. **Cognate V2** work post-dates the 2026-03-12 lock.
 > **Automated check (2026-06-18):** `ctest` 100% pass; audit grep checklist pass — see `audit.md`.
-> **Manual TC-01–TC-07:** not re-run 2026-06-18 (requires GUI + Ollama). Re-run before the next
-> major merge or benchmark score campaign; record date in §5 below.
-> Baseline §1 references `DefaultPlanner`; production may use `LLMPlanner` — re-verify
-> TC-02 plan structure on the next manual pass.
+> **Manual TC-01–TC-07:** GUI pass **2026-06-29** — see §5.2 and `TEST_SUITE_GUI_CHECKLIST.md`.
+> Headless `run_test_suite --dev` 7/7 (2026-06-27+). Baseline §1 references `DefaultPlanner`; production uses `LLMPlanner` — TC-02 re-verified 2026-06-29.
 
 ---
 
@@ -163,9 +161,23 @@ These are known gaps that are NOT failures — they are documented future work:
 | `ctest --output-on-failure` | **PASS** | ~100s, all unit tests green |
 | `audit.md` §7 grep checklist | **PASS** | confirmation, ConstraintChecker, sandbox, shell gate, stub |
 
-### 5.2 Manual TEST_SUITE — historical (2026-03-12)
+### 5.2 Manual TEST_SUITE — GUI (2026-06-29)
 
-Last full manual pass (GUI + logs). **Pending refresh** — run TC-01–TC-07 per `TEST_SUITE.md` before next merge.
+Per **`TEST_SUITE_GUI_CHECKLIST.md`**. Observability (Plan Execution + GRAG Diagnostics) confirmed in GUI.
+
+| Test | Result | Evidence |
+|------|--------|----------|
+| TC-01: Plain chat, no goal | PASS | Chat session + `logs/chat_rag.jsonl` |
+| TC-02: Goal → RETRIEVAL before LLM | PASS | GUI goal 2 steps, completed; `decision_trace.jsonl` |
+| TC-03: GRAG math active | PASS | `grag_alpha=1.0`; benchmark mag ≈ 0.78 |
+| TC-04: Chat during active goal | PASS | `active_goal` + post-goal chat in session |
+| TC-05: UI observability | PASS | Plan + GRAG panels update (user confirmed) |
+| TC-06: No tool hallucination | PASS | Prose chat responses, no tool JSON |
+| TC-07: Goal persists after PLAN_COMPLETED | PASS | Banner + follow-up chat retained |
+
+### 5.3 Manual TEST_SUITE — historical (2026-03-12)
+
+Last full manual pass (GUI + logs). **Superseded by §5.2 (2026-06-29)** — retained for history.
 
 | Test | Result | Log Signal |
 |------|--------|-----------|

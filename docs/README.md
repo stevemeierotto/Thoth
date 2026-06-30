@@ -60,7 +60,7 @@ A real-time directed graph visualization that highlights which part of the archi
 ### `run_cognate_benchmark`
 A dedicated research tool for performing comparative analysis (Standard vs. Scientific mode) and measuring the "Learning Curve" of strategy adoption.
 
-> **Benchmark caveat:** Cognate benchmark runs in `benchmark_results.md` report **0.00\*** task success rates in the mock environment. Metrics such as reasoning depth, SCR, and strategy promotion remain meaningful; end-to-end task completion is **not** implied by those runs.
+> **Benchmark caveat:** Cognate benchmark runs in `benchmark_results.md` report **0.00\*** task success rates in the mock environment. Metrics such as reasoning depth, SCR, and strategy promotion remain meaningful; end-to-end task completion is **not** implied by those runs. The **51× reasoning depth** figure is iteration count under mock conditions, not real task completion — see `COGNATE_V2.md` and `audit.md` §5. External review (2026-06) noted this level of candor as a documentation strength (`cursor_list.md`).
 
 ### Explainable Retrieval (`ScoreBreakdown`)
 Every retrieved chunk carries a `ScoreBreakdown` providing "Why this document?" transparency across Query, Goal, Trajectory, Keyword, and Graph signals.
@@ -76,7 +76,7 @@ Every retrieved chunk carries a `ScoreBreakdown` providing "Why this document?" 
 | ✅ Complete | Cognitive Loop Graph & "Plan vs. Reality" Visualization |
 | ✅ Complete | Stable UI Sidebar Architecture & AddCollapsiblePane helper |
 | ✅ Complete | Adaptive Graph Learning & Multi-Index Routing |
-| 🔶 Partial | Phase 3: Memory Stability (hot-tier prune wired; summarize/age restore open) |
+| 🔶 Partial | Phase 3: Memory Stability (M1–M2 consolidation verified; M3–M4 open) |
 | 🔮 Future expansion | Phase 5: Self-Building (optional — owner may try later; `apply_diff` stub today) |
 | 📋 Planned | Subgoal Trees (Hierarchical Decomposition) |
 

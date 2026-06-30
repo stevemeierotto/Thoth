@@ -6,6 +6,8 @@
 
 ## How to Use This Document
 
+**GUI quick pass:** see **[TEST_SUITE_GUI_CHECKLIST.md](TEST_SUITE_GUI_CHECKLIST.md)** (~30 min, Observability-focused).
+
 Each test case is self-contained. You run the agent, perform the described
 action, then check the specified log signals. A test passes only when ALL
 signals for that test are confirmed.

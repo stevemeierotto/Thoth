@@ -107,6 +107,40 @@ bool AgentInterface::loadConversationMemory(
     return true;
 }
 
+bool AgentInterface::loadConversationMemorySync(
+    const std::vector<Memory::TimedMessage>& messages,
+    const std::string& summary) {
+    if (!plugin) {
+        return false;
+    }
+
+    auto done = std::make_shared<std::promise<void>>();
+    std::future<void> finished = done->get_future();
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this, messages, summary, done]() {
+            if (plugin) {
+                plugin->setConversationMemory(messages, summary);
+            }
+            done->set_value();
+        });
+    }
+    workersCv.notify_one();
+    finished.wait();
+    return true;
+}
+
+bool AgentInterface::loadConversationMemorySync(
+    const std::vector<std::pair<std::string, std::string>>& messages,
+    const std::string& summary) {
+    std::vector<Memory::TimedMessage> timed;
+    timed.reserve(messages.size());
+    for (const auto& msg : messages) {
+        timed.push_back({msg.first, msg.second, 0});
+    }
+    return loadConversationMemorySync(timed, summary);
+}
+
 void AgentInterface::setRagFiles(const std::vector<std::string>& filePaths) {
     if (!plugin) return;
 

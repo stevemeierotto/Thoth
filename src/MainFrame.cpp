@@ -216,10 +216,6 @@ void MainFrame::LoadChatSessions() {
 
             m_sessions.push_back(std::move(session));
         }
-
-        for (auto& session : m_sessions) {
-            TrimSessionMessagesForPersistence(session);
-        }
     } catch (...) {
         m_sessions.clear();
     }
@@ -228,10 +224,6 @@ void MainFrame::LoadChatSessions() {
 void MainFrame::SaveChatSessions() {
     if (m_chatSessionsPath.empty()) {
         return;
-    }
-
-    for (auto& session : m_sessions) {
-        TrimSessionMessagesForPersistence(session);
     }
 
     const std::filesystem::path sessionsPath(m_chatSessionsPath);
@@ -411,18 +403,26 @@ bool MainFrame::SyncAgentMemoryFromActiveSession(bool includeRagFiles) {
     auto sessionCopy = session;
     MigrateFilesToSandbox(sessionCopy.ragFilePaths);
     
-    std::vector<std::pair<std::string, std::string>> memoryMessages;
+    std::vector<Memory::TimedMessage> memoryMessages;
     memoryMessages.reserve(sessionCopy.messages.size());
     for (const auto& message : sessionCopy.messages) {
-        memoryMessages.emplace_back(message.role, message.content);
+        Memory::TimedMessage timed;
+        timed.role = message.role;
+        timed.content = message.content;
+        timed.timestamp_ms = message.timestampMs;
+        memoryMessages.push_back(std::move(timed));
     }
 
     if (includeRagFiles) {
         agent->setRagFiles(sessionCopy.ragFilePaths);
     }
-    bool ok = agent->loadConversationMemory(memoryMessages, BuildMemorySummary(sessionCopy));
+    bool ok = agent->loadConversationMemorySync(memoryMessages, BuildMemorySummary(sessionCopy));
     if (ok) {
         agent->checkResumablePlan();
+        if (m_activeSessionIndex >= 0
+            && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+            TrimSessionMessagesForPersistence(m_sessions[static_cast<std::size_t>(m_activeSessionIndex)]);
+        }
     }
     
     if (!session.activeGoal.empty()) {
@@ -1394,6 +1394,8 @@ void MainFrame::SetupMenuBar() {
     benchMenu->Append(ID_MENU_BENCH_RETRIEVAL_COMPARISON, "Run &Retrieval Comparison");
     benchMenu->Append(ID_MENU_BENCH_STRATEGY_LEARNING, "Run &Strategy Learning Test");
     benchMenu->Append(ID_MENU_BENCH_FULL_SYSTEM, "Run &Full System Benchmark");
+    benchMenu->AppendSeparator();
+    benchMenu->Append(ID_MENU_BENCH_EXPORT_COGNITIVE_METRICS, "Export &Cognitive Metrics...");
 
     // View Menu
     wxMenu* viewMenu = new wxMenu();
@@ -1443,6 +1445,7 @@ void MainFrame::SetupMenuBar() {
     Bind(wxEVT_MENU, &MainFrame::OnMenuBenchRetrievalComparison, this, ID_MENU_BENCH_RETRIEVAL_COMPARISON);
     Bind(wxEVT_MENU, &MainFrame::OnMenuBenchStrategyLearning, this, ID_MENU_BENCH_STRATEGY_LEARNING);
     Bind(wxEVT_MENU, &MainFrame::OnMenuBenchFullSystem, this, ID_MENU_BENCH_FULL_SYSTEM);
+    Bind(wxEVT_MENU, &MainFrame::OnMenuBenchExportCognitiveMetrics, this, ID_MENU_BENCH_EXPORT_COGNITIVE_METRICS);
 
     Bind(wxEVT_MENU, &MainFrame::OnMenuViewShowGrag, this, ID_MENU_VIEW_SHOW_GRAG);
     Bind(wxEVT_MENU, &MainFrame::OnMenuViewShowStrategy, this, ID_MENU_VIEW_SHOW_STRATEGY);
@@ -1524,6 +1527,137 @@ void MainFrame::OnMenuBenchRunGrag(wxCommandEvent& WXUNUSED(evt)) {
 
     m_activeBenchmarkWindow->Show();
     m_activeBenchmarkWindow->Run(bin + " --sample", projectRoot);
+}
+
+void MainFrame::OnMenuBenchExportCognitiveMetrics(wxCommandEvent& WXUNUSED(evt)) {
+    FileHandler fh;
+    const std::filesystem::path projectRoot = fh.getProjectRoot();
+    const std::filesystem::path sourcePath = projectRoot / "logs" / "cognitive_metrics.jsonl";
+
+    if (!std::filesystem::exists(sourcePath)) {
+        wxMessageBox("No cognitive metrics log found at logs/cognitive_metrics.jsonl.\nRun a goal first.",
+                     "Export Cognitive Metrics", wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+
+    wxFileDialog dialog(this,
+                        "Export Cognitive Metrics",
+                        wxString::FromUTF8((projectRoot / "logs").string()),
+                        "cognitive_metrics.jsonl",
+                        "JSON Lines (*.jsonl)|*.jsonl|CSV (*.csv)|*.csv",
+                        wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (dialog.ShowModal() != wxID_OK) {
+        return;
+    }
+
+    const wxString destPath = dialog.GetPath();
+    const bool exportCsv = destPath.Lower().EndsWith(".csv");
+
+    std::ifstream in(sourcePath);
+    if (!in.is_open()) {
+        wxMessageBox("Could not read logs/cognitive_metrics.jsonl.", "Export Cognitive Metrics",
+                     wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    std::vector<nlohmann::json> rows;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        try {
+            auto row = nlohmann::json::parse(line);
+            if (row.value("event", "") == "GOAL_COGNITIVE_METRICS") {
+                rows.push_back(std::move(row));
+            }
+        } catch (...) {
+        }
+    }
+
+    if (rows.empty()) {
+        wxMessageBox("The cognitive metrics log contains no GOAL_COGNITIVE_METRICS rows.",
+                     "Export Cognitive Metrics", wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+
+    std::ofstream out(destPath.ToStdString());
+    if (!out.is_open()) {
+        wxMessageBox("Could not write export file.", "Export Cognitive Metrics", wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    static const char* kColumns[] = {
+        "emitted_at_ms", "plan_id", "session_id", "goal", "outcome", "total_wall_clock_ms",
+        "planning_time_ms", "retrieval_time_ms", "llm_synthesis_time_ms", "step_count",
+        "retrieved_chunk_count", "grag_alpha", "grag_routing_mode", "trajectory_score",
+        "final_success_score", "reflection_count", "revisions_count", "max_reflections",
+        "reflection_skip_reason", "plan_reused", "total_tokens", "prompt_tokens",
+        "completion_tokens", "planning_tokens", "synthesis_tokens", "synthesis_prompt_chars",
+        "synthesis_context_truncated"
+    };
+
+    auto csvEscape = [](const std::string& value) {
+        const bool needsQuotes = value.find_first_of(",\"\n\r") != std::string::npos;
+        std::string escaped;
+        escaped.reserve(value.size() + 2);
+        if (needsQuotes) {
+            escaped.push_back('"');
+        }
+        for (char ch : value) {
+            if (ch == '"') {
+                escaped += "\"\"";
+            } else {
+                escaped.push_back(ch);
+            }
+        }
+        if (needsQuotes) {
+            escaped.push_back('"');
+        }
+        return escaped;
+    };
+
+    auto fieldValue = [](const nlohmann::json& row, const char* key) -> std::string {
+        if (!row.contains(key)) {
+            return "";
+        }
+        const auto& value = row.at(key);
+        if (value.is_string()) {
+            return value.get<std::string>();
+        }
+        if (value.is_boolean()) {
+            return value.get<bool>() ? "true" : "false";
+        }
+        if (value.is_number()) {
+            return value.dump();
+        }
+        return value.dump();
+    };
+
+    if (exportCsv) {
+        for (size_t i = 0; i < sizeof(kColumns) / sizeof(kColumns[0]); ++i) {
+            if (i > 0) {
+                out << ',';
+            }
+            out << kColumns[i];
+        }
+        out << '\n';
+        for (const auto& row : rows) {
+            for (size_t i = 0; i < sizeof(kColumns) / sizeof(kColumns[0]); ++i) {
+                if (i > 0) {
+                    out << ',';
+                }
+                out << csvEscape(fieldValue(row, kColumns[i]));
+            }
+            out << '\n';
+        }
+    } else {
+        for (const auto& row : rows) {
+            out << row.dump() << '\n';
+        }
+    }
+
+    SetStatusText(wxString::Format("Exported %zu cognitive metric rows.", rows.size()));
 }
 
 void MainFrame::OnMenuBenchRetrievalComparison(wxCommandEvent& WXUNUSED(evt)) {

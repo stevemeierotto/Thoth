@@ -108,25 +108,48 @@ Preservation rules:
 
 ---
 
-## Step 3.2 — Memory Pruning: Implementation
+## Step 3.2 — Memory Consolidation (M1): Implementation
 
-**Status:** 🔶 Partial — hot-tier auto-prune + session scoping + GUI trim (2026-06-16). Open: summarize-before-prune, age trigger, `/prune` admin command, range-based restore, full audit metadata.
+**Status:** ✅ **M1 verified** (2026-06-26) — M1.5 gate passed. See **`episodic_memory_benchmark.md`**.
 
 **Description:**
-Implement the pruning and archival pipeline based on the approved design from Step 3.1.
+Memory **consolidation** (design term; code: `MemoryPruner` until rename) transforms hot → warm + cold when count threshold exceeded.
 
-Requirements:
-- New class: `MemoryPruner`
-- Triggered automatically on session write when thresholds are exceeded
-- Uses `DecisionTraceLogger` to log pruning events
-- Audit metadata per archived turn: `archived_at_ms`, `summary_version`, `source_range`
-- Restore path: `MemoryPruner::restore(session_id, range)` for on-demand historical replay
-- All operations must be transactional (SQLite)
+**M1 deliverables:**
+- `SummaryGenerator` → `EpisodicMemory` → `EpisodicMemoryRenderer` (structured source of truth; JSON is persistence only)
+- `warm_memory` + `warm_memory_embeddings` tables; atomic transaction (LLM outside txn; hot delete only after DB success)
+- Embed **canonical structured text**, not rendered prose
+- GRAG merge-before-score for documents + warm memories (`MemoryScope::SESSION`)
+- Fix `archived_at_ms` timestamp bugs; `derived_from_hash` integrity
+- GUI: consolidate via agent pipeline (no silent JSON drops)
+- Unit tests with `THOTH_MOCK_EPISODIC=1`
 
-**Output required:**
-- `memory_pruner.h` and `memory_pruner.cpp`
-- Updated `SQLiteMemoryRepository` to integrate pruning triggers
-- Unit tests: prune triggers at threshold, restore returns correct turns
+**Output:**
+- `memory_architecture.md`, `summary_generator.*`, `episodic_memory.*`
+- Updated `memory_pruner.cpp`, `sqlite_memory_repository.cpp`, `rag.cpp`
+- Unit tests: consolidate at threshold, warm row + cold archive, GRAG recall
+
+**Deferred (M3–M4):** `/prune`, range restore, async queue, background repair, warm merge lifecycle; token/pressure triggers (enum reserved).
+
+---
+
+## Step 3.2b — Memory Consolidation (M2): Age-Based Policy
+
+**Status:** ✅ **Complete** (2026-06-29)
+
+**Deliverables:**
+- `ConsolidationReason` bitmask + `ConsolidationDecision` (structured policy with diagnostics)
+- `Clock` / `SystemClock` / `FakeClock` — injectable time for policy + tests
+- `config.json` → `memory.max_hot_messages`, `memory.max_hot_age_days`, `memory.prune_batch_size`
+- `evaluatePolicy()` OR triggers: HOT_COUNT | SESSION_INACTIVE | OLDEST_MESSAGE
+- `consolidateIfNeeded()` batch loop (cap 5, no-progress guard, deferred trace)
+- Startup stale-session discovery (no LLM); consolidate active only; defer others until access
+- Timestamp-preserving `loadConversation()` + GUI sync
+- Unit tests M2-01–M2-08
+
+**Output:**
+- `consolidation_policy.*`, `clock.*`
+- Updated `memory_pruner.*`, `memory.cpp`, `basic_agent_plugin.cpp`, `MainFrame.cpp`
 
 ---
 

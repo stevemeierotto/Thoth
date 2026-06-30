@@ -68,6 +68,7 @@ private:
         ID_MENU_BENCH_RETRIEVAL_COMPARISON,
         ID_MENU_BENCH_STRATEGY_LEARNING,
         ID_MENU_BENCH_FULL_SYSTEM,
+        ID_MENU_BENCH_EXPORT_COGNITIVE_METRICS,
         ID_MENU_VIEW_SHOW_SESSIONS,
         ID_MENU_VIEW_SHOW_PLAN,
         ID_MENU_VIEW_SHOW_GRAG,
@@ -187,6 +188,7 @@ private:
     void OnMenuBenchRetrievalComparison(wxCommandEvent& evt);
     void OnMenuBenchStrategyLearning(wxCommandEvent& evt);
     void OnMenuBenchFullSystem(wxCommandEvent& evt);
+    void OnMenuBenchExportCognitiveMetrics(wxCommandEvent& evt);
     void OnMenuViewShowGrag(wxCommandEvent& evt);
     void OnMenuViewShowStrategy(wxCommandEvent& evt);
     void OnMenuViewShowRetrievalGraph(wxCommandEvent& evt);

@@ -1,9 +1,117 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-06-27 (C1/C2/C6 shipped; pushed to GitHub)  
+**Last updated:** 2026-06-29 (M2 complete; reflection & external review)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
+
+---
+
+## External review — documentation honesty (2026-06)
+
+Independent review noted that Thoth docs are **unusually candid** about limits — a strength, not a gap:
+
+| Topic | How docs handle it |
+|-------|-------------------|
+| **Mock Cognate benchmarks** | `benchmark_results.md` / `COGNATE_V2.md` report **0.00\*** task success under mock setup; metrics framed as process signals, not end-to-end completion |
+| **Trajectory weight ($w_t$)** | Mixed lift on trajectory-disambiguation cases documented (`plan_reuse_tuning.md`, `benchmark_results.md`) |
+| **Hierarchical subgoals** | Explicitly **not implemented** (`improvements.md` Step 4.4, `audit.md`, `GRAG.md` planned) |
+| **Scientific mode “51× depth”** | Footnoted as **iteration count under mock conditions**, not real task completion (`COGNATE_V2.md`, `benchmark_results.md`) |
+
+**Maintain this standard:** new benchmarks and thesis-facing claims must label environment (mock vs Ollama vs GUI), distinguish iteration depth from task success, and log partial features in `audit.md` + `completed_improvements_log.md` before narrative docs.
+
+---
+
+## External review — staleness & beyond backlog (2026-06-29)
+
+Second pass: docs are **current** (dated through 2026-06-29). No meaningful code/doc drift yet. **Watch externally:** Ollama model versions, `nomic-embed-text`, and local LLM choice — these can change benchmark reproducibility without any Thoth commit.
+
+### Gaps gestured at but not fully developed
+
+| Priority | Gap | Expert view | Maps to |
+|----------|-----|-------------|---------|
+| **High** | **Longitudinal system eval** — per-run metrics exist (`C6`, `logs/cognitive_metrics.jsonl`) but no time-series view across many runs to answer “is the system improving across sessions?” (core thesis: strategy promotion + consolidation → behavioral lift) | Extend `summarize_cognitive_metrics.py` / new script: trend lines over weeks; segment by strategy-injected vs not, pre/post consolidation | **C6 Phase 3** (proposed), thesis evidence |
+| **High** | **Strategy impact measurement** — SCR defined in `COGNATE_V2.md` but not wired into a **regular automated benchmark**; promoted strategies should show detectable plan-structure change continuously, not only in one cold/warm paper run | Add SCR (or proxy) to CI/nightly harness; log to JSONL alongside reflection A/B | **C3/C6 extension**, `StrategyEngine` |
+| **Medium** | **Trajectory signal diagnostic (G1)** — mixed/negative lift on some buckets; understand **why** (noisy T, weight too high, short-trajectory construction) **before** F5 semantic embeddings | Targeted benchmark on `TRAJECTORY_DISAMBIGUATES` bucket only; tune / redesign / drop based on evidence | **G1** (active), blocks **F5** |
+| **Medium** | **M3/M4 operational gap** — without restore/replay, episodic memory is **write-only** for operators; long-running accumulation needs inspect + range replay | Finish `/prune` admin + `restore(session, range)` before claiming long-term episodic ops | **M3**, **M4** |
+| **Medium** | **B1 hardened corpus** — 30 research cases listed, not done; strengthens future benchmark claims and **V3** Zenodo re-upload | Expand hardened case set beyond 100-case research corpus baseline | **B1**, **V3** |
+| **Horizon** | **Post M3/M4 quality ceiling** — context management + memory hygiene alone won't raise planning/episodic quality further | **F3** (richer episodic memory) + **F1** (planning heuristics) highest leverage after memory ops close | **F3**, **F1** (§8) |
+
+**Suggested order (expert-aligned, not yet scheduled):** M3/M4 → G1 trajectory diagnostic → C6 time-series + SCR harness → B1 → promote F3/F1 when eval shows where lift is blocked.
+
+---
+
+## Reflection & analysis (2026-06-29)
+
+**Context:** Tier 0 (C1–C7) and memory consolidation (M1–M2) are shipped. Headless loop is verified; docs are candid. This section consolidates **external review** (above) with **implementation-grounded analysis** — what to do next and why.
+
+### Where the system actually is
+
+| Layer | Status | What it proves |
+|-------|--------|----------------|
+| **Wiring** | ✅ | RETRIEVAL→LLM goals complete; tools, reflection, scientific mode operational |
+| **Component quality** | ✅/🔶 | C1/C2 hardened context + retrieval; G1 trajectory signal mixed on some buckets |
+| **Memory pipeline** | ✅ | Hot→warm→cold consolidation + age policy; M1.5 verified retrieval path |
+| **Learning thesis** | 🔶 **Unproven longitudinally** | Strategy promotion + episodic memory **exist**; cross-session behavioral lift **not yet measured** |
+
+The gap is not “missing features” — it is **missing eval that connects features to outcomes over time**.
+
+### Three eval layers (current vs needed)
+
+```
+Component harnesses (C3–C5)     →  “Does this mechanism fire correctly?”     ✅
+Per-goal metrics (C6)           →  “How did this run perform?”               ✅
+Longitudinal / learning eval    →  “Is the system improving across runs?”    ❌ (proposed C6 Phase 3)
+```
+
+M1.5 proved the **consolidation pipe** (Apollo E2E). It did **not** prove that consolidated memory improves **later goal success** — that needs **E2** (repeat-goal harness).
+
+### Expert recommendations — agreed priorities
+
+1. **Longitudinal metrics (C6 Phase 3)** — Highest leverage for thesis honesty. Instrumentation exists; analysis is per-run only.
+2. **SCR / strategy-impact harness (E3)** — Strategy Engine is real; impact is trace-visible but not regression-tested.
+3. **G1 diagnostic before F5** — Negative lift on trajectory-disambiguation bucket → ablate before embedding more into T.
+4. **M3/M4 before “long-term memory” claims** — Warm tier is readable via GRAG but **operators cannot replay** archived episodes; write-only for ops.
+5. **B1 before V3 Zenodo** — Hardened corpus defends external claims.
+
+### Additional insights (not on prior lists)
+
+| ID | Insight | Rationale |
+|----|---------|-----------|
+| **E1** | **Benchmark environment pinning** | Expert flagged Ollama/model/embed drift. Log `llm_model`, `embedding_model`, git SHA, and mock vs `--full` tier alongside every benchmark row (`benchmark_results.md`, `cognitive_metrics.jsonl`, or sidecar `benchmark_env.json`). Cheap; prevents silent reproducibility loss. |
+| **E2** | **Episodic learning eval** | M1.5 = pipeline correctness. Need harness: same goal class pre/post consolidation, or multi-session repeat task, measuring success/latency/plan reuse when warm memory should help. Directly tests thesis. |
+| **Doc** | **Sync `COGNATE_V2.html`** | Markdown has mock footnote for 51× depth; HTML export may not — align before any thesis-facing export. |
+| **Discipline** | **Mock vs Ollama split** | Fast CI (mock/TfIdf) must never be the sole evidence for learning or retrieval claims. Nightly `--full` + pinned env = authoritative tier (already in C4; enforce in eval culture). |
+| **F3 vs M4** | **F3 overlaps M4** | “Richer episodic memory” includes restore/replay — **M4 is prerequisite**, not parallel optional work. |
+| **F1 timing** | **F1 after eval, not before** | Planning heuristics need longitudinal + episodic eval to show *where* plans fail (retrieval miss vs decomposition vs tool choice). Otherwise F1 is guesswork. |
+
+### Nuance on expert “F3 + F1 after M3/M4”
+
+Agree on direction; adjust sequencing:
+
+- **M3/M4** — operational completeness (inspect, manual prune, range restore).
+- **G1 + E1** — cheap diagnostics; run in parallel with M3/M4 if capacity allows.
+- **C6 Phase 3 + E3 + E2** — eval layer that validates (or falsifies) learning claims.
+- **B1** — when preparing V3 or external publication.
+- **F3/F1** — only after eval identifies the binding constraint; F3 extends what M4 restores, F1 fixes planner quality ceiling.
+
+### Consolidated roadmap (reflection snapshot)
+
+```
+Now      M3 → M4                    (memory ops: prune admin + restore)
+Next     G1 diagnostic + E1         (trajectory ablation; env pinning)
+Then     C6 Phase 3 + E2 + E3       (longitudinal metrics; episodic lift; SCR harness)
+Parallel B1 (if V3 Zenodo)         (hardened corpus)
+Later    F3 / F1                    (promote when eval shows bottleneck)
+Last     UI polish (§6), S1 apply_diff (owner discretion)
+```
+
+### What not to do yet
+
+- **F5** (semantic trajectory embeddings) before G1 diagnostic completes.
+- **Zenodo V3** before B1 + pinned-env benchmark runs.
+- **F-series bulk promotion** — horizon items; eval should drive which F moves first.
+- **NODE / self-building** — defer per existing backlog discipline.
 
 ---
 
@@ -24,13 +132,18 @@
 | Executive loop, reflection, scientific mode, strategy promotion | ✅ |
 | `executeLLM` (real synthesis, not stub) | ✅ 2026-06-27 |
 | Headless `run_test_suite` TC-01–TC-07 | ✅ full ~40 min (2026-06-27); **dev ~10s** (2026-06-26) |
+| Dev cognitive harnesses (reflection A/B, robustness suite) | ✅ 2026-06-28 |
+| Developer & CI latency (**C4**) | ✅ dev tier + CI tiers + `ctest -L fast` |
+| Runtime latency (**C7**) | ✅ batch embed, synthesis cap, parallel RETRIEVAL + prefetch |
+| Robustness & failure tests (**C5**) | ✅ `run_robustness_suite` 10/10 |
+| Reflection A/B measurement (**C3**) | ✅ 2026-06-26 |
 | Production plan templates (RETRIEVAL → LLM) + plan-reuse strip | ✅ 2026-06-27 |
 | Plan history reuse + observability events | ✅ |
 | Chat RAG pipeline (observability + 5/5 benchmark + grounded Q&A) | ✅ 2026-06-27 |
 | Per-goal cognitive metrics (`logs/cognitive_metrics.jsonl`) | ✅ 2026-06-27 |
 | C1 planner context management (budgets, validator, memory hygiene) | ✅ 2026-06-27 |
 | `allow_shell_exec` tool gating | ✅ |
-| Memory hot-tier prune + session scoping + GUI trim | 🔶 core wired; warm/cold tier open |
+| Memory consolidation (M2 age-based policy) | ✅ 2026-06-29 |
 | Trajectory $w_t$ in scoring path | 🔶 config 0.2; mixed lift on trajectory-disambiguation cases |
 | Unit tests | ✅ full suite green (~78s, 2026-06-16) |
 | Doc alignment P2.1–P2.6 | ✅ |
@@ -48,9 +161,9 @@ End-to-end goal execution works; next focus is **quality, speed, and evidence** 
 | **C1** | **Improve planning quality** | ✅ | Phases 1–5 shipped — see **§ C1**. Goal execution only; chat path separate (**C2**). |
 | **C2** | **Improve retrieval ranking** | ✅ | Phase 0–3 complete — see **§ C2**. |
 | **C3** | **Measure reflection outcomes** | ✅ | Headless A/B harness — see **§ C3**. `max_reflections` 0 vs 2; timeout skip; `logs/reflection_ab_benchmark.jsonl`. |
-| **C4** | **Developer & CI latency** | ✅ | Dev tier + CI wiring — see **§ C4**. PR: `ctest -L fast` (~2 min). Nightly: `test-suite-full` with Ollama. |
+| **C4** | **Developer & CI latency** | ✅ | Dev tier + CI wiring — see **§ C4**. PR: `ctest -L pr`; dev: `ctest -L fast` 3/3 (~70s). Nightly: `test-suite-full` with Ollama. |
 | **C5** | **Robustness & failure tests** | ✅ | `run_robustness_suite` — 10 mock cases; `logs/robustness_suite.jsonl`. See **§ C5**. |
-| **C6** | **Cognitive metrics** | 🔶 | Phase 1 ✅ — `logs/cognitive_metrics.jsonl`. Phase 2 (plots/tokens) pending. |
+| **C6** | **Cognitive metrics** | ✅ | Phase 1–2 complete — logging, summarize + plot scripts, token counts, GUI export. See **§ C6**. |
 | **C7** | **Runtime latency** | ✅ | Phase 1–3 complete — batch embeddings, synthesis cap, parallel RETRIEVAL + prefetch. See **§ C7**. |
 
 **Dependencies:** C3 benefits from C1/C2 (reflection currently retriggers on failed LLM/timeouts, not just bad answers). **C4** and **C7** are independent — do not mix mock-fast-CI work with runtime optimization. **C6** should start early (append-only logging) and deepen as C1–C7 land — metrics make every subsequent tuning iteration measurable.
@@ -137,7 +250,7 @@ Fast feedback while coding; keep full Ollama path for regression.
 | Phase | Task | Status |
 |-------|------|--------|
 | **1** | **`run_test_suite --dev`** — TfIdf embeddings, mock LLM (`test_suite_dev`), tiny `test_suite_corpus`, cached `test_suite.rag_index.bin`, skip re-index. ~10s vs ~40 min full. | ✅ |
-| **2** | **CI tiers** — PR: `ctest -L pr` (unit + dev TEST_SUITE + reflection A/B). Dev loop: `ctest -L fast` (~25s). Nightly: Ollama `test-suite-full`. | ✅ |
+| **2** | **CI tiers** — PR: `ctest -L pr` (unit + dev TEST_SUITE + reflection A/B + robustness). Dev loop: `ctest -L fast` (~70s). Nightly: Ollama `test-suite-full`. | ✅ |
 
 **Run:**
 ```bash
@@ -147,7 +260,7 @@ Fast feedback while coding; keep full Ollama path for regression.
 
 **CI (GitHub Actions):** `.github/workflows/ci-security.yml` — PR/push runs `ctest -L pr`; scheduled nightly runs full Ollama `test-suite-full`.
 
-**Local CTest labels:** `fast` (cognitive mocks ~25s), `pr` (unit + cognitive), `nightly` (configure with `-DTHOTH_TEST_SUITE_FULL=ON`).
+**Local CTest labels:** `fast` (cognitive mocks ~70s: dev TEST_SUITE + reflection A/B + robustness), `pr` (unit + cognitive), `nightly` (configure with `-DTHOTH_TEST_SUITE_FULL=ON`).
 
 **Dev vs full TC-03:** dev checks goal-scoped GRAG row (`goal_present`); full requires `alpha > 0` and `direction_magnitude > 0`.
 
@@ -168,16 +281,18 @@ Optimize real goal execution without touching the C4 mock/CI path.
 python3 scripts/summarize_cognitive_metrics.py --log logs/cognitive_metrics.jsonl
 ```
 
-#### C4 & C7 — Latency (developer vs runtime)
+#### C4 & C7 — Latency (developer vs runtime) ✅ complete
 
-Two different engineering problems; separate solutions and success criteria.
+Two different engineering problems; separate solutions and success criteria. **Both shipped 2026-06-26 – 2026-06-28** (see `completed_improvements_log.md`).
 
 | | **C4 — Developer & CI** | **C7 — Runtime / production** |
 |--|---------------------------|-------------------------------|
+| **Status** | ✅ Complete | ✅ Complete |
 | **Goal** | Fast feedback while coding; cheap regression in CI | Faster real goal execution for users |
-| **Examples** | `THOTH_MOCK_LLM`, tiny test corpus, cached embeddings, no re-index when paths unchanged, `run_test_suite` dev tier vs full tier, parallel ctest | Parallel retrieval where safe, prompt/context trimming, step batching, Ollama `num_predict` / model choice, ExecutiveController scheduling, embedding batch API |
+| **Delivered** | `run_test_suite --dev` (~10s), mock LLM + TfIdf + cached index; CTest labels (`fast`/`pr`/`nightly`); GitHub Actions PR + nightly Ollama | Batch TF-IDF rescoring; `embedBatch` G/C; synthesis context cap + `num_predict`; parallel RETRIEVAL + dependency prefetch; `summarize_cognitive_metrics.py` |
 | **Measures** | CI wall time, developer iteration loop | Per-goal `total_wall_clock_ms`, step latencies (via **C6**) |
-| **Risk** | Mocks drift from production behavior — keep full Ollama path as nightly/regression | Optimizations must not break GRAG quality (**C2**) or plan correctness (**C1**) |
+| **Verify** | `ctest -L fast` 3/3 (~70s); `run_test_suite --dev` 7/7 | `testParallelRetrieval`; config in `agent_workspace/config.json` |
+| **Risk** | Mocks drift from production — mitigated by nightly `test-suite-full` | GRAG quality (**C2**) and plan correctness (**C1**) preserved via regression harnesses |
 
 #### C6 — Cognitive metrics
 
@@ -186,7 +301,8 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | Phase | Task | Status |
 |-------|------|--------|
 | **1** | **Append-only per-goal logging** — `GOAL_COGNITIVE_METRICS` → `logs/cognitive_metrics.jsonl` on `PLAN_COMPLETED` / `PLAN_FAILED` / `PLAN_ABORTED`. | ✅ |
-| **2** | **Analysis tooling** — `scripts/plot_cognitive_metrics.py`, token counts from `LLMInterface`, GUI export. | 📋 |
+| **2** | **Analysis tooling** — `scripts/summarize_cognitive_metrics.py`; `scripts/plot_cognitive_metrics.py` (matplotlib); token counts from `LLMInterface`; GUI export (Benchmarks → Export Cognitive Metrics, JSONL/CSV). | ✅ |
+| **3** | **Longitudinal analysis** — time-series over many runs: trend success/latency/tokens; segment by `plan_reused`, strategy injection, pre/post consolidation; answer “is the system improving?” | 📋 | See **§ Reflection**; expert + analysis consensus |
 
 **Per-goal fields (Phase 1 schema):**
 
@@ -202,7 +318,8 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | `max_reflections` | Configured reflection limit for the goal |
 | `reflection_skip_reason` | Why reflection was suppressed (`timeout_failure`, `reflection_disabled`, etc.) |
 | `final_success_score` | Plan history / past_plans success signal |
-| `total_tokens` | LLM token usage (plan + synthesis; embed if available) |
+| `total_tokens` | LLM token usage (plan + synthesis; Ollama/OpenAI or char estimate for mocks) |
+| `planning_tokens` / `synthesis_tokens` | Split at last planning boundary |
 | `total_wall_clock_ms` | Goal start → PLAN_COMPLETED/FAILED |
 
 **Questions metrics should answer over time:**
@@ -216,7 +333,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 
 - **Partial data today:** `StepMetricsRepository`, `grag_benchmark.jsonl`, `decision_trace.jsonl`, `GragMetricsLogger` — now supplemented by unified per-goal rows.
 - **Phase 1 (✅):** `logs/cognitive_metrics.jsonl` — `GOAL_COGNITIVE_METRICS` on `PLAN_COMPLETED` / `PLAN_FAILED` / `PLAN_ABORTED`; fields below.
-- **Phase 2 (📋):** optional `scripts/plot_cognitive_metrics.py`, token counts from `LLMInterface`, GUI export.
+- **Phase 2 (✅):** `summarize_cognitive_metrics.py`, `plot_cognitive_metrics.py`, `LLMInterface` session token tracking, GUI export (JSONL/CSV).
 - **Consumers:** C3 A/B runs, C4/C7 regression checks, `benchmark_results.md` archive, thesis/paper figures.
 
 ---
@@ -225,7 +342,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
-| **V1** | Re-run `TEST_SUITE.md` TC-01–TC-07 | 🔶 | **Headless:** `run_test_suite` ✅ 2026-06-27 (all 7). **Manual GUI pass:** pending (scores panel TC-05, chat UX) |
+| **V1** | Re-run `TEST_SUITE.md` TC-01–TC-07 | ✅ | **Headless:** `run_test_suite` ✅ 2026-06-27; **GUI:** ✅ 2026-06-29 — see **`TEST_SUITE_GUI_CHECKLIST.md`** |
 | **V2** | Refresh `audit.md` | ✅ | 2026-06-18 — shell gate fixed, portable paths, verification checklist |
 | **V3** | Re-upload **`MYPAPER.md`** to Zenodo | ⏸️ | Deferred — more benchmark runs first (see **C2**) |
 
@@ -237,8 +354,9 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
-| **M1** | Pruning: summarize-before-archive | 📋 | LLM summary of pruned turns before raw delete; searchable warm tier |
-| **M2** | Pruning: age-based trigger | 📋 | Policy from Step 3.1 (e.g. 30-day threshold) |
+| **M1** | Memory consolidation (warm tier) | ✅ | **Verified** 2026-06-26 — **`memory_architecture.md`**; M1.5 gate passed |
+| **M1.5** | Episodic verification gate | ✅ | **`episodic_memory_benchmark.md`** — E2E retrieval, failure injection, latency, negative cases |
+| **M2** | Pruning: age-based trigger | ✅ | Policy-driven consolidation — `memory` config, `ConsolidationDecision`, Clock |
 | **M3** | Pruning: admin `/prune` command | 📋 | Manual trigger + `DecisionTraceLogger` pruning events |
 | **M4** | Pruning: `MemoryPruner::restore(session_id, range)` | 📋 | On-demand historical replay; transactional SQLite |
 | **M5** | Vector store benchmark scaffold | 📋 | Step 3.4: ingest/latency/memory contract tests at 10k/50k/100k chunks; dual-write stub (disabled) |
@@ -262,14 +380,18 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 
 ---
 
-### 4. Benchmarks & automated testing
+### 4. Benchmarks, eval & automated testing
 
-| ID | Task | Source | Notes |
+| ID | Task | Status | Notes |
 |----|------|--------|-------|
-| **B1** | Research-paper corpus: 30 hardened cases | `new_corpus_tests.md` | 6 per paper × 3 case types; per-paper and per-type breakdown |
-| **B2** | Automate critical manual suite signals | ✅ | `tests/run_test_suite.cpp` + `check_baseline.py` (2026-06-27); extend per **C5** |
-| **B3** | Reduce test log noise | unit tests | Repeated `[Memory] Phase 4: Migrating embedding schema v1→v2` per fixture |
-| **B4** | Compiler warnings (~14 on debug build) | build output | Unused params in stubs/GUI; sign compare in `PlanExecutionPanel.cpp` |
+| **B1** | Research-paper corpus: 30 hardened cases | 📋 | `new_corpus_tests.md`; feeds **V3** Zenodo |
+| **B2** | Automate critical manual suite signals | ✅ | `run_test_suite.cpp` + `check_baseline.py` (2026-06-27); **C5** extends coverage |
+| **B3** | Reduce test log noise | 📋 | Repeated embedding migration log per fixture |
+| **B4** | Compiler warnings (~14 on debug build) | 📋 | Unused params in stubs/GUI |
+| **E1** | Benchmark environment pinning | 📋 | Log model, embed version, git SHA, mock/full tier with every benchmark run — **§ Reflection** |
+| **E2** | Episodic memory learning eval | 📋 | Repeat-goal / multi-session harness: does consolidation improve later success? (beyond M1.5 pipe test) |
+| **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
+| **G1d** | Trajectory bucket diagnostic | 📋 | Ablation on `TRAJECTORY_DISAMBIGUATES` (`w_t=0` vs `0.2`, empty T) before **F5** |
 
 ---
 
@@ -313,7 +435,7 @@ From `ui_improvements.md` §11–§12 — research console shell exists; these a
 
 ### 8. Future cognitive expansion — research horizon
 
-**Do not start until C1–C7 and Phase 3–4 internals are in good shape.** These are the next layer of capability — beyond fixing context management and measuring what exists today. Spec detail belongs in `improvements.md` when any item is promoted to active work.
+**Do not start until C1–C7 are complete and Phase 3–4 internals are in good shape.** These are the next layer of capability — beyond fixing context management and measuring what exists today. Spec detail belongs in `improvements.md` when any item is promoted to active work.
 
 | ID | Direction | Status | Notes |
 |----|-----------|--------|-------|
@@ -327,6 +449,56 @@ From `ui_improvements.md` §11–§12 — research console shell exists; these a
 | **F8** | **Curriculum generation** | 📋 | Auto-generate eval/training goals from corpus gaps, progressive difficulty, regression suites for planner/retrieval/reflection. Feeds **B1**, **C5**, **C6**; supports thesis/paper benchmark expansion. |
 
 **Suggested dependency order (when promoted):** F3/F5 (memory + trajectory signal) → F1/F7 (planning + tools) → F2 (reflection) → F4 (long-term learning) → F8 (curriculum/eval automation) → F6 (multi-agent, highest architectural lift).
+
+---
+
+### 9. Strategic review — external reflection 2026-06-29
+
+#### Architectural milestone acknowledgment
+
+During C1–C7 and M1–M2, Thoth crossed an architectural threshold. The project now has a coherent cognitive architecture with automated verification and policy-driven memory management. Future milestones are no longer about inventing core infrastructure — they are about demonstrating measurable improvements in cognition over time. That is a fundamentally different and more mature problem.
+
+#### The honest gap
+
+Thoth is in a strong engineering position and a weaker evidence position. The cognitive loop works, memory consolidates, and the docs tell the truth about limits. What does not exist yet is proof that the system learns over time — which is the thesis claim that strategy promotion and episodic memory are meant to support.
+
+Three independent reviewers reading the same codebase converged on the same diagnosis: instrumentation (C6) and component tests (C3–C5) are solid, but the longitudinal question has not been asked. That convergence is a strong signal this is the right place to invest next.
+
+#### The three testing tiers (do not conflate)
+
+| Tier | Examples | Valid claims |
+|------|----------|--------------|
+| **Fast mock CI** | `--dev`, C3/C5, reflection A/B | Mechanism fires, no crash, bounded retries |
+| **Slow Ollama truth** | nightly `--full`, chat RAG 5/5 | Retrieval quality, real synthesis |
+| **Accumulated multi-session** | C6 Phase 3 over weeks of runs | System gets better — the learning claim |
+
+The third tier does not exist yet. It is the missing bridge between "it works" and "it gets better." Building it is the primary remaining research obligation.
+
+#### Consolidated priority order (all reviewers)
+
+| Step | Item | Rationale |
+|------|------|-----------|
+| **1** | **M3** — `/prune` admin command | Closes operational memory loop; unblocks debugging and consolidation demos |
+| **2** | **E1** — Environment pinning | Pin model version, Ollama version, corpus fingerprint. One day of work that saves months of unreproducible benchmarks. Must exist before E2 or B1 mean anything |
+| **3** | **E2** — Repeat-goal multi-session harness | Run the same goal cold then warm across sessions; measure delta systematically. This is the actual learning proof — the question M1.5 deliberately did not ask |
+| **4** | **M4** — `MemoryPruner::restore(session_id, range)` | Built into already-verified eval environment. Foundation F3 needs; do not parallel-track with E2 |
+| **5** | **G1 diagnostic** — Trajectory scoring ablation | `w_t=0` vs `0.2` vs empty T ablation is cheap. Tells you tune vs drop vs redesign before touching anything else in retrieval. Do not promote F5 until this completes |
+| **6** | **E3** — SCR in CI | Wire Strategy Conformance Rate into continuous benchmark. Makes strategy promotion a regression signal not a one-off paper figure |
+| **7** | **C6 Phase 3** — Accumulated multi-session analysis | Longitudinal analysis tooling over weeks of Ollama/GUI runs. Establishes the third testing tier |
+| **8** | **B1** — 30 hardened corpus cases | Run under pinned E1 environment. Defensible benchmark claims for V3 |
+| **9** | **V3** — Zenodo re-upload | Only after B1 + E1 pinned runs. Do not re-publish stale or unreproducible numbers |
+| **10** | **F-series** — Chosen by evidence | F1/F3 are highest-leverage next capability layer. Do not promote until E2/E3 data identifies the actual bottleneck — retrieval, decomposition, or tool choice |
+
+#### What to avoid
+
+- **Zenodo V3 before B1 and E1 are complete** — re-publishing unreproducible numbers weakens the paper
+- **F5 before G1 diagnostic completes** — risk of amplifying noise in the trajectory signal
+- **Bulk F-series promotion** — the horizon list is correctly deferred; eval data should drive the order
+- **Parallel-tracking M4 and F3** — M4 is the foundation F3 needs
+
+#### Missing definition (open question to resolve)
+
+The roadmap correctly defers F-series until eval data points the way, but no promotion criteria are defined. Before starting E2/E3, document: how many sessions, what delta in SCR or nDCG, and what threshold triggers promotion of the first F-series item. Without this the eval layer has no exit condition.
 
 ---
 
@@ -347,18 +519,35 @@ Done    C6 Phase 1 — cognitive metrics logging (`logs/cognitive_metrics.jsonl`
 Done    C3 — reflection A/B measurement (2/2 cases, mean lift 0.5)
 Done    C4 Phase 1 — run_test_suite --dev (~10s, mock LLM + TfIdf + cached index)
 Done    C4 Phase 2 — CI tiers (PR fast / nightly full Ollama)
+Done    C7 Phase 1–2 — hot-path wins + summarize_cognitive_metrics.py
 Done    C7 Phase 3 — parallel RETRIEVAL dispatch + dependency prefetch
 Done    C5 — robustness suite (10 cases, logs/robustness_suite.jsonl)
-Next 1  V1 manual GUI pass (TC-05 scores panel, chat UX)
-Next 5  M1–M4 — finish memory pruning pipeline
-Next 6  G1 / G2 — trajectory tuning or subgoal trees
+Done    C6 Phase 2 — plot script, LLM token counts, GUI export
+Done    V1 — manual GUI TEST_SUITE TC-01–TC-07 (2026-06-29, observability confirmed)
+Done    M1.5 — episodic verification (E2E retrieval, failure inject, latency, benchmark) ✅ 2026-06-26
+Done    M2 — age-based consolidation policy (config, Clock, structured decisions) ✅
+Next 1  M3–M4 — /prune admin + range restore (memory ops)
+Next 2  G1d + E1 — trajectory ablation; benchmark env pinning
+Next 3  C6 Phase 3 + E2 + E3 — longitudinal metrics; episodic lift; SCR harness
+Next 4  B1 (if V3 Zenodo) — hardened research corpus
+Later   F3/F1 — when eval identifies bottleneck (§ Reflection)
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)
 Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
 External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
+Next    M3 — /prune admin command
+Next    E1 — environment pinning (model, Ollama, corpus fingerprint)
+Next    E2 — repeat-goal multi-session harness (the learning proof)
+Next    M4 — range restore (built into verified eval environment)
+Next    G1d — trajectory ablation benchmark (w_t=0 vs 0.2 vs empty T)
+Next    E3 — SCR wired into CI
+Next    C6 Phase 3 — accumulated multi-session longitudinal analysis
+Later   B1 — 30 hardened corpus cases (under pinned E1 environment)
+Later   V3 — Zenodo re-upload (after B1 + E1)
+Later   F-series — promoted by eval evidence, not schedule
 ```
 
-**GitHub (2026-06-28):** Thoth `539d3b6`, Basic_agent `2397385` on `main`.
+**GitHub (2026-06-28):** Thoth `5277413`, Basic_agent `2397385` on `main`.
 
 ---
 
@@ -367,20 +556,19 @@ External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 | Item | Today |
 |------|-------|
 | End-to-end cognitive loop (RETRIEVAL → LLM → PLAN_COMPLETED) | ✅ headless 2026-06-27 |
-| Headless TEST_SUITE 7/7 | ✅ ~40 min with Ollama |
-| Manual TEST_SUITE (GUI) | 🔶 pending |
+| Headless TEST_SUITE 7/7 | ✅ dev ~10s (`--dev`); full ~40 min with Ollama |
+| Manual TEST_SUITE (GUI) | ✅ 2026-06-29 — `TEST_SUITE_GUI_CHECKLIST.md` |
 | Chat RAG observability (C2 Phase 0) | ✅ `logs/chat_rag.jsonl` |
 | Golden chat retrieval benchmark (C2 Phase 1) | ✅ `run_chat_rag_benchmark` — baseline 2/5 hit@1 |
 | Conversational retrieval tuning (C2 Phase 2) | ✅ 5/5 hit@1 on golden corpus |
 | Chat pipeline fixes (C2 Phase 3) | ✅ user-validated grounded Q&A |
 | Planning quality (C1) | ✅ phases 1–5 shipped |
 | Chat / retrieval quality (C2) | ✅ phases 0–3; user-validated grounded Q&A |
-| Per-goal cognitive metrics (C6 Phase 1) | ✅ `logs/cognitive_metrics.jsonl` |
+| Per-goal cognitive metrics (C6) | ✅ logging + summarize/plot scripts + tokens + GUI export |
 | Reflection A/B measurement (C3) | ✅ `run_reflection_ab_benchmark` — 2/2 cases |
-| Developer / CI latency (C4) | ✅ `ctest -L fast` ~25s; PR `ctest -L pr`; nightly `--full` |
-| Runtime latency (C7 Phase 1–2) | ✅ batch embed + synthesis cap + metrics script |
-| Runtime latency (C7 Phase 3 prefetch) | ✅ |
-| Robustness test coverage | ✅ **C5** — `run_robustness_suite` 10/10 |
+| Developer / CI latency (C4) | ✅ complete — `ctest -L fast` 3/3 (~70s); PR `ctest -L pr`; nightly `--full` |
+| Runtime latency (C7) | ✅ complete — Phases 1–3 (embed batch, synthesis cap, parallel RETRIEVAL + prefetch) |
+| Robustness test coverage (C5) | ✅ `run_robustness_suite` 10/10 |
 | Future cognitive expansion (F1–F8) | 📋 research horizon — §8 |
 
 ---
@@ -391,6 +579,8 @@ External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 |------|------|
 | Full phase specs | `improvements.md` |
 | What's actually shipped | `completed_improvements_log.md` |
+| Honest gaps + external review | `audit.md` §5 |
+| **Reflection & next priorities** | **`cursor_list.md` § Reflection & analysis** |
 | GRAG implementation truth | `GRAG.md`, `benchmark_results.md` |
 | Cognate / executive truth | `cognate.md`, `PLAN.md` |
 | GRAG paper (Zenodo) | `MYPAPER.md` |

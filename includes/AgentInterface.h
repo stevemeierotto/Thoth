@@ -8,8 +8,7 @@
 #include <vector>
 #include <utility>
 #include <condition_variable>
-#include <queue>
-#include <wx/string.h>
+#include <future>
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 #include "basic_agent_plugin.h"
@@ -28,6 +27,13 @@ public:
     void setSessionId(const std::string& sessionId);
     std::string getLatestDecisionTraceSummary() const;
     bool loadConversationMemory(
+        const std::vector<std::pair<std::string, std::string>>& messages,
+        const std::string& summary = "");
+    bool loadConversationMemorySync(
+        const std::vector<Memory::TimedMessage>& messages,
+        const std::string& summary = "");
+    /** Legacy API without timestamps (uses current time for each message). */
+    bool loadConversationMemorySync(
         const std::vector<std::pair<std::string, std::string>>& messages,
         const std::string& summary = "");
     void setRagFiles(const std::vector<std::string>& filePaths);

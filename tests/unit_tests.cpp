@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -27,6 +28,10 @@
 #include "code_modify_tool.h"
 #include "sqlite_memory_repository.h"
 #include "memory_pruning_config.h"
+#include "memory_consolidation_metrics.h"
+#include "consolidation_policy.h"
+#include "clock.h"
+#include "grag_scorer.h"
 #include "fact_store.h"
 #include "store_fact_tool.h"
 #include "flat_vector_store.h"
@@ -476,33 +481,43 @@ static bool testPastPlanRetrieval() {
     Memory memory(cfg);
     auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
 
+    const std::string goodGoal = "optimize GRAG retrieval directional scoring";
+    const std::string lowGoal = "optimize GRAG retrieval directional scoring failed run";
+    const std::string unrelatedGoal = "email inbox classification pipeline";
+    const std::string queryGoal = "improve GRAG directional retrieval scoring";
+
+    // TfIdf IDF weights require a seeded corpus (same as index_manager during indexing).
+    for (const auto& text : {goodGoal, lowGoal, unrelatedGoal, queryGoal}) {
+        engine->updateVocabulary(text);
+    }
+
     auto embed = [&](const std::string& text) { return engine->embed(text); };
 
     Memory::PastPlanRecord good;
     good.plan_id = "plan-good";
-    good.goal = "optimize GRAG retrieval directional scoring";
+    good.goal = goodGoal;
     good.outline = R"({"steps":[{"step_id":"s1"}]})";
     good.success_score = 0.9f;
-    good.goal_embedding = embed("optimize GRAG retrieval directional scoring");
+    good.goal_embedding = embed(goodGoal);
     memory.storePastPlan(good);
 
     Memory::PastPlanRecord low;
     low.plan_id = "plan-low";
-    low.goal = "optimize GRAG retrieval directional scoring failed run";
+    low.goal = lowGoal;
     low.outline = R"({"steps":[]})";
     low.success_score = 0.3f;
-    low.goal_embedding = embed("optimize GRAG retrieval directional scoring failed run");
+    low.goal_embedding = embed(lowGoal);
     memory.storePastPlan(low);
 
     Memory::PastPlanRecord unrelated;
     unrelated.plan_id = "plan-other";
-    unrelated.goal = "email inbox classification pipeline";
+    unrelated.goal = unrelatedGoal;
     unrelated.outline = R"({"steps":[]})";
     unrelated.success_score = 0.95f;
-    unrelated.goal_embedding = embed("email inbox classification pipeline");
+    unrelated.goal_embedding = embed(unrelatedGoal);
     memory.storePastPlan(unrelated);
 
-    auto query = embed("improve GRAG directional retrieval scoring");
+    auto query = embed(queryGoal);
     auto results = memory.retrieveSimilarPlans(query, 2);
 
     if (results.empty() || results[0].plan_id != "plan-good") {
@@ -528,6 +543,12 @@ static bool testMemoryPruning() {
     Config cfg;
     cfg.database_path = makeTempPath("thoth_pruning_test.db").string();
     auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+#ifdef _WIN32
+    _putenv_s("THOTH_MOCK_EPISODIC", "1");
+#else
+    setenv("THOTH_MOCK_EPISODIC", "1", 1);
+#endif
     std::string sid = "test_session";
     repo->createSession(sid, 1000);
 
@@ -538,13 +559,20 @@ static bool testMemoryPruning() {
     Thoth::PruningPolicy policy;
     policy.max_hot_messages = Thoth::MemoryPruning::kMaxHotMessages;
     policy.prune_batch_size = Thoth::MemoryPruning::kPruneBatchSize;
-    
-    Thoth::MemoryPruner pruner(*repo, policy);
-    int archived = pruner.prune(sid);
+
+    Thoth::MemoryPruner pruner(*repo, policy, nullptr, &engine);
+    int archived = pruner.consolidateOneBatch(sid);
 
     if (archived != static_cast<int>(Thoth::MemoryPruning::kPruneBatchSize)) {
         std::cerr << "testMemoryPruning: expected " << Thoth::MemoryPruning::kPruneBatchSize
                   << " archived, got " << archived << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto warm = repo->getRecentWarmMemory(sid, 5);
+    if (warm.empty()) {
+        std::cerr << "testMemoryPruning: expected warm memory row\n";
         fs::remove(cfg.database_path);
         return false;
     }
@@ -556,7 +584,14 @@ static bool testMemoryPruning() {
 static bool testMemoryPruningIntegration() {
     Config cfg;
     cfg.database_path = makeTempPath("thoth_pruning_integration.db").string();
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+#ifdef _WIN32
+    _putenv_s("THOTH_MOCK_EPISODIC", "1");
+#else
+    setenv("THOTH_MOCK_EPISODIC", "1", 1);
+#endif
     Memory memory(cfg);
+    memory.configureConsolidation(nullptr, &engine);
     memory.setActiveSessionId("integration-session");
 
     for (int i = 0; i < 60; ++i) {
@@ -576,6 +611,496 @@ static bool testMemoryPruningIntegration() {
         std::cerr << "testMemoryPruningIntegration: expected at least "
                   << Thoth::MemoryPruning::kPruneBatchSize << " archived turns, got "
                   << archived.size() << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto warm = memory.getRecentWarmMemory(3);
+    if (warm.empty()) {
+        std::cerr << "testMemoryPruningIntegration: expected warm memory after consolidation\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static void enableEpisodicMock() {
+#ifdef _WIN32
+    _putenv_s("THOTH_MOCK_EPISODIC", "1");
+#else
+    setenv("THOTH_MOCK_EPISODIC", "1", 1);
+#endif
+}
+
+static bool hotConversationContains(const Memory& memory, const std::string& needle) {
+    for (const auto& msg : memory.getConversation()) {
+        if (msg.at("content").get<std::string>().find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool seedApolloSessionAndConsolidate(Memory& memory, EmbeddingEngine& engine) {
+    enableEpisodicMock();
+    memory.configureConsolidation(nullptr, &engine);
+    memory.setActiveSessionId("episodic-apollo");
+    memory.addMessage("user", "My dog's name is Apollo.");
+    for (int i = 1; i < 60; ++i) {
+        memory.addMessage("user", "filler turn " + std::to_string(i));
+    }
+    return !hotConversationContains(memory, "Apollo");
+}
+
+static bool testEpisodicRetrievalEndToEnd() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_episodic_e2e.db").string();
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    Memory memory(cfg);
+
+    if (!seedApolloSessionAndConsolidate(memory, *engine)) {
+        std::cerr << "testEpisodicRetrievalEndToEnd: Apollo still in hot tier\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const std::vector<float> queryEmb = engine->embed("What is my dog's name?");
+    const auto warmHits = memory.searchWarmMemory(queryEmb, 3);
+    if (warmHits.empty() || warmHits.front().rendered_summary.find("Apollo") == std::string::npos) {
+        std::cerr << "testEpisodicRetrievalEndToEnd: warm search missed Apollo\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    auto idx = new IndexManager(engine.get());
+    CodeChunk distractor;
+    distractor.code = "Paris is the capital of France and a major European city.";
+    distractor.fileName = "geography.md";
+    distractor.embedding = engine->embed(distractor.code);
+    idx->addChunkToIndex(std::move(distractor));
+
+    RAGPipeline rag(std::move(engine), idx, &cfg, &memory);
+    const auto chunks = rag.retrieveRelevant("What is my dog's name?", {}, 5);
+    bool foundWarmApollo = false;
+    for (const auto& chunk : chunks) {
+        if (chunk.fileName.rfind("warm_memory:", 0) == 0 &&
+            chunk.code.find("Apollo") != std::string::npos) {
+            foundWarmApollo = true;
+            break;
+        }
+    }
+    if (!foundWarmApollo) {
+        std::cerr << "testEpisodicRetrievalEndToEnd: GRAG did not return warm Apollo chunk\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testEpisodicMemoryBenchmarkNegative() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_episodic_negative.db").string();
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    Memory memory(cfg);
+
+    if (!seedApolloSessionAndConsolidate(memory, *engine)) {
+        std::cerr << "testEpisodicMemoryBenchmarkNegative: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto dogHits = memory.searchWarmMemory(engine->embed("What is my dog's name?"), 1);
+    if (dogHits.empty() || dogHits.front().rendered_summary.find("Apollo") == std::string::npos) {
+        std::cerr << "testEpisodicMemoryBenchmarkNegative: positive control failed (no Apollo warm)\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto unrelatedHits =
+        memory.searchWarmMemory(engine->embed("What is the capital of France?"), 3);
+    for (const auto& row : unrelatedHits) {
+        if (row.rendered_summary.find("Paris") != std::string::npos) {
+            std::cerr << "testEpisodicMemoryBenchmarkNegative: warm memory leaked unrelated fact (Paris)\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    Memory underCap(cfg);
+    underCap.configureConsolidation(nullptr, engine.get());
+    underCap.setActiveSessionId("under-cap");
+    for (int i = 0; i < 5; ++i) {
+        underCap.addMessage("user", "short session " + std::to_string(i));
+    }
+    if (!underCap.getRecentWarmMemory(1).empty()) {
+        std::cerr << "testEpisodicMemoryBenchmarkNegative: warm created below hot cap\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testConsolidationFailureEmbed() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_consolidation_fail_embed.db").string();
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    enableEpisodicMock();
+#ifdef _WIN32
+    _putenv_s("THOTH_MOCK_EMBED_EMPTY", "1");
+#else
+    setenv("THOTH_MOCK_EMBED_EMPTY", "1", 1);
+#endif
+
+    const std::string sid = "fail-embed";
+    repo->createSession(sid, 1000);
+    for (int i = 0; i < 60; ++i) {
+        repo->appendMessage(sid, {"user", "msg " + std::to_string(i), 1000 + i});
+    }
+
+    Thoth::PruningPolicy policy;
+    Thoth::MemoryPruner pruner(*repo, policy, nullptr, &engine);
+    const int archived = pruner.prune(sid);
+
+#ifdef _WIN32
+    _putenv_s("THOTH_MOCK_EMBED_EMPTY", "");
+#else
+    unsetenv("THOTH_MOCK_EMBED_EMPTY");
+#endif
+
+    if (archived != 0 || repo->getHotMessageCount(sid) != 60) {
+        std::cerr << "testConsolidationFailureEmbed: hot tier changed (archived=" << archived << ")\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (!repo->getRecentWarmMemory(sid, 1).empty()) {
+        std::cerr << "testConsolidationFailureEmbed: warm row created on embed failure\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testConsolidationFailureTransaction() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_consolidation_fail_txn.db").string();
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    enableEpisodicMock();
+#ifdef _WIN32
+    _putenv_s("THOTH_INJECT_CONSOLIDATION_FAIL", "commit");
+#else
+    setenv("THOTH_INJECT_CONSOLIDATION_FAIL", "commit", 1);
+#endif
+
+    const std::string sid = "fail-txn";
+    repo->createSession(sid, 1000);
+    for (int i = 0; i < 60; ++i) {
+        repo->appendMessage(sid, {"user", "msg " + std::to_string(i), 1000 + i});
+    }
+
+    Thoth::PruningPolicy policy;
+    Thoth::MemoryPruner pruner(*repo, policy, nullptr, &engine);
+    const int archived = pruner.prune(sid);
+
+#ifdef _WIN32
+    _putenv_s("THOTH_INJECT_CONSOLIDATION_FAIL", "");
+#else
+    unsetenv("THOTH_INJECT_CONSOLIDATION_FAIL");
+#endif
+
+    if (archived != 0 || repo->getHotMessageCount(sid) != 60) {
+        std::cerr << "testConsolidationFailureTransaction: hot tier changed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (!repo->getRecentWarmMemory(sid, 1).empty() || !repo->getArchivedMessages(sid).empty()) {
+        std::cerr << "testConsolidationFailureTransaction: partial consolidation persisted\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testConsolidationLatencyRecorded() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_consolidation_latency.db").string();
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    enableEpisodicMock();
+    Thoth::resetConsolidationTimingForTest();
+
+    const std::string sid = "latency";
+    repo->createSession(sid, 1000);
+    for (int i = 0; i < 60; ++i) {
+        repo->appendMessage(sid, {"user", "msg " + std::to_string(i), 1000 + i});
+    }
+
+    Thoth::PruningPolicy policy;
+    Thoth::MemoryPruner pruner(*repo, policy, nullptr, &engine);
+    if (pruner.prune(sid) <= 0) {
+        std::cerr << "testConsolidationLatencyRecorded: prune failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const Thoth::ConsolidationTiming timing = Thoth::lastConsolidationTiming();
+    if (timing.consolidation_ms <= 0 || timing.transaction_ms < 0) {
+        std::cerr << "testConsolidationLatencyRecorded: missing timing fields\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+namespace {
+
+constexpr int64_t kTestDayMs = 86'400'000LL;
+
+std::shared_ptr<Thoth::FakeClock> makeM2TestClock(int64_t baseMs = 1'700'000'000'000LL) {
+    return std::make_shared<Thoth::FakeClock>(baseMs);
+}
+
+void seedSessionMessages(Thoth::SQLiteMemoryRepository& repo,
+                         const std::string& sessionId,
+                         int count,
+                         int64_t baseTimestampMs) {
+    repo.createSession(sessionId, baseTimestampMs);
+    for (int i = 0; i < count; ++i) {
+        repo.appendMessage(sessionId, {"user", "msg " + std::to_string(i), baseTimestampMs + i});
+    }
+}
+
+} // namespace
+
+static bool testM2StaleSessionUnderCap() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m2_stale_under_cap.db").string();
+    cfg.memory_max_hot_age_days = 30;
+    enableEpisodicMock();
+
+    const int64_t baseMs = 1'700'000'000'000LL;
+    auto clock = makeM2TestClock(baseMs);
+    clock->advanceDays(31);
+
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    seedSessionMessages(*repo, "stale-session", 20, baseMs);
+
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    const auto policy = Thoth::PruningPolicy::fromConfig(cfg);
+    Thoth::MemoryPruner pruner(*repo, policy, nullptr, &engine, clock);
+
+    const auto decision = pruner.evaluatePolicy("stale-session");
+    if (!decision.shouldConsolidate()
+        || !Thoth::hasConsolidationReason(decision.reasons, Thoth::ConsolidationReason::SESSION_INACTIVE)) {
+        std::cerr << "testM2StaleSessionUnderCap: expected SESSION_INACTIVE trigger\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    if (pruner.consolidateIfNeeded("stale-session").total_archived <= 0) {
+        std::cerr << "testM2StaleSessionUnderCap: expected consolidation under cap\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (repo->getRecentWarmMemory("stale-session", 1).empty()) {
+        std::cerr << "testM2StaleSessionUnderCap: expected warm memory row\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM2FreshSessionNoOp() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m2_fresh.db").string();
+    auto clock = makeM2TestClock();
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    seedSessionMessages(*repo, "fresh", 10, clock->nowMs());
+
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    Thoth::MemoryPruner pruner(*repo, Thoth::PruningPolicy::fromConfig(cfg), nullptr, &engine, clock);
+    const auto decision = pruner.evaluatePolicy("fresh");
+    if (decision.shouldConsolidate()) {
+        std::cerr << "testM2FreshSessionNoOp: unexpected consolidation trigger\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM2StartupDeferredNonActive() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m2_startup_deferred.db").string();
+    enableEpisodicMock();
+
+    const int64_t baseMs = 1'700'000'000'000LL;
+    auto clock = makeM2TestClock(baseMs);
+    clock->advanceDays(31);
+
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("active");
+
+    if (auto* sqliteRepo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*sqliteRepo, "active", 5, clock->nowMs());
+        seedSessionMessages(*sqliteRepo, "stale-other", 20, baseMs);
+    } else {
+        std::cerr << "testM2StartupDeferredNonActive: sqlite repo unavailable\n";
+        return false;
+    }
+
+    memory.runStartupConsolidationDiscovery();
+
+    if (!memory.isSessionMarkedStale("stale-other")) {
+        std::cerr << "testM2StartupDeferredNonActive: expected stale-other marked\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    if (auto* sqliteRepo = memory.getSQLiteRepo()) {
+        if (!sqliteRepo->getRecentWarmMemory("stale-other", 1).empty()) {
+            std::cerr << "testM2StartupDeferredNonActive: stale-other consolidated during discovery\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    memory.setActiveSessionId("stale-other");
+    if (memory.isSessionMarkedStale("stale-other")) {
+        std::cerr << "testM2StartupDeferredNonActive: stale mark not cleared after access\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (auto* sqliteRepo = memory.getSQLiteRepo()) {
+        if (sqliteRepo->getRecentWarmMemory("stale-other", 1).empty()) {
+            std::cerr << "testM2StartupDeferredNonActive: expected warm after session switch\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM2TimestampPreservation() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m2_timestamp.db").string();
+    enableEpisodicMock();
+
+    const int64_t baseMs = 1'700'000'000'000LL;
+    auto clock = makeM2TestClock(baseMs);
+
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("ts-session");
+
+    const int64_t preservedTs = baseMs + 12'345;
+    Memory::TimedMessage message;
+    message.role = "user";
+    message.content = "hello";
+    message.timestamp_ms = preservedTs;
+    memory.loadConversation({message});
+
+    if (auto* sqliteRepo = memory.getSQLiteRepo()) {
+        const auto messages = sqliteRepo->getMessages("ts-session");
+        if (messages.size() != 1) {
+            std::cerr << "testM2TimestampPreservation: expected 1 message, got "
+                      << messages.size() << "\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+        if (messages[0].timestamp_ms != preservedTs) {
+            std::cerr << "testM2TimestampPreservation: timestamp not preserved (got "
+                      << messages[0].timestamp_ms << ", expected " << preservedTs << ")\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    } else {
+        std::cerr << "testM2TimestampPreservation: sqlite repo unavailable\n";
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM2MultiTriggerReasons() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m2_multi_trigger.db").string();
+    cfg.memory_max_hot_messages = 50;
+    cfg.memory_max_hot_age_days = 30;
+    enableEpisodicMock();
+
+    const int64_t baseMs = 1'700'000'000'000LL;
+    auto clock = makeM2TestClock(baseMs);
+    clock->advanceDays(31);
+
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    seedSessionMessages(*repo, "multi", 61, baseMs);
+
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    Thoth::MemoryPruner pruner(*repo, Thoth::PruningPolicy::fromConfig(cfg), nullptr, &engine, clock);
+    const auto decision = pruner.evaluatePolicy("multi");
+    if (!Thoth::hasConsolidationReason(decision.reasons, Thoth::ConsolidationReason::HOT_COUNT)
+        || !Thoth::hasConsolidationReason(decision.reasons, Thoth::ConsolidationReason::OLDEST_MESSAGE)) {
+        std::cerr << "testM2MultiTriggerReasons: expected HOT_COUNT and OLDEST_MESSAGE\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM2BatchCapDeferred() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m2_batch_cap.db").string();
+    enableEpisodicMock();
+
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    seedSessionMessages(*repo, "cap", 110, 1'000'000'000'000LL);
+
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    Thoth::MemoryPruner pruner(*repo, Thoth::PruningPolicy::fromConfig(cfg), nullptr, &engine);
+    const auto result = pruner.consolidateIfNeeded("cap");
+    if (!result.deferred) {
+        std::cerr << "testM2BatchCapDeferred: expected deferred flag\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (result.batches_completed != static_cast<int>(Thoth::MemoryPruning::kMaxBatchesPerInvocation)) {
+        std::cerr << "testM2BatchCapDeferred: expected max batches completed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (result.total_archived != static_cast<int>(Thoth::MemoryPruning::kMaxBatchesPerInvocation
+                                                  * Thoth::MemoryPruning::kPruneBatchSize)) {
+        std::cerr << "testM2BatchCapDeferred: unexpected archived count " << result.total_archived << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (!pruner.evaluatePolicy("cap").shouldConsolidate()) {
+        std::cerr << "testM2BatchCapDeferred: expected remaining stale messages\n";
         fs::remove(cfg.database_path);
         return false;
     }
@@ -1432,6 +1957,38 @@ static bool testStrategyPromotion() {
     return ok;
 }
 
+static bool testLlmTokenUsage() {
+    Config cfg;
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    llm.resetSessionTokenUsage();
+
+    const char* prevDev = std::getenv("THOTH_TEST_SUITE_DEV");
+    setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+
+    const std::string response = llm.query("token usage test prompt for cognitive metrics");
+    const LlmTokenUsage session = llm.sessionTokenUsage();
+    const LlmTokenUsage last = llm.lastCallTokenUsage();
+
+    if (prevDev) {
+        setenv("THOTH_TEST_SUITE_DEV", prevDev, 1);
+    } else {
+        unsetenv("THOTH_TEST_SUITE_DEV");
+    }
+
+    llm.resetSessionTokenUsage();
+    const LlmTokenUsage cleared = llm.sessionTokenUsage();
+
+    const bool ok = !response.empty()
+        && session.total_tokens > 0
+        && last.total_tokens > 0
+        && cleared.total_tokens == 0;
+
+    if (!ok) {
+        std::cerr << "testLlmTokenUsage: expected non-zero tracked tokens and resettable session\n";
+    }
+    return ok;
+}
+
 static bool testStrategyInjection() {
     Config cfg;
     cfg.database_path = makeTempPath("thoth_strategy_inject_test.db").string();
@@ -1479,6 +2036,17 @@ int main() {
     if (!testPastPlanRetrieval()) failures++;
     if (!testMemoryPruning()) failures++;
     if (!testMemoryPruningIntegration()) failures++;
+    if (!testEpisodicRetrievalEndToEnd()) failures++;
+    if (!testEpisodicMemoryBenchmarkNegative()) failures++;
+    if (!testConsolidationFailureEmbed()) failures++;
+    if (!testConsolidationFailureTransaction()) failures++;
+    if (!testConsolidationLatencyRecorded()) failures++;
+    if (!testM2StaleSessionUnderCap()) failures++;
+    if (!testM2FreshSessionNoOp()) failures++;
+    if (!testM2StartupDeferredNonActive()) failures++;
+    if (!testM2TimestampPreservation()) failures++;
+    if (!testM2MultiTriggerReasons()) failures++;
+    if (!testM2BatchCapDeferred()) failures++;
     if (!testMemorySessionScoping()) failures++;
     if (!testFactStore()) failures++;
     if (!testStoreFactTool()) failures++;
@@ -1486,6 +2054,7 @@ int main() {
     if (!testWebScrapeTool()) failures++;
     if (!testToolBatching()) failures++;
     if (!testParallelRetrieval()) failures++;
+    if (!testLlmTokenUsage()) failures++;
     if (!testSelfCorrectTool()) failures++;
     if (!testConstraintChecker()) failures++;
     if (!testReflectionLoop()) failures++;

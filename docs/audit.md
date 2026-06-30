@@ -7,7 +7,7 @@
 **Verification run (2026-06-18):**
 - `ctest --output-on-failure`: **100% pass** (~100s)
 - Tool confirmation, `ConstraintChecker`, sandbox reject, and `apply_diff` stub: confirmed via grep (see §7)
-- **Manual** `TEST_SUITE.md` TC-01–TC-07: not re-run this session (requires GUI + live LLM); last historical pass 2026-03-12 in `VERIFIED_BASELINE.md`
+- **Manual** `TEST_SUITE.md` TC-01–TC-07: **GUI pass 2026-06-29** — `TEST_SUITE_GUI_CHECKLIST.md`, `VERIFIED_BASELINE.md` §5.2
 
 ---
 
@@ -123,10 +123,16 @@ Managed by the memory system — **do not edit manually.**
 
 ### ⚠️ Known Gaps (honest)
 
+These are documented openly in specs and benchmark footnotes — external review (2026-06) flagged this candor as a project strength.
+
 1. **`code_modify apply_diff` stub** — Self-building / diff apply is **optional future expansion**, not active work. Harness tools (`project_analyze`, `run_tests`, read) work.
 2. **Trace replay** — Observability only; authoritative resume is SQLite (`resume_from_plan()`).
-3. **Trajectory $w_t$ tuning** — Weight active locally; mixed lift on `TRAJECTORY_DISAMBIGUATES` benchmark cases (`plan_reuse_tuning.md`).
-4. **Hierarchical subgoals** — Not implemented (single root goal embedding for full plan).
+3. **Trajectory $w_t$ tuning** — Weight active locally; **mixed lift** on `TRAJECTORY_DISAMBIGUATES` benchmark cases (`plan_reuse_tuning.md`).
+4. **Hierarchical subgoals** — **Not implemented** (single root goal embedding for full plan).
+5. **Mock Cognate benchmark success rates** — `run_cognate_benchmark` reports **0.00\*** task success in mock setup (`benchmark_results.md`, `COGNATE_V2.md`); reasoning-depth and strategy-promotion metrics are labeled separately from end-to-end completion.
+6. **Scientific mode “51× reasoning depth”** — Documented as **iteration count under mock conditions**, not proof of real task completion (`COGNATE_V2.md` environment note, `benchmark_results.md`).
+
+**Eval gap (2026-06 reflection):** Component harnesses and per-run metrics exist; **longitudinal learning eval** (C6 Phase 3, E2/E3) does not. See `cursor_list.md` § Reflection & analysis.
 
 ### ✅ Security improvements (not gaps)
 

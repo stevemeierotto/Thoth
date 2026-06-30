@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-summarize_cognitive_metrics.py — C7 latency summary from logs/cognitive_metrics.jsonl.
+summarize_cognitive_metrics.py — C6/C7 latency and token summary from logs/cognitive_metrics.jsonl.
 
 Usage:
     python3 scripts/summarize_cognitive_metrics.py
@@ -71,6 +71,9 @@ def main():
         "retrieval_time_ms": [],
         "llm_synthesis_time_ms": [],
         "synthesis_prompt_chars": [],
+        "total_tokens": [],
+        "planning_tokens": [],
+        "synthesis_tokens": [],
     }
     truncated = 0
     completed = 0
