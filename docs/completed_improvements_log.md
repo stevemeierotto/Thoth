@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-01 (E1 Checkpoint D1 — `run_test_suite` harness wiring)
+Last updated: 2026-07-01 (E1 Checkpoint D2 — `run_reflection_ab_benchmark` harness wiring)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
@@ -25,7 +25,15 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 ### E1 — Benchmark environment pinning (in progress)
 
-**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D2** — wire `run_reflection_ab_benchmark`.
+**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D3** — wire `run_robustness_suite`.
+
+#### Checkpoint D2 — 2026-07-01
+
+- **Scope:** `run_reflection_ab_benchmark` — probe-stack env capture (empty TfIdf index) before case loop; single `run_id` across 4 `execute_goal` calls; `ReflectionAbRunRecorder` RAII (`REFLECTION_AB_COMPLETE` / `REFLECTION_AB_ABORTED`); `run_id`/`env_hash` on `REFLECTION_AB_CASE` + `REFLECTION_AB_SUMMARY`; worker-thread crash limitation documented in `benchmark_environment.md` § Harness terminal events.
+- **Pre-flight (D1 crash trace):** D1's worker-thread `std::terminate` was on the **test-suite path** (`LLMPlanner` + `THOTH_TEST_SUITE_DEV` mock responses + multi-step RETRIEVAL/LLM goals). Reflection A/B uses **`ReflectionAbMockPlanner`** (deterministic plans, no LLM JSON parsing), does not wire `LLMInterface`, and does not enable `THOTH_TEST_SUITE_DEV` — **does not share the crash code path**. Shared `THOTH_MOCK_LLM` alone is not the fragility; test-suite-specific mock plumbing is.
+- **Tests:** E1-13 green (direct-controller smoke + non-empty `index_hash`); harness 2/2 cases, mean lift 0.5; 4 cognitive metrics rows share `run_id`/`env_hash`; `REFLECTION_AB_ABORTED` verified via `THOTH_REFLECTION_AB_BENCHMARK_ABORT_SMOKE=1`.
+- **Files:** `run_reflection_ab_benchmark.cpp`, `tests/unit_tests.cpp`, `docs/benchmark_environment.md`.
+- **Safe stop — next checkpoint: D3** (`run_robustness_suite`).
 
 #### Checkpoint D1 — 2026-07-01
 
