@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-01 (E1 Checkpoint D2 — `run_reflection_ab_benchmark` harness wiring)
+Last updated: 2026-07-01 (E1 Checkpoint D3 — `run_robustness_suite` harness wiring)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
@@ -25,7 +25,16 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 ### E1 — Benchmark environment pinning (in progress)
 
-**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D3** — wire `run_robustness_suite`.
+**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D4** — wire `run_chat_rag_benchmark`.
+
+#### Checkpoint D3 — 2026-07-01
+
+- **Scope:** `run_robustness_suite` — probe-stack capture before case loop (`THOTH_MOCK_LLM` baseline, `clearRobustnessEnv()` per-case runs after create); single `run_id` across 7 `execute_goal` calls via `runRobustnessCase(spec, attribution)` / `runExecutiveCase` / C5-09 / C5-10; `RobustnessRunRecorder` RAII; `run_id`/`env_hash` on harness JSONL rows.
+- **Metrics note (verified):** 7 attributed `execute_goal` invocations produce **6** `GOAL_COGNITIVE_METRICS` rows. **C5-09** uses one `ExecutiveController` (not two): slow then fast on the same instance. Pre-D3 baseline rebuilt from `fb4fd9f` robustness sources (`THOTH_COGNITIVE_METRICS_LOG` → 6 rows, no `slow concurrent goal`) — same count as post-D3. Mechanism: second `execute_goal` sets `stop_requested_`, joins `loop_thread_`; `run_loop()` exits without COMPLETED/FAILED → no metrics emit (contrast `abort()`, which does emit). Both C5-09 calls pass the same suite-wide `BenchmarkAttribution`; slow goal never reaches terminal emit, so attribution overwrite is immaterial. **Not an E1 regression.**
+- **C5-10:** `teardown goal` metrics row present with matching `run_id`/`env_hash`; case still `DESTROYED no_crash=true`.
+- **Tests:** E1-14 green; harness 10/10; `ROBUSTNESS_ABORTED` verified via `THOTH_ROBUSTNESS_BENCHMARK_ABORT_SMOKE=1`.
+- **Files:** `run_robustness_suite.cpp`, `robustness_cases.h/cpp`, `tests/unit_tests.cpp`, `docs/benchmark_environment.md`.
+- **Safe stop — next checkpoint: D4** (`run_chat_rag_benchmark`).
 
 #### Checkpoint D2 — 2026-07-01
 

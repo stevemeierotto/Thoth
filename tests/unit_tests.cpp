@@ -3075,6 +3075,138 @@ static bool testE1ReflectionAbBenchmarkSmoke() {
     return true;
 }
 
+class E1RobustnessSmokePlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "e1-14-robustness-plan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        PlanStep step;
+        step.step_id = "fast-step";
+        step.description = "E1-14 smoke LLM step";
+        step.type = StepType::LLM;
+        step.payload = {{"prompt", "E1-14 robustness smoke"}};
+        plan.steps.push_back(step);
+        return plan;
+    }
+
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+/** E1-14: robustness harness path — probe stack → execute_goal(attribution) → metrics/sidecar. */
+static bool testE1RobustnessBenchmarkSmoke() {
+    unsetenv("THOTH_TEST_SUITE_DEV");
+    setenv("THOTH_MOCK_LLM", "true", 1);
+
+    const fs::path logsDir = makeTempPath("thoth_e1_robustness_logs");
+    fs::create_directories(logsDir);
+    const fs::path metricsLog = logsDir / "cognitive_metrics.jsonl";
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsLog.string().c_str(), 1);
+
+    auto probeEngine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager probeIdx(probeEngine.get());
+
+    Thoth::BenchmarkEnvironmentInputs inputs;
+    inputs.harness = "robustness_suite";
+    inputs.tier = Thoth::BenchmarkTier::MOCK;
+    inputs.model.llm_model = "mock";
+    inputs.model.embedding_method = "TfIdf";
+    inputs.model.embedding_dimension = probeEngine->getDimension();
+    inputs.model.embedding_internal_version = probeEngine->getInternalVersion();
+    inputs.corpus_mode = Thoth::CorpusFingerprintMode::FAST;
+    inputs.thoth_env_flags = Thoth::collectThothEnvFlags();
+
+    Thoth::BenchmarkContextOptions opts;
+    opts.logs_directory = logsDir.string();
+    opts.auto_fill_git = false;
+    Thoth::BenchmarkRun run = Thoth::BenchmarkRun::create(inputs, opts);
+
+    Thoth::IndexEnvironment index;
+    index.rag_index_header = {
+        {"model_name", probeEngine->getModelName()},
+        {"embedding_dimension", probeEngine->getDimension()},
+        {"embedding_version", probeEngine->getInternalVersion()},
+        {"chunk_count", 0},
+    };
+    run.bindIndex(index);
+
+    if (run.index_hash().empty()) {
+        std::cerr << "testE1RobustnessBenchmarkSmoke: index_hash empty after bind\n";
+        fs::remove_all(logsDir);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    const Thoth::BenchmarkAttribution attr = run.attribution();
+
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_e1_robustness.db").string();
+    fs::remove(cfg.database_path);
+
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto idx = new IndexManager(engine.get());
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+    auto planner = std::make_shared<E1RobustnessSmokePlanner>();
+    auto registry = std::make_shared<ToolRegistry>();
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    controller.set_config(&cfg);
+    controller.set_llm_interface(&llm);
+
+    std::atomic<bool> planTerminal{false};
+    controller.set_event_callback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_FAILED) {
+            planTerminal.store(true);
+        }
+    });
+
+    controller.execute_goal("E1-14 robustness smoke goal", attr);
+
+    const bool finished = waitMsHarnessPlan(planTerminal, 30000);
+    auto cleanup = [&]() {
+        fs::remove(cfg.database_path);
+        fs::remove_all(logsDir);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+    };
+
+    if (!finished) {
+        std::cerr << "testE1RobustnessBenchmarkSmoke: goal did not finish\n";
+        cleanup();
+        return false;
+    }
+
+    nlohmann::json sidecar;
+    {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        if (!in.is_open()) {
+            std::cerr << "testE1RobustnessBenchmarkSmoke: sidecar missing\n";
+            cleanup();
+            return false;
+        }
+        in >> sidecar;
+    }
+    if (sidecar.value("run_id", "") != run.run_id() ||
+        sidecar.value("environment_hash", "") != run.environment_hash()) {
+        std::cerr << "testE1RobustnessBenchmarkSmoke: sidecar run identity mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    const auto row = readMetricsRowWithRunId(metricsLog, attr.run_id);
+    if (!row.has_value() || row->value("env_hash", "") != attr.env_hash) {
+        std::cerr << "testE1RobustnessBenchmarkSmoke: metrics attribution mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    cleanup();
+    return true;
+}
+
 static Thoth::BenchmarkContextOptions makeE1TempLogsOptions(const fs::path& logsDir) {
     Thoth::BenchmarkContextOptions options;
     options.logs_directory = logsDir.string();
@@ -3322,6 +3454,7 @@ int main() {
     if (!testE1GoalMetricsWorkerThreadAttribution()) failures++;
     if (!testE1HarnessBenchmarkSmoke()) failures++;
     if (!testE1ReflectionAbBenchmarkSmoke()) failures++;
+    if (!testE1RobustnessBenchmarkSmoke()) failures++;
 
     if (failures == 0) {
         std::cout << "All unit tests passed.\n";
