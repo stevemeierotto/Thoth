@@ -98,11 +98,12 @@ Agree on direction; adjust sequencing:
 ### Consolidated roadmap (reflection snapshot)
 
 ```
-Now      M3 → M4                    (memory ops: prune admin + restore)
-Next     G1 diagnostic + E1         (trajectory ablation; env pinning)
-Then     C6 Phase 3 + E2 + E3       (longitudinal metrics; episodic lift; SCR harness)
-Parallel B1 (if V3 Zenodo)         (hardened corpus)
-Later    F3 / F1                    (promote when eval shows bottleneck)
+Now      E1 Checkpoint E              (identity pass, scripts, close-out)
+Next     G1 diagnostic + E2          (trajectory ablation; episodic learning eval)
+Then     C6 Phase 3 + E3             (longitudinal metrics; SCR harness)
+Parallel B1 (if V3 Zenodo)           (hardened corpus)
+Later    M3 → M4                     (memory ops: prune admin + restore)
+Later    F3 / F1                     (promote when eval shows bottleneck)
 Last     UI polish (§6), S1 apply_diff (owner discretion)
 ```
 
@@ -536,7 +537,7 @@ Last    Tier 7 self-building / apply_diff (owner discretion)
 Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
 External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 Next    M3 — /prune admin command
-Next    E1 — environment pinning (A–C, D1–D5 done; Checkpoint E close-out next)
+Next    E1 Checkpoint E — close-out (identity pass, Python scripts)
 Next    E2 — repeat-goal multi-session harness (the learning proof)
 Next    M4 — range restore (built into verified eval environment)
 Next    G1d — trajectory ablation benchmark (w_t=0 vs 0.2 vs empty T)
@@ -547,7 +548,7 @@ Later   V3 — Zenodo re-upload (after B1 + E1)
 Later   F-series — promoted by eval evidence, not schedule
 ```
 
-**GitHub (2026-06-28):** Thoth `5277413`, Basic_agent `2397385` on `main`.
+**GitHub (2026-07-01):** Thoth `fd247c8`, Basic_agent `4c45aca` on `main` — E1 D3–D5 harness wiring pushed.
 
 ---
 
