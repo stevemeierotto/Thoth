@@ -218,3 +218,16 @@ The system employs a multi-tier verification process for autonomous learning:
 | Mean nDCG@5 | 0.600 | 0.619 | +0.019 |
 
 ---
+
+## Benchmark Run: Tue Jun 30 21:05:12 2026
+- **Embedding Model:** nomic-embed-text
+- **Corpus Size:** 311 chunks
+- **Weights:** $w_q=0.4, w_d=0.4, w_k=0.3$
+
+| Metric | RAG (Baseline) | GRAG (Optimized) | Delta |
+| :--- | :---: | :---: | :---: |
+| Mean Precision@5 | 0.600 | 0.620 | +0.020 |
+| Mean MRR | 0.683 | 0.700 | +0.017 |
+| Mean nDCG@5 | 0.600 | 0.619 | +0.019 |
+
+---
