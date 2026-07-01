@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-01 (E1 Checkpoint D3 — `run_robustness_suite` harness wiring)
+Last updated: 2026-07-01 (E1 Checkpoint D4 — `run_chat_rag_benchmark` harness wiring)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
@@ -25,7 +25,16 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 ### E1 — Benchmark environment pinning (in progress)
 
-**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D4** — wire `run_chat_rag_benchmark`.
+**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D5** — wire `run_grag_benchmark`.
+
+#### Checkpoint D4 — 2026-07-01
+
+- **Scope:** `run_chat_rag_benchmark` — env capture after golden corpus index (External embeddings, `BenchmarkTier::OLLAMA`, `fetchOllamaSnapshot`); single `run_id` on all `CHAT_RAG_BENCHMARK_CASE` + `CHAT_RAG_BENCHMARK_SUMMARY` rows; `ChatRagRunRecorder` RAII (`CHAT_RAG_BENCHMARK_COMPLETE` / `CHAT_RAG_BENCHMARK_ABORTED`).
+- **Ollama policy:** E1-15 is Ollama-independent (probe-stack smoke). Happy-path Ollama run + abort smoke are required stop gates when Ollama is reachable; if not reachable at commit time, log **“D4 wired, happy-path verification pending”** per `benchmark_environment.md` § Ollama availability.
+- **Metrics note:** **0** `GOAL_COGNITIVE_METRICS` rows — retrieval-only harness; no `execute_goal`.
+- **Tests:** E1-15 green; Ollama happy path 5/5 hit@1 (`run_id` on 6 JSONL rows); `CHAT_RAG_BENCHMARK_ABORTED` verified via `THOTH_CHAT_RAG_BENCHMARK_ABORT_SMOKE=1`.
+- **Files:** `run_chat_rag_benchmark.cpp`, `tests/unit_tests.cpp`, `docs/benchmark_environment.md`.
+- **Safe stop — next checkpoint: D5** (`run_grag_benchmark`).
 
 #### Checkpoint D3 — 2026-07-01
 

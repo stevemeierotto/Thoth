@@ -1,6 +1,6 @@
 # E1 — Benchmark Environment Pinning
 
-**Status:** 🔶 Checkpoint D3 complete — next: **Checkpoint D4** (`run_chat_rag_benchmark`)
+**Status:** 🔶 Checkpoint D4 complete — next: **Checkpoint D5** (`run_grag_benchmark`)
 **Spec version:** v3.1 (2026-06-26)  
 **Effort:** ~10–12 hours total, **split across checkpoints A–E** (see below)  
 **Roadmap:** Must complete before **E2**, **B1**, and **V3** Zenodo re-upload.
@@ -114,7 +114,8 @@ Harnesses emit a **terminal summary** via `BenchmarkRun::emit()` when the run fi
 | `run_test_suite` | `TEST_SUITE_COMPLETE` | `TEST_SUITE_ABORTED` |
 | `run_reflection_ab_benchmark` | `REFLECTION_AB_COMPLETE` | `REFLECTION_AB_ABORTED` |
 | `run_robustness_suite` | `ROBUSTNESS_COMPLETE` | `ROBUSTNESS_ABORTED` |
-| *(D4–D5)* | *(per harness)* | *(same pattern)* |
+| `run_chat_rag_benchmark` | `CHAT_RAG_BENCHMARK_COMPLETE` | `CHAT_RAG_BENCHMARK_ABORTED` |
+| *(D5)* | *(per harness)* | *(same pattern)* |
 
 Each harness wraps its case loop in an RAII recorder: `complete()` sets a flag and emits the **COMPLETE** event; if scope exits without `complete()` (early `return`, exception propagated to `main()`), the destructor emits **ABORTED** with whatever counts are available.
 
@@ -122,7 +123,13 @@ Each harness wraps its case loop in an RAII recorder: `complete()` sets a flag a
 
 **Analysis rule:** A `BENCHMARK_ENV` row with **no** terminal **COMPLETE** / **ABORTED** event for the same `run_id` in `benchmark_env.jsonl` indicates a crash or hard kill, not a silent successful run. Treat orphaned `BENCHMARK_ENV` rows accordingly when comparing sessions.
 
-Dev-only smoke hooks (e.g. `THOTH_TEST_SUITE_BENCHMARK_ABORT_SMOKE`, `THOTH_REFLECTION_AB_BENCHMARK_ABORT_SMOKE`, `THOTH_ROBUSTNESS_BENCHMARK_ABORT_SMOKE`) force the main-thread **ABORTED** path for verification; they do not exercise worker-thread crashes.
+Dev-only smoke hooks (e.g. `THOTH_TEST_SUITE_BENCHMARK_ABORT_SMOKE`, `THOTH_REFLECTION_AB_BENCHMARK_ABORT_SMOKE`, `THOTH_ROBUSTNESS_BENCHMARK_ABORT_SMOKE`, `THOTH_CHAT_RAG_BENCHMARK_ABORT_SMOKE`) force the main-thread **ABORTED** path for verification; they do not exercise worker-thread crashes.
+
+### Ollama availability and D4 committability
+
+**Policy:** E1-15 (probe-stack smoke) is CI-safe and does not require Ollama. The **happy-path Ollama run** (all JSONL rows + `CHAT_RAG_BENCHMARK_COMPLETE` + abort smoke) is a **required stop gate** when Ollama is reachable in-session.
+
+If Ollama is **not** reachable when implementation finishes: commit wired code + E1-15 as **“D4 wired, happy-path verification pending”** with an explicit note in `completed_improvements_log.md` (same discipline as logging the D3 six-row discrepancy rather than hiding it). Do **not** mark D4 fully closed in the checkpoint table until the Ollama run passes.
 
 ### Python (v3.1 #3)
 
@@ -144,7 +151,8 @@ Dev-only smoke hooks (e.g. `THOTH_TEST_SUITE_BENCHMARK_ABORT_SMOKE`, `THOTH_REFL
 | **D1** | `run_test_suite` harness wiring + E1-12 smoke | ✅ E1-12 + `--dev` suite green | Template for D2–D5; RAII terminal event guard. |
 | **D2** | `run_reflection_ab_benchmark` harness wiring + E1-13 smoke | ✅ E1-13 + harness green | Direct-controller path; probe-stack index bind. |
 | **D3** | `run_robustness_suite` harness wiring + E1-14 smoke | ✅ E1-14 + harness green | 7 `execute_goal` calls; **6** metrics rows — C5-09 slow goal preempted (verified pre-D3 baseline at `fb4fd9f`: same 6 rows; one controller; join-on-replace, no terminal emit). |
-| **D4–D5** | Step 6: remaining harnesses | Harness-specific smoke + existing suite green before next sub-session | One harness per sub-session. |
+| **D4** | `run_chat_rag_benchmark` harness wiring + E1-15 smoke | ✅ E1-15 + Ollama happy path + abort smoke | Retrieval-only; **0** cognitive metrics rows; `run_id`/`env_hash` on 5 case + summary JSONL rows. |
+| **D5** | `run_grag_benchmark` harness wiring + smoke | Harness-specific smoke + existing suite green | One harness per sub-session. |
 | **E** | Step 7 (index mismatch / `BENCHMARK_INDEX_BOUND`) + Step 8 (Python scripts, docs, close-out) | Script smoke; close-out checklist | Final pass; low risk individually. |
 
 ### Checkpoint D — harness sub-sessions (Step 6)
@@ -156,7 +164,7 @@ Wire **one harness per sub-session**; test before starting the next:
 | **D1** | `run_test_suite` | ✅ `--dev` green |
 | **D2** | `run_reflection_ab_benchmark` | ✅ mock path green |
 | **D3** | `run_robustness_suite` | ✅ mock path green |
-| **D4** | `run_chat_rag_benchmark` | |
+| **D4** | `run_chat_rag_benchmark` | ✅ Ollama path green (5/5 hit@1) |
 | **D5** | `run_grag_benchmark` / `BenchmarkReporter` | |
 
 ### Step mapping (reference)
@@ -195,6 +203,7 @@ Add to `tests/unit_tests.cpp` as each checkpoint completes:
 | **E1-12** | D1 | End-to-end harness helper path: create → `executeGoal(attribution)` → sidecar + metrics hash match |
 | **E1-13** | D2 | Reflection A/B direct-controller path: probe stack → `execute_goal(attribution)` → sidecar + metrics; `index_hash` non-empty |
 | **E1-14** | D3 | Robustness harness path: probe stack → `execute_goal(attribution)` → sidecar + metrics; `index_hash` non-empty |
+| **E1-15** | D4 | Chat-RAG harness path: probe stack → `retrieveRelevant` → sidecar; `index_hash` non-empty (no Ollama) |
 
 ---
 

@@ -3207,6 +3207,78 @@ static bool testE1RobustnessBenchmarkSmoke() {
     return true;
 }
 
+/** E1-15: chat-RAG harness path — probe stack → retrieveRelevant → sidecar (no Ollama). */
+static bool testE1ChatRagBenchmarkSmoke() {
+    const fs::path logsDir = makeTempPath("thoth_e1_chat_rag_logs");
+    fs::create_directories(logsDir);
+
+    auto probeEngine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager probeIdx(probeEngine.get());
+
+    Thoth::BenchmarkEnvironmentInputs inputs;
+    inputs.harness = "chat_rag_benchmark";
+    inputs.tier = Thoth::BenchmarkTier::MOCK;
+    inputs.model.llm_model = "mock";
+    inputs.model.embedding_method = "TfIdf";
+    inputs.model.embedding_dimension = probeEngine->getDimension();
+    inputs.model.embedding_internal_version = probeEngine->getInternalVersion();
+    inputs.corpus_mode = Thoth::CorpusFingerprintMode::FAST;
+    inputs.thoth_env_flags = Thoth::collectThothEnvFlags();
+
+    Thoth::BenchmarkContextOptions opts;
+    opts.logs_directory = logsDir.string();
+    opts.auto_fill_git = false;
+    Thoth::BenchmarkRun run = Thoth::BenchmarkRun::create(inputs, opts);
+
+    Thoth::IndexEnvironment index;
+    index.rag_index_header = {
+        {"model_name", probeEngine->getModelName()},
+        {"embedding_dimension", probeEngine->getDimension()},
+        {"embedding_version", probeEngine->getInternalVersion()},
+        {"chunk_count", 0},
+    };
+    run.bindIndex(index);
+
+    if (run.index_hash().empty()) {
+        std::cerr << "testE1ChatRagBenchmarkSmoke: index_hash empty after bind\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    Config cfg;
+    Memory memory(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto idx = new IndexManager(engine.get());
+    RAGPipeline rag(std::move(engine), idx, &cfg, &memory);
+
+    GragDiagnostics diagnostics;
+    const auto chunks = rag.retrieveRelevant("E1-15 chat rag smoke query", {}, 3, "E1-15", {}, {}, {}, {}, {},
+                                              &diagnostics);
+    if (chunks.empty() && diagnostics.breakdowns.empty()) {
+        // Empty index is acceptable — wiring must not crash.
+    }
+
+    nlohmann::json sidecar;
+    {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        if (!in.is_open()) {
+            std::cerr << "testE1ChatRagBenchmarkSmoke: sidecar missing\n";
+            fs::remove_all(logsDir);
+            return false;
+        }
+        in >> sidecar;
+    }
+    if (sidecar.value("run_id", "") != run.run_id() ||
+        sidecar.value("environment_hash", "") != run.environment_hash()) {
+        std::cerr << "testE1ChatRagBenchmarkSmoke: sidecar run identity mismatch\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    fs::remove_all(logsDir);
+    return true;
+}
+
 static Thoth::BenchmarkContextOptions makeE1TempLogsOptions(const fs::path& logsDir) {
     Thoth::BenchmarkContextOptions options;
     options.logs_directory = logsDir.string();
@@ -3455,6 +3527,7 @@ int main() {
     if (!testE1HarnessBenchmarkSmoke()) failures++;
     if (!testE1ReflectionAbBenchmarkSmoke()) failures++;
     if (!testE1RobustnessBenchmarkSmoke()) failures++;
+    if (!testE1ChatRagBenchmarkSmoke()) failures++;
 
     if (failures == 0) {
         std::cout << "All unit tests passed.\n";
