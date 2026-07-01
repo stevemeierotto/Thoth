@@ -116,13 +116,37 @@ Background repair of `summary_missing` rows is deferred (post-M1).
 
 **Knowledge Artifact model:** Unify documents, episodic memories, plans, strategies, reflections, and tool outputs as artifact types consumed by one GRAG retrieval interface. M1 introduces episodic memory as the **first non-document artifact type** without building the full abstraction yet.
 
-**Warm lifecycle (M3/M4+):** Merge similar warm summaries → promote to semantic memory → archive; prevents unbounded tiny summary accumulation.
+**Warm lifecycle (M4+):** Merge similar warm summaries → promote to semantic memory → archive; prevents unbounded tiny summary accumulation.
 
 **Rename:** `MemoryPruner` → `MemoryConsolidator` when churn allows; design docs use “consolidation” terminology now.
 
 ---
 
-**M1 verified** (2026-06-26). **M2 complete** (2026-06-29).
+**M1 verified** (2026-06-26). **M2 complete** (2026-06-29). **M3 complete** (2026-06-30).
+
+---
+
+## Architectural invariant (M3)
+
+Consolidation is deterministic with respect to the current hot memory state. Manual consolidation changes only **when** consolidation occurs, not **how** it behaves. Whether triggered by hot count, age, startup, session switch, or `/prune`, the same pipeline executes: `SummaryGenerator` → warm row + embedding → cold archive → hot delete (single transaction after LLM/embed).
+
+`--ignore-thresholds` bypasses **automatic trigger conditions** only. Safety policies still apply: goal-active guard (unless `--unsafe`), embed failure abort, SQLite rollback.
+
+---
+
+## M3 — operational interface (`/prune`) ✅
+
+| Component | Detail |
+|-----------|--------|
+| API | `Memory::getConsolidationStatus()`, `Memory::runConsolidation()` |
+| Source vs Reason | `ConsolidationSource` (AUTOMATIC/MANUAL) separate from `ConsolidationReason` (policy triggers) |
+| Trace dimensions | `requested_by` + `source` + `decision.reasons` |
+| CLI | `/prune` → status; `explain`, `batch`, `run`; `--ignore-thresholds`, `--unsafe` |
+| Goal guard | Block manual consolidation while goal executing unless `--unsafe` |
+| Tests | M3-01 – M3-09 (`THOTH_MOCK_EPISODIC=1`) |
+| Future | `/memory` namespace — parser stub only in M3 |
+
+**Public types (frozen after M3):** `ConsolidationStatus`, `ConsolidationRequest`, `ConsolidationResult`, `ConsolidationDecision`.
 
 ---
 
@@ -157,4 +181,4 @@ Run: `THOTH_MOCK_EPISODIC=1 ./build/debug/tests/thoth-unit-tests`
 
 ---
 
-*Last updated: 2026-06-29 (M2 age-based policy complete)*
+*Last updated: 2026-06-30 (M3 `/prune` operational interface complete)*

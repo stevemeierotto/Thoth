@@ -129,7 +129,7 @@ Memory **consolidation** (design term; code: `MemoryPruner` until rename) transf
 - Updated `memory_pruner.cpp`, `sqlite_memory_repository.cpp`, `rag.cpp`
 - Unit tests: consolidate at threshold, warm row + cold archive, GRAG recall
 
-**Deferred (M3–M4):** `/prune`, range restore, async queue, background repair, warm merge lifecycle; token/pressure triggers (enum reserved).
+**Deferred (M4+):** range restore, async queue, background repair, warm merge lifecycle; token/pressure triggers (enum reserved).
 
 ---
 
@@ -150,6 +150,57 @@ Memory **consolidation** (design term; code: `MemoryPruner` until rename) transf
 **Output:**
 - `consolidation_policy.*`, `clock.*`
 - Updated `memory_pruner.*`, `memory.cpp`, `basic_agent_plugin.cpp`, `MainFrame.cpp`
+
+---
+
+## Step 3.2c — Memory Consolidation (M3): Operational Interface
+
+**Status:** ✅ **Complete**
+
+**Description:**
+Expose manual consolidation for operators via `/prune` and a stable public Memory API. M3 wires existing M1/M2 infrastructure — it does **not** introduce a second consolidation pipeline.
+
+**Architectural invariant:**
+
+> Consolidation is deterministic with respect to the current hot memory state. Manual consolidation changes only **when** consolidation occurs, not **how** it behaves. Whether triggered by hot count, age, startup, session switch, or `/prune`, the same pipeline executes: `SummaryGenerator` → warm row + embedding → cold archive → hot delete.
+
+**Public contract (frozen after M3):**
+
+| Type | Role |
+|------|------|
+| `ConsolidationDecision` | Policy evaluation — **why** (HOT_COUNT, SESSION_INACTIVE, …) |
+| `ConsolidationSource` | Initiation mode — **how** (`AUTOMATIC`, `MANUAL`) |
+| `ConsolidationStatus` | Immutable read snapshot (state + configured thresholds) |
+| `ConsolidationRequest` | Write input (`ignore_thresholds`, `single_batch`, `allow_during_goal`, `requested_by`) |
+| `ConsolidationResult` | Write output (`archived`, `warm_created`, `batches`, `remaining_hot`, `deferred`, `blocked`) |
+
+Three orthogonal trace dimensions: `requested_by` (CLI/GUI/TEST/SYSTEM), `source` (AUTOMATIC/MANUAL), `decision.reasons`.
+
+**Deliverables:**
+- `Memory::getConsolidationStatus()` + `explainConsolidationStatus()`
+- `Memory::runConsolidation()` — goal-active guard unless `--unsafe`
+- `MemoryPruner::runConsolidation()` — `ignore_thresholds` entry gate only; safety (embed fail, SQLite rollback) unchanged
+- `/prune` command: default `status`; subcommands `explain`, `batch`, `run`; flags `--ignore-thresholds`, `--unsafe`
+- Tracing: `admin_command` + `memory_consolidation` with `requested_by` + `source`
+- Parser structured for future `/memory` namespace (`handleMemorySubcommand`)
+- Unit tests M3-01 – M3-08
+
+**CLI:**
+
+| Command | Behavior |
+|---------|----------|
+| `/prune` | Alias for `status` (no LLM) |
+| `/prune status [session]` | Compact snapshot |
+| `/prune explain [session]` | Human-readable policy checklist |
+| `/prune batch [--ignore-thresholds] [--unsafe] [session]` | Single batch |
+| `/prune run [--ignore-thresholds] [--unsafe] [session]` | Full loop (cap 5 batches) |
+
+**Deferred (M4+):** `restore(session, range)`, warm merge lifecycle, consolidation queue.
+
+**Output:**
+- `consolidation_api.*` (Status, Request, Result, explain helper)
+- Updated `memory_pruner.*`, `memory.*`, `command_processor.cpp`
+- `memory_architecture.md` § M3
 
 ---
 

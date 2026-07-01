@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-06-29 (V1 GUI pass; C1–C7 complete including C6 Phase 2)
+Last updated: 2026-07-01 (E1 Checkpoint C closed — E1-11 cross-thread guard)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
@@ -22,6 +22,69 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - **Trajectory Awareness**: Infrastructure is implemented; production `retrieval_config.json` sets `trajectory: 0.2` (2026-06-15). Benchmark shows mixed lift on `TRAJECTORY_DISAMBIGUATES` cases — see `docs/plan_reuse_tuning.md`.
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
+
+### E1 — Benchmark environment pinning (in progress)
+
+**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D1** — wire `run_test_suite` first.
+
+#### Checkpoint C — 2026-06-30 (closed 2026-07-01)
+
+- **Scope:** `execute_goal(goal, BenchmarkAttribution={})` on `ExecutiveController`; `benchmark_attribution_` stored before `loop_thread_`; `GoalCognitiveMetricsRecord` + `CognitiveMetricsLogger::toJson` emit optional `run_id`/`env_hash`; `BasicAgentPlugin::executeGoal` overload; `THOTH_COGNITIVE_METRICS_LOG` test override.
+- **Tests:** E1-09 – E1-11 green (attribution present; omitted without attribution; worker-thread cross-thread guard).
+- **E1-11 guard (2026-07-01):** Asserts `STEP_STARTED` on thread ≠ caller (mid-execution worker read, not post-hoc luck); waits for terminal callback before thread check; final metrics must carry attribution — would fail harness-thread thread-local regression.
+- **Files:** `executive_controller.h/cpp`, `cognitive_metrics.h`, `cognitive_metrics_logger.cpp`, `basic_agent_plugin.h`, `benchmark_execution_contract.h`, `tests/unit_tests.cpp`, `docs/benchmark_environment.md`.
+- **Safe stop — next checkpoint: D1** (harness wiring begins; one harness per sub-session).
+
+#### Checkpoint B — 2026-06-30
+
+- **Scope:** `BenchmarkRun` / `BenchmarkContext::create`, sidecar + JSONL emit, `bindIndex()` merge under mutex, `GitMetadata`, `fetchOllamaSnapshot` / `isOllamaReachable`, `benchmark_execution_contract.h` design lock.
+- **Tests:** E1-07 – E1-08 green (sidecar create + concurrent bindIndex merge).
+- **Files:** `benchmark_context.*`, `git_metadata.*`, `ollama_snapshot.*`, `benchmark_execution_contract.h`, `tests/unit_tests.cpp`, `external/basic_agent/CMakeLists.txt`.
+- **Safe stop — next checkpoint: C** (still no harness/GUI wiring).
+
+#### Checkpoint A — 2026-06-30
+
+- **Scope:** Nested benchmark environment structs; pure `assembleEnvironment()`; `inferTier()` / `hasTierMismatch()`; `computeEnvironmentHash()` (index-excluded) + `computeIndexHash()`; JSON round-trip; SHA-256 helper.
+- **Tests:** E1-01 – E1-06 green (`thoth-unit-tests` with `THOTH_MOCK_EPISODIC=1`).
+- **Files:** `external/basic_agent/include/benchmark_environment.h`, `external/basic_agent/src/benchmark_environment.cpp`, `tests/unit_tests.cpp`, `external/basic_agent/CMakeLists.txt`.
+- **Safe stop — next checkpoint: B** (no production call sites touched).
+
+<!--
+#### Checkpoint B — (date)
+- **Scope:** BenchmarkContext, GitMetadata, OllamaSnapshot, design-lock headers
+- **Tests:** E1-07 – E1-08 green
+- **Next:** Checkpoint C
+
+#### Checkpoint C — (date)
+- **Scope:** BenchmarkAttribution → execute_goal → CognitiveMetricsLogger (all call sites)
+- **Tests:** E1-09 – E1-11 green; ctest fast green
+- **Next:** Checkpoint D1
+
+#### Checkpoint D1–D5 — (date each)
+- **Scope:** one harness wired per sub-session
+- **Next:** D(n+1) or E
+
+#### Checkpoint E — (date)
+- **Scope:** BENCHMARK_INDEX_BOUND, Python scripts, close-out
+- **Tests:** E1-12; E1 close-out checklist complete
+- **Status:** E1 ✅ — move summary to permanent section below
+-->
+
+### 2026-06-26 (E1 — v3.1 spec approved; checkpoint plan)
+
+- **Technical:** v3.1 approved — explicit `BenchmarkAttribution` via `execute_goal()` (C7 `StepExecutionContext` pattern); no `setActive()` / thread-local. Sidecar mutex for `bindIndex()`; `check_baseline.py --require-env` opt-in only.
+- **Process:** Multi-session checkpoints **A–E** — each ends compile-clean, test-green, committable. **Checkpoint C isolated** — hot-path signature change must not span sessions. Harness wiring D1–D5 one per sub-session.
+- **Doc:** `docs/benchmark_environment.md` — authoritative implementation spec.
+- **Next:** Checkpoint **A** (E1-01–E1-06).
+
+### 2026-06-30 (M3 — `/prune` operational interface)
+
+- **API:** `ConsolidationSource` (AUTOMATIC/MANUAL) separate from `ConsolidationReason`; `ConsolidationStatus`, `ConsolidationRequest`, `ConsolidationResult` frozen public contract.
+- **Memory:** `getConsolidationStatus()`, `runConsolidation()`, `setGoalActiveChecker()`; goal-active guard unless `--unsafe`.
+- **CLI:** `/prune` (default status), `explain`, `batch`, `run`; `--ignore-thresholds`, `--unsafe`.
+- **Tracing:** `admin_command` + `memory_consolidation` with `requested_by`, `source`, `decision.reasons`.
+- **Fix:** `configureConsolidation` uses `rag.engine.get()` (embed engine after move).
+- **Tests:** M3-01 – M3-09 pass under `THOTH_MOCK_EPISODIC=1`.
 
 ### 2026-06-29 (Reflection & analysis — eval gap, consolidated roadmap)
 

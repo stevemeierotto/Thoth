@@ -78,7 +78,7 @@ M1.5 proved the **consolidation pipe** (Apollo E2E). It did **not** prove that c
 
 | ID | Insight | Rationale |
 |----|---------|-----------|
-| **E1** | **Benchmark environment pinning** | Expert flagged Ollama/model/embed drift. Log `llm_model`, `embedding_model`, git SHA, and mock vs `--full` tier alongside every benchmark row (`benchmark_results.md`, `cognitive_metrics.jsonl`, or sidecar `benchmark_env.json`). Cheap; prevents silent reproducibility loss. |
+| **E1** | **Benchmark environment pinning** | Checkpoints **A–C ✅** (pure env + `BenchmarkContext` + `execute_goal` attribution hook). Spec: **`docs/benchmark_environment.md`**. Next: **D1** (`run_test_suite`). |
 | **E2** | **Episodic learning eval** | M1.5 = pipeline correctness. Need harness: same goal class pre/post consolidation, or multi-session repeat task, measuring success/latency/plan reuse when warm memory should help. Directly tests thesis. |
 | **Doc** | **Sync `COGNATE_V2.html`** | Markdown has mock footnote for 51× depth; HTML export may not — align before any thesis-facing export. |
 | **Discipline** | **Mock vs Ollama split** | Fast CI (mock/TfIdf) must never be the sole evidence for learning or retrieval claims. Nightly `--full` + pinned env = authoritative tier (already in C4; enforce in eval culture). |
@@ -357,7 +357,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **M1** | Memory consolidation (warm tier) | ✅ | **Verified** 2026-06-26 — **`memory_architecture.md`**; M1.5 gate passed |
 | **M1.5** | Episodic verification gate | ✅ | **`episodic_memory_benchmark.md`** — E2E retrieval, failure injection, latency, negative cases |
 | **M2** | Pruning: age-based trigger | ✅ | Policy-driven consolidation — `memory` config, `ConsolidationDecision`, Clock |
-| **M3** | Pruning: admin `/prune` command | 📋 | Manual trigger + `DecisionTraceLogger` pruning events |
+| **M3** | Pruning: admin `/prune` command | ✅ | Manual trigger + `DecisionTraceLogger`; `getConsolidationStatus` / `runConsolidation` API |
 | **M4** | Pruning: `MemoryPruner::restore(session_id, range)` | 📋 | On-demand historical replay; transactional SQLite |
 | **M5** | Vector store benchmark scaffold | 📋 | Step 3.4: ingest/latency/memory contract tests at 10k/50k/100k chunks; dual-write stub (disabled) |
 
@@ -388,7 +388,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **B2** | Automate critical manual suite signals | ✅ | `run_test_suite.cpp` + `check_baseline.py` (2026-06-27); **C5** extends coverage |
 | **B3** | Reduce test log noise | 📋 | Repeated embedding migration log per fixture |
 | **B4** | Compiler warnings (~14 on debug build) | 📋 | Unused params in stubs/GUI |
-| **E1** | Benchmark environment pinning | 📋 | Log model, embed version, git SHA, mock/full tier with every benchmark run — **§ Reflection** |
+| **E1** | Benchmark environment pinning | 🔶 | A–C ✅ — `BenchmarkAttribution` → `execute_goal` → metrics; E1-11 cross-thread guard. Next: **D1** (`run_test_suite`) — **`docs/benchmark_environment.md`** |
 | **E2** | Episodic memory learning eval | 📋 | Repeat-goal / multi-session harness: does consolidation improve later success? (beyond M1.5 pipe test) |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
 | **G1d** | Trajectory bucket diagnostic | 📋 | Ablation on `TRAJECTORY_DISAMBIGUATES` (`w_t=0` vs `0.2`, empty T) before **F5** |
@@ -536,7 +536,7 @@ Last    Tier 7 self-building / apply_diff (owner discretion)
 Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
 External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 Next    M3 — /prune admin command
-Next    E1 — environment pinning (model, Ollama, corpus fingerprint)
+Next    E1 — environment pinning (A–C done; D1 `run_test_suite` next)
 Next    E2 — repeat-goal multi-session harness (the learning proof)
 Next    M4 — range restore (built into verified eval environment)
 Next    G1d — trajectory ablation benchmark (w_t=0 vs 0.2 vs empty T)

@@ -1024,6 +1024,7 @@ void MainFrame::OnCopyChat(wxCommandEvent& WXUNUSED(evt)) {
 
 void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
     wxString input = m_inputCtrl->GetValue();
+    input.Trim(true).Trim(false);
     if (input.IsEmpty()) return;
     m_inputCtrl->Clear();
 

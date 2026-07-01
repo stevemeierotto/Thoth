@@ -30,6 +30,7 @@
 #include "memory_pruning_config.h"
 #include "memory_consolidation_metrics.h"
 #include "consolidation_policy.h"
+#include "consolidation_api.h"
 #include "clock.h"
 #include "grag_scorer.h"
 #include "fact_store.h"
@@ -42,6 +43,11 @@
 #include "scientific_execution_mode.h"
 #include "benchmark_runner.h"
 #include "benchmark_reporter.h"
+#include "benchmark_environment.h"
+#include "benchmark_context.h"
+#include "git_metadata.h"
+#include "ollama_snapshot.h"
+#include "cognitive_metrics.h"
 #include <json.hpp>
 
 namespace fs = std::filesystem;
@@ -129,6 +135,41 @@ static bool testCommandProcessorSetCommand() {
     fs::remove(cfg.database_path);
     if (!ok) std::cerr << "testCommandProcessorSetCommand: /set did not apply\n";
     return ok;
+}
+
+static bool testCommandProcessorSlashTrim() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_cp_slash_trim.db").string();
+    Memory memory(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager indexManager(engine.get());
+    RAGPipeline rag(std::move(engine), &indexManager, &cfg);
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+
+    CommandProcessor cp(memory, rag, llm, &cfg);
+    memory.setActiveSessionId("trim-test");
+
+    const std::string help = cp.handleCommand("/help\n");
+    if (help.find("Unknown command") != std::string::npos) {
+        std::cerr << "testCommandProcessorSlashTrim: /help\\n not recognized\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const std::string prune = cp.handleCommand("/prune\r\n");
+    if (prune.find("Unknown command") != std::string::npos) {
+        std::cerr << "testCommandProcessorSlashTrim: /prune\\r\\n not recognized\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (prune.find("[Prune status]") == std::string::npos) {
+        std::cerr << "testCommandProcessorSlashTrim: expected prune status line\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
 }
 
 static bool testAgentInterfaceLifecycle() {
@@ -1109,6 +1150,349 @@ static bool testM2BatchCapDeferred() {
     return true;
 }
 
+static Thoth::ConsolidationRequest makeTestManualRequest(bool ignore_thresholds = false,
+                                                         bool single_batch = false) {
+    Thoth::ConsolidationRequest request;
+    request.source = Thoth::ConsolidationSource::MANUAL;
+    request.requested_by = "TEST";
+    request.ignore_thresholds = ignore_thresholds;
+    request.single_batch = single_batch;
+    return request;
+}
+
+static bool testM3StatusDryRun() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_status.db").string();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m3-status");
+
+    if (auto* repo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*repo, "m3-status", 30, clock->nowMs());
+    } else {
+        std::cerr << "testM3StatusDryRun: sqlite repo unavailable\n";
+        return false;
+    }
+
+    const auto status = memory.getConsolidationStatus("m3-status");
+    if (status.decision.hot_count != 30) {
+        std::cerr << "testM3StatusDryRun: unexpected hot count " << status.decision.hot_count << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (status.decision.shouldConsolidate()) {
+        std::cerr << "testM3StatusDryRun: unexpected policy trigger under cap\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (auto* repo = memory.getSQLiteRepo()) {
+        if (!repo->getRecentWarmMemory("m3-status", 1).empty()) {
+            std::cerr << "testM3StatusDryRun: warm row created during status\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3IgnoreThresholdsUnderCap() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_ignore.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m3-ignore");
+
+    if (auto* repo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*repo, "m3-ignore", 15, clock->nowMs());
+    } else {
+        std::cerr << "testM3IgnoreThresholdsUnderCap: sqlite repo unavailable\n";
+        return false;
+    }
+
+    auto request = makeTestManualRequest(true, true);
+    const auto result = memory.runConsolidation("m3-ignore", request);
+    if (result.blocked || result.archived != 10 || result.warm_created != 1) {
+        std::cerr << "testM3IgnoreThresholdsUnderCap: expected batch archive under cap\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (result.source != Thoth::ConsolidationSource::MANUAL) {
+        std::cerr << "testM3IgnoreThresholdsUnderCap: expected MANUAL source\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (result.decision.shouldConsolidate()) {
+        std::cerr << "testM3IgnoreThresholdsUnderCap: expected policy reasons NONE after partial\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3PolicyRunOverCap() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_over_cap.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m3-cap");
+
+    if (auto* repo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*repo, "m3-cap", 55, clock->nowMs());
+    } else {
+        std::cerr << "testM3PolicyRunOverCap: sqlite repo unavailable\n";
+        return false;
+    }
+
+    const auto status_before = memory.getConsolidationStatus("m3-cap");
+    if (!Thoth::hasConsolidationReason(status_before.decision.reasons,
+                                       Thoth::ConsolidationReason::HOT_COUNT)) {
+        std::cerr << "testM3PolicyRunOverCap: expected HOT_COUNT before run\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    auto request = makeTestManualRequest(false, false);
+    const auto result = memory.runConsolidation("m3-cap", request);
+    if (result.archived <= 0 || result.warm_created <= 0) {
+        std::cerr << "testM3PolicyRunOverCap: expected consolidation over cap\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3EmptyHot() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_empty.db").string();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine);
+    memory.setActiveSessionId("m3-empty");
+
+    auto request = makeTestManualRequest(true, false);
+    const auto result = memory.runConsolidation("m3-empty", request);
+    if (result.archived != 0 || result.warm_created != 0) {
+        std::cerr << "testM3EmptyHot: expected no-op on empty hot tier\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3ClearsStaleMark() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_stale.db").string();
+    enableEpisodicMock();
+
+    const int64_t baseMs = 1'700'000'000'000LL;
+    auto clock = makeM2TestClock(baseMs);
+    clock->advanceDays(31);
+
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("active");
+
+    if (auto* repo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*repo, "active", 5, clock->nowMs());
+        seedSessionMessages(*repo, "stale-m3", 20, baseMs);
+    } else {
+        std::cerr << "testM3ClearsStaleMark: sqlite repo unavailable\n";
+        return false;
+    }
+
+    memory.runStartupConsolidationDiscovery();
+    if (!memory.isSessionMarkedStale("stale-m3")) {
+        std::cerr << "testM3ClearsStaleMark: expected stale mark\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    auto request = makeTestManualRequest(false, true);
+    const auto result = memory.runConsolidation("stale-m3", request);
+    if (result.archived <= 0) {
+        std::cerr << "testM3ClearsStaleMark: expected manual consolidation\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (memory.isSessionMarkedStale("stale-m3")) {
+        std::cerr << "testM3ClearsStaleMark: stale mark not cleared\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3EmbedUnavailable() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_no_embed.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+
+    auto repo = std::make_unique<Thoth::SQLiteMemoryRepository>(cfg.database_path);
+    seedSessionMessages(*repo, "no-embed", 55, clock->nowMs());
+
+    Thoth::MemoryPruner pruner(*repo, Thoth::PruningPolicy::fromConfig(cfg), nullptr, nullptr, clock);
+    Thoth::ConsolidationRequest request;
+    request.source = Thoth::ConsolidationSource::MANUAL;
+    request.requested_by = "TEST";
+    const auto result = pruner.runConsolidation("no-embed", request);
+    if (result.archived != 0) {
+        std::cerr << "testM3EmbedUnavailable: expected hot unchanged without embed engine\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (repo->getHotMessageCount("no-embed") != 55) {
+        std::cerr << "testM3EmbedUnavailable: hot tier mutated\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3IdempotentDoubleRun() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_idempotent.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m3-idem");
+
+    if (auto* repo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*repo, "m3-idem", 55, clock->nowMs());
+    } else {
+        std::cerr << "testM3IdempotentDoubleRun: sqlite repo unavailable\n";
+        return false;
+    }
+
+    auto request = makeTestManualRequest(false, false);
+    const auto first = memory.runConsolidation("m3-idem", request);
+    const int warm_after_first = memory.getRecentWarmMemory(100).size();
+    const auto second = memory.runConsolidation("m3-idem", request);
+
+    if (first.archived <= 0) {
+        std::cerr << "testM3IdempotentDoubleRun: first run expected archives\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (second.archived != 0 || second.warm_created != 0) {
+        std::cerr << "testM3IdempotentDoubleRun: second run should no-op under cap\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (memory.getRecentWarmMemory(100).size() != warm_after_first) {
+        std::cerr << "testM3IdempotentDoubleRun: duplicate warm rows\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3StatusRunStatus() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_status_run.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m3-srs");
+
+    if (auto* repo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*repo, "m3-srs", 55, clock->nowMs());
+    } else {
+        std::cerr << "testM3StatusRunStatus: sqlite repo unavailable\n";
+        return false;
+    }
+
+    const auto before = memory.getConsolidationStatus("m3-srs");
+    auto request = makeTestManualRequest(false, true);
+    const auto run = memory.runConsolidation("m3-srs", request);
+    const auto after = memory.getConsolidationStatus("m3-srs");
+
+    if (!before.decision.shouldConsolidate()) {
+        std::cerr << "testM3StatusRunStatus: expected should consolidate before run\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (run.archived <= 0 || after.decision.hot_count >= before.decision.hot_count) {
+        std::cerr << "testM3StatusRunStatus: hot count did not decrease\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (after.decision.hot_count != run.remaining_hot) {
+        std::cerr << "testM3StatusRunStatus: remaining_hot mismatch\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM3GoalBlockedUnlessUnsafe() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m3_goal_block.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setGoalActiveChecker([]() { return true; });
+    memory.setActiveSessionId("m3-block");
+
+    if (auto* repo = memory.getSQLiteRepo()) {
+        seedSessionMessages(*repo, "m3-block", 55, clock->nowMs());
+    } else {
+        std::cerr << "testM3GoalBlockedUnlessUnsafe: sqlite repo unavailable\n";
+        return false;
+    }
+
+    auto blocked = makeTestManualRequest(false, false);
+    const auto blocked_result = memory.runConsolidation("m3-block", blocked);
+    if (!blocked_result.blocked || blocked_result.archived != 0) {
+        std::cerr << "testM3GoalBlockedUnlessUnsafe: expected blocked run\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    auto unsafe = makeTestManualRequest(false, true);
+    unsafe.allow_during_goal = true;
+    const auto unsafe_result = memory.runConsolidation("m3-block", unsafe);
+    if (unsafe_result.blocked || unsafe_result.archived <= 0) {
+        std::cerr << "testM3GoalBlockedUnlessUnsafe: expected --unsafe to allow run\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
 static bool testMemorySessionScoping() {
     Config cfg;
     cfg.database_path = makeTempPath("thoth_session_scope.db").string();
@@ -2017,12 +2401,620 @@ static bool testStrategyInjection() {
     return true; 
 }
 
+namespace {
+
+Thoth::BenchmarkEnvironmentInputs makeE1SampleInputs() {
+    Thoth::BenchmarkEnvironmentInputs inputs;
+    inputs.tier = Thoth::BenchmarkTier::DEV;
+    inputs.harness = "test_suite";
+    inputs.provenance.thoth_git_sha = "abc1234";
+    inputs.provenance.basic_agent_git_sha = "def5678";
+    inputs.provenance.captured_at_ms = 1'700'000'000'000LL;
+    inputs.model.llm_model = "mock";
+    inputs.model.embedding_model = "tfidf-local";
+    inputs.model.embedding_method = "TfIdf";
+    inputs.model.embedding_dimension = 768;
+    inputs.model.embedding_internal_version = 2;
+    inputs.thoth_env_flags = {{"THOTH_TEST_SUITE_DEV", "1"}};
+    inputs.corpus_fingerprint_override = "corpus-fast-deadbeef";
+    inputs.corpus_mode = Thoth::CorpusFingerprintMode::FAST;
+    inputs.corpus_chunk_count = 42;
+    return inputs;
+}
+
+} // namespace
+
+static bool testE1AssembleEnvironmentDeterministic() {
+    const auto inputs = makeE1SampleInputs();
+    const Thoth::BenchmarkEnvironment first = Thoth::assembleEnvironment(inputs);
+    const Thoth::BenchmarkEnvironment second = Thoth::assembleEnvironment(inputs);
+
+    if (first.environment_hash.empty() || first.environment_hash != second.environment_hash) {
+        std::cerr << "testE1AssembleEnvironmentDeterministic: hash mismatch\n";
+        return false;
+    }
+    if (first.model.llm_model != "mock" || first.runtime.harness != "test_suite") {
+        std::cerr << "testE1AssembleEnvironmentDeterministic: unexpected assembled fields\n";
+        return false;
+    }
+    if (!first.ollama.models_digest.empty()) {
+        std::cerr << "testE1AssembleEnvironmentDeterministic: expected empty ollama digest\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE1InferTierFromEnvFlags() {
+    Thoth::BenchmarkEnvironmentInputs devInputs = makeE1SampleInputs();
+    devInputs.tier = Thoth::BenchmarkTier::DEV;
+    devInputs.thoth_env_flags = {{"THOTH_TEST_SUITE_DEV", "1"}};
+    if (Thoth::inferTier(devInputs) != Thoth::BenchmarkTier::DEV) {
+        std::cerr << "testE1InferTierFromEnvFlags: expected DEV\n";
+        return false;
+    }
+
+    Thoth::BenchmarkEnvironmentInputs fullInputs = makeE1SampleInputs();
+    fullInputs.tier = Thoth::BenchmarkTier::FULL;
+    fullInputs.harness = "test_suite";
+    fullInputs.thoth_env_flags = nlohmann::json::object();
+    fullInputs.ollama_reachable = true;
+    if (Thoth::inferTier(fullInputs) != Thoth::BenchmarkTier::FULL) {
+        std::cerr << "testE1InferTierFromEnvFlags: expected FULL\n";
+        return false;
+    }
+
+    Thoth::BenchmarkEnvironmentInputs mockInputs = makeE1SampleInputs();
+    mockInputs.tier = Thoth::BenchmarkTier::MOCK;
+    mockInputs.harness = "robustness_suite";
+    mockInputs.thoth_env_flags = {{"THOTH_MOCK_LLM", "1"}};
+    if (Thoth::inferTier(mockInputs) != Thoth::BenchmarkTier::MOCK) {
+        std::cerr << "testE1InferTierFromEnvFlags: expected MOCK\n";
+        return false;
+    }
+
+    Thoth::BenchmarkEnvironmentInputs ollamaInputs = makeE1SampleInputs();
+    ollamaInputs.tier = Thoth::BenchmarkTier::OLLAMA;
+    ollamaInputs.harness = "chat_rag_benchmark";
+    ollamaInputs.model.embedding_method = "External";
+    ollamaInputs.thoth_env_flags = nlohmann::json::object();
+    ollamaInputs.ollama_reachable = true;
+    if (Thoth::inferTier(ollamaInputs) != Thoth::BenchmarkTier::OLLAMA) {
+        std::cerr << "testE1InferTierFromEnvFlags: expected OLLAMA\n";
+        return false;
+    }
+
+    Thoth::BenchmarkEnvironmentInputs strictCorpus = makeE1SampleInputs();
+    strictCorpus.corpus_mode = Thoth::CorpusFingerprintMode::STRICT;
+    strictCorpus.corpus_fingerprint_override = "strict-corpus";
+    const auto strictEnv = Thoth::assembleEnvironment(strictCorpus);
+    if (strictEnv.corpus.fingerprint_mode != "STRICT") {
+        std::cerr << "testE1InferTierFromEnvFlags: expected STRICT corpus mode\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testE1EnvironmentHashExcludesIndex() {
+    auto inputs = makeE1SampleInputs();
+    const Thoth::BenchmarkEnvironment baseline = Thoth::assembleEnvironment(inputs);
+
+    inputs.rag_index_header = {
+        {"model_name", "nomic-embed-text"},
+        {"embedding_dimension", 768},
+        {"embedding_version", 2},
+        {"chunk_count", 100},
+    };
+    const Thoth::BenchmarkEnvironment withIndex = Thoth::assembleEnvironment(inputs);
+
+    if (baseline.environment_hash != withIndex.environment_hash) {
+        std::cerr << "testE1EnvironmentHashExcludesIndex: index changed environment_hash\n";
+        return false;
+    }
+
+    const std::string recomputed = Thoth::computeEnvironmentHash(withIndex);
+    if (recomputed != withIndex.environment_hash) {
+        std::cerr << "testE1EnvironmentHashExcludesIndex: recompute mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE1IndexHashDistinctFromEnvironmentHash() {
+    Thoth::IndexEnvironment index;
+    index.rag_index_header = {
+        {"model_name", "nomic-embed-text"},
+        {"embedding_dimension", 768},
+        {"embedding_version", 2},
+        {"chunk_count", 100},
+    };
+
+    const auto inputs = makeE1SampleInputs();
+    const Thoth::BenchmarkEnvironment env = Thoth::assembleEnvironment(inputs);
+    const std::string indexHash = Thoth::computeIndexHash(index);
+
+    if (indexHash.empty()) {
+        std::cerr << "testE1IndexHashDistinctFromEnvironmentHash: empty index hash\n";
+        return false;
+    }
+    if (indexHash == env.environment_hash) {
+        std::cerr << "testE1IndexHashDistinctFromEnvironmentHash: index hash equals environment hash\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE1TierMismatchPredicate() {
+    Thoth::BenchmarkEnvironmentInputs inputs = makeE1SampleInputs();
+    inputs.tier = Thoth::BenchmarkTier::FULL;
+    inputs.thoth_env_flags = {{"THOTH_TEST_SUITE_DEV", "1"}};
+    if (!Thoth::hasTierMismatch(inputs)) {
+        std::cerr << "testE1TierMismatchPredicate: expected mismatch for FULL vs DEV flags\n";
+        return false;
+    }
+
+    inputs.tier = Thoth::BenchmarkTier::DEV;
+    if (Thoth::hasTierMismatch(inputs)) {
+        std::cerr << "testE1TierMismatchPredicate: unexpected mismatch for aligned DEV tier\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE1BenchmarkEnvironmentJsonRoundTrip() {
+    auto inputs = makeE1SampleInputs();
+    inputs.include_hostname = true;
+    inputs.provenance.hostname = "bench-host";
+    inputs.rag_index_header = {{"embedding_version", 2}};
+    inputs.ollama = Thoth::OllamaSnapshot{
+        "0.5.1",
+        {{"llama3", "digest-a"}, {"nomic-embed-text", "digest-b"}},
+    };
+
+    const Thoth::BenchmarkEnvironment original = Thoth::assembleEnvironment(inputs);
+    const nlohmann::json json = Thoth::benchmarkEnvironmentToJson(original);
+    const Thoth::BenchmarkEnvironment restored = Thoth::benchmarkEnvironmentFromJson(json);
+
+    if (restored.prov.thoth_git_sha != original.prov.thoth_git_sha ||
+        restored.model.embedding_internal_version != original.model.embedding_internal_version ||
+        restored.runtime.tier != original.runtime.tier ||
+        restored.corpus.fingerprint != original.corpus.fingerprint ||
+        restored.environment_hash != original.environment_hash ||
+        restored.ollama.models_digest != original.ollama.models_digest) {
+        std::cerr << "testE1BenchmarkEnvironmentJsonRoundTrip: round-trip field mismatch\n";
+        return false;
+    }
+    if (!restored.prov.hostname.has_value() || *restored.prov.hostname != "bench-host") {
+        std::cerr << "testE1BenchmarkEnvironmentJsonRoundTrip: hostname missing\n";
+        return false;
+    }
+    return true;
+}
+
+class MockSingleLlmPlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "e1-metrics-plan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+
+        PlanStep step;
+        step.step_id = "step-1";
+        step.description = "Single LLM step";
+        step.type = StepType::LLM;
+        step.payload = {{"prompt", "benchmark metrics test"}};
+        plan.steps.push_back(step);
+        return plan;
+    }
+
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+static bool waitForPlanTerminal(Thoth::ExecutiveController& controller, int timeoutMs = 10000) {
+    const int stepMs = 50;
+    int waited = 0;
+    while (waited < timeoutMs) {
+        const auto state = controller.get_state();
+        if (state == Thoth::ControllerState::COMPLETED ||
+            state == Thoth::ControllerState::FAILED ||
+            state == Thoth::ControllerState::ABORTED) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
+        waited += stepMs;
+    }
+    return false;
+}
+
+static std::optional<nlohmann::json> readMetricsRowForPlan(const fs::path& logPath,
+                                                            const std::string& planId) {
+    if (!fs::exists(logPath)) {
+        return std::nullopt;
+    }
+    std::ifstream in(logPath);
+    std::string line;
+    std::optional<nlohmann::json> lastMatch;
+    while (std::getline(in, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        try {
+            const auto row = nlohmann::json::parse(line);
+            if (row.value("event", "") == "GOAL_COGNITIVE_METRICS" &&
+                row.value("plan_id", "") == planId) {
+                lastMatch = row;
+            }
+        } catch (...) {
+        }
+    }
+    return lastMatch;
+}
+
+struct E1MetricsTestBed {
+    Config cfg;
+    std::shared_ptr<Memory> memory;
+    std::unique_ptr<EmbeddingEngine> engine;
+    IndexManager* idx = nullptr;
+    std::shared_ptr<RAGPipeline> rag;
+    std::shared_ptr<MockSingleLlmPlanner> planner;
+    std::shared_ptr<ToolRegistry> registry;
+    std::unique_ptr<Thoth::ExecutiveController> controller;
+
+    E1MetricsTestBed() {
+        cfg.database_path = makeTempPath("thoth_e1_metrics.db").string();
+        memory = std::make_shared<Memory>(cfg);
+        engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+        idx = new IndexManager(engine.get());
+        rag = std::make_shared<RAGPipeline>(std::move(engine), idx);
+        planner = std::make_shared<MockSingleLlmPlanner>();
+        registry = std::make_shared<ToolRegistry>();
+        controller = std::make_unique<Thoth::ExecutiveController>(planner, registry, rag, memory);
+    }
+
+    void cleanup() { fs::remove(cfg.database_path); }
+};
+
+static bool testE1GoalMetricsWithAttribution() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    const fs::path metricsLog = makeTempPath("thoth_e1_cognitive_metrics.jsonl");
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsLog.string().c_str(), 1);
+
+    E1MetricsTestBed bed;
+    const Thoth::BenchmarkAttribution attribution{"run-e1-09", "envhash-e1-09"};
+
+    bed.controller->execute_goal("E1 attribution metrics goal", attribution);
+    if (!waitForPlanTerminal(*bed.controller)) {
+        std::cerr << "testE1GoalMetricsWithAttribution: goal did not finish\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    const auto row = readMetricsRowForPlan(metricsLog, "e1-metrics-plan");
+    if (!row.has_value()) {
+        std::cerr << "testE1GoalMetricsWithAttribution: metrics row missing\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    if (row->value("run_id", "") != attribution.run_id ||
+        row->value("env_hash", "") != attribution.env_hash) {
+        std::cerr << "testE1GoalMetricsWithAttribution: attribution fields missing or wrong\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    bed.cleanup();
+    fs::remove(metricsLog);
+    unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+    unsetenv("THOTH_MOCK_LLM");
+    return true;
+}
+
+static bool testE1GoalMetricsWithoutAttribution() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    const fs::path metricsLog = makeTempPath("thoth_e1_cognitive_metrics_none.jsonl");
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsLog.string().c_str(), 1);
+
+    E1MetricsTestBed bed;
+    bed.controller->execute_goal("E1 no attribution metrics goal");
+    if (!waitForPlanTerminal(*bed.controller)) {
+        std::cerr << "testE1GoalMetricsWithoutAttribution: goal did not finish\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    const auto row = readMetricsRowForPlan(metricsLog, "e1-metrics-plan");
+    if (!row.has_value()) {
+        std::cerr << "testE1GoalMetricsWithoutAttribution: metrics row missing\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    if (row->contains("run_id") || row->contains("env_hash")) {
+        std::cerr << "testE1GoalMetricsWithoutAttribution: unexpected benchmark fields\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    bed.cleanup();
+    fs::remove(metricsLog);
+    unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+    unsetenv("THOTH_MOCK_LLM");
+    return true;
+}
+
+static bool testE1GoalMetricsWorkerThreadAttribution() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    const fs::path metricsLog = makeTempPath("thoth_e1_cognitive_metrics_worker.jsonl");
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsLog.string().c_str(), 1);
+
+    E1MetricsTestBed bed;
+    const std::thread::id callerThread = std::this_thread::get_id();
+    std::optional<std::thread::id> stepStartedThread;
+    std::optional<std::thread::id> terminalEventThread;
+
+    bed.controller->set_event_callback([&](const ControllerEvent& event) {
+        if (event.type == EventType::STEP_STARTED) {
+            stepStartedThread = std::this_thread::get_id();
+        }
+        if (event.type == EventType::PLAN_COMPLETED || event.type == EventType::PLAN_FAILED) {
+            terminalEventThread = std::this_thread::get_id();
+        }
+    });
+
+    const Thoth::BenchmarkAttribution attribution{"run-e1-11", "envhash-e1-11"};
+    bed.controller->execute_goal("E1 worker thread attribution goal", attribution);
+
+    if (!waitForPlanTerminal(*bed.controller)) {
+        std::cerr << "testE1GoalMetricsWorkerThreadAttribution: goal did not finish\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    int callbackWaitMs = 0;
+    while ((!stepStartedThread.has_value() || !terminalEventThread.has_value()) &&
+           callbackWaitMs < 2000) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        callbackWaitMs += 20;
+    }
+
+    if (!stepStartedThread.has_value() || *stepStartedThread == callerThread) {
+        std::cerr << "testE1GoalMetricsWorkerThreadAttribution: STEP_STARTED not on worker thread\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    if (!terminalEventThread.has_value() || *terminalEventThread == callerThread) {
+        std::cerr << "testE1GoalMetricsWorkerThreadAttribution: terminal event not on worker thread\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    const auto row = readMetricsRowForPlan(metricsLog, "e1-metrics-plan");
+    if (!row.has_value() ||
+        row->value("run_id", "") != attribution.run_id ||
+        row->value("env_hash", "") != attribution.env_hash) {
+        std::cerr << "testE1GoalMetricsWorkerThreadAttribution: worker metrics missing attribution\n";
+        bed.cleanup();
+        fs::remove(metricsLog);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    bed.cleanup();
+    fs::remove(metricsLog);
+    unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+    unsetenv("THOTH_MOCK_LLM");
+    return true;
+}
+
+static Thoth::BenchmarkContextOptions makeE1TempLogsOptions(const fs::path& logsDir) {
+    Thoth::BenchmarkContextOptions options;
+    options.logs_directory = logsDir.string();
+    options.auto_fill_git = false;
+    options.auto_collect_env_flags = false;
+    return options;
+}
+
+static bool testE1BenchmarkContextCreateSidecar() {
+    const fs::path logsDir = makeTempPath("thoth_e1_logs");
+    fs::create_directories(logsDir);
+
+    const auto run = Thoth::BenchmarkRun::create(makeE1SampleInputs(), makeE1TempLogsOptions(logsDir));
+
+    if (run.run_id().empty() || run.environment_hash().empty()) {
+        std::cerr << "testE1BenchmarkContextCreateSidecar: missing run_id or environment_hash\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    const fs::path sidecar = logsDir / "benchmark_env.latest.json";
+    if (!fs::exists(sidecar)) {
+        std::cerr << "testE1BenchmarkContextCreateSidecar: sidecar missing\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    nlohmann::json doc;
+    {
+        std::ifstream in(sidecar);
+        in >> doc;
+    }
+    if (doc.value("run_id", "") != run.run_id() ||
+        doc.value("environment_hash", "") != run.environment_hash() ||
+        !doc.contains("environment")) {
+        std::cerr << "testE1BenchmarkContextCreateSidecar: sidecar fields mismatch\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    const fs::path jsonl = logsDir / "benchmark_env.jsonl";
+    if (!fs::exists(jsonl)) {
+        std::cerr << "testE1BenchmarkContextCreateSidecar: jsonl missing\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    bool sawBenchmarkEnv = false;
+    {
+        std::ifstream in(jsonl);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.empty()) {
+                continue;
+            }
+            const auto row = nlohmann::json::parse(line);
+            if (row.value("event", "") == "BENCHMARK_ENV" &&
+                row.value("run_id", "") == run.run_id() &&
+                row.value("env_hash", "") == run.environment_hash() &&
+                row.contains("env")) {
+                sawBenchmarkEnv = true;
+                break;
+            }
+        }
+    }
+    if (!sawBenchmarkEnv) {
+        std::cerr << "testE1BenchmarkContextCreateSidecar: BENCHMARK_ENV row missing\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    const Thoth::BenchmarkAttribution attr = run.attribution();
+    if (attr.run_id != run.run_id() || attr.env_hash != run.environment_hash()) {
+        std::cerr << "testE1BenchmarkContextCreateSidecar: attribution mismatch\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    fs::remove_all(logsDir);
+    return true;
+}
+
+static bool testE1BenchmarkContextBindIndexMerge() {
+    const fs::path logsDir = makeTempPath("thoth_e1_bind_logs");
+    fs::create_directories(logsDir);
+
+    Thoth::BenchmarkRun run = Thoth::BenchmarkRun::create(makeE1SampleInputs(), makeE1TempLogsOptions(logsDir));
+    const std::string originalRunId = run.run_id();
+    const std::string originalEnvHash = run.environment_hash();
+
+    Thoth::IndexEnvironment firstIndex;
+    firstIndex.rag_index_header = {
+        {"model_name", "nomic-embed-text"},
+        {"embedding_dimension", 768},
+        {"embedding_version", 2},
+        {"chunk_count", 10},
+    };
+    run.bindIndex(firstIndex);
+
+    if (run.index_hash().empty()) {
+        std::cerr << "testE1BenchmarkContextBindIndexMerge: expected index_hash after first bind\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    const std::string firstIndexHash = run.index_hash();
+
+    Thoth::IndexEnvironment secondIndex = firstIndex;
+    secondIndex.rag_index_header["chunk_count"] = 20;
+    run.bindIndex(secondIndex);
+
+    if (run.run_id() != originalRunId || run.environment_hash() != originalEnvHash) {
+        std::cerr << "testE1BenchmarkContextBindIndexMerge: bindIndex changed run identity\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+    if (run.index_hash().empty() || run.index_hash() == firstIndexHash) {
+        std::cerr << "testE1BenchmarkContextBindIndexMerge: index_hash did not update\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    nlohmann::json doc;
+    {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        in >> doc;
+    }
+    if (doc.value("run_id", "") != originalRunId ||
+        doc.value("environment_hash", "") != originalEnvHash ||
+        doc.value("index_hash", "") != run.index_hash()) {
+        std::cerr << "testE1BenchmarkContextBindIndexMerge: sidecar merge mismatch\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    std::atomic<bool> sidecarValid{true};
+    Thoth::IndexEnvironment threadIndex = firstIndex;
+    threadIndex.rag_index_header["chunk_count"] = 30;
+    Thoth::IndexEnvironment threadIndexB = firstIndex;
+    threadIndexB.rag_index_header["chunk_count"] = 40;
+
+    std::thread bindA([&]() {
+        run.bindIndex(threadIndex);
+    });
+    std::thread bindB([&]() {
+        run.bindIndex(threadIndexB);
+    });
+    bindA.join();
+    bindB.join();
+
+    try {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        nlohmann::json merged;
+        in >> merged;
+        if (merged.value("run_id", "") != originalRunId) {
+            sidecarValid = false;
+        }
+    } catch (...) {
+        sidecarValid = false;
+    }
+
+    if (!sidecarValid.load()) {
+        std::cerr << "testE1BenchmarkContextBindIndexMerge: concurrent bind left invalid sidecar\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    fs::remove_all(logsDir);
+    return true;
+}
+
 
 int main() {
     int failures = 0;
     if (!testConfigRoundTrip()) failures++;
     if (!testMemoryPersistence()) failures++;
     if (!testCommandProcessorSetCommand()) failures++;
+    if (!testCommandProcessorSlashTrim()) failures++;
     if (!testAgentInterfaceLifecycle()) failures++;
     if (!testStructuredLoggerRedaction()) failures++;
     if (!testRetrievalDiagnosticsEvent()) failures++;
@@ -2047,6 +3039,15 @@ int main() {
     if (!testM2TimestampPreservation()) failures++;
     if (!testM2MultiTriggerReasons()) failures++;
     if (!testM2BatchCapDeferred()) failures++;
+    if (!testM3StatusDryRun()) failures++;
+    if (!testM3IgnoreThresholdsUnderCap()) failures++;
+    if (!testM3PolicyRunOverCap()) failures++;
+    if (!testM3EmptyHot()) failures++;
+    if (!testM3ClearsStaleMark()) failures++;
+    if (!testM3EmbedUnavailable()) failures++;
+    if (!testM3IdempotentDoubleRun()) failures++;
+    if (!testM3StatusRunStatus()) failures++;
+    if (!testM3GoalBlockedUnlessUnsafe()) failures++;
     if (!testMemorySessionScoping()) failures++;
     if (!testFactStore()) failures++;
     if (!testStoreFactTool()) failures++;
@@ -2070,6 +3071,17 @@ int main() {
     if (!testScientificConvergence()) failures++;
     if (!testStrategyPromotion()) failures++;
     if (!testStrategyInjection()) failures++;
+    if (!testE1AssembleEnvironmentDeterministic()) failures++;
+    if (!testE1InferTierFromEnvFlags()) failures++;
+    if (!testE1EnvironmentHashExcludesIndex()) failures++;
+    if (!testE1IndexHashDistinctFromEnvironmentHash()) failures++;
+    if (!testE1TierMismatchPredicate()) failures++;
+    if (!testE1BenchmarkEnvironmentJsonRoundTrip()) failures++;
+    if (!testE1BenchmarkContextCreateSidecar()) failures++;
+    if (!testE1BenchmarkContextBindIndexMerge()) failures++;
+    if (!testE1GoalMetricsWithAttribution()) failures++;
+    if (!testE1GoalMetricsWithoutAttribution()) failures++;
+    if (!testE1GoalMetricsWorkerThreadAttribution()) failures++;
 
     if (failures == 0) {
         std::cout << "All unit tests passed.\n";
