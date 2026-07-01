@@ -15,7 +15,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | **C6** | Cognitive metrics | ✅ Phases 1–2 | 2026-06-27 (C6 P1), 2026-06-29 (C6 P2) |
 | **C7** | Runtime / production latency | ✅ Phases 1–3 | 2026-06-26 (C7) |
 
-**GitHub (2026-07-01):** Thoth `fd247c8`, Basic_agent `4c45aca` on `main` — E1 checkpoints D3–D5 (robustness, chat-RAG, GRAG harness wiring) pushed.
+**GitHub (2026-07-01):** Thoth `de5a469`, Basic_agent `4c45aca` on `main` — E1 checkpoints D3–D5 (robustness, chat-RAG, GRAG harness wiring) pushed.
 
 **NOTE ON DOCUMENTATION ACCURACY (2026-03-30)**: An internal audit revealed that some features listed as "complete" are actually in a prototype or stub state. This document is being updated to reflect the actual implementation status:
 - **Self-Building Capability**: Harness tools exist (`project_analyze`, `run_tests`, `code_modify` read); **`apply_diff` is a stub**. Treated as **optional future expansion** — not scheduled active work (2026-06-17).

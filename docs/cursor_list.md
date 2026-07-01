@@ -548,7 +548,7 @@ Later   V3 — Zenodo re-upload (after B1 + E1)
 Later   F-series — promoted by eval evidence, not schedule
 ```
 
-**GitHub (2026-07-01):** Thoth `fd247c8`, Basic_agent `4c45aca` on `main` — E1 D3–D5 harness wiring pushed.
+**GitHub (2026-07-01):** Thoth `de5a469`, Basic_agent `4c45aca` on `main` — E1 D3–D5 harness wiring pushed.
 
 ---
 
