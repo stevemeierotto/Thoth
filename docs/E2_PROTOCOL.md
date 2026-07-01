@@ -1,0 +1,407 @@
+# E2 — Episodic Memory Learning Eval (Protocol)
+
+**Protocol version:** 1.2  
+**Locked:** 2026-07-01  
+**Supersedes:** v1.0, v1.1  
+**Status:** 🔒 Preregistered — evaluation kernel hardened; harness retrieval migration pending re-baseline  
+**Distinct from:** `episodic_memory_benchmark.md` (M1.5 pipeline verification — retrieval only)
+
+> **Immutability:** Constants and pass/fail rules in this document may not change during an in-flight E2 **STRICT** run. Revisions require **Protocol v1.3** with a new lock date and commit SHA.
+
+---
+
+## Core objective
+
+E2 is a **deterministic evaluation function**:
+
+```
+E2(query, corpus_snapshot, frozen_episode_log, model_version) → reproducible score + artifacts
+```
+
+**Forbidden in E2-EVAL-STRICT:** hidden state, cross-session memory effects, implicit heuristics, partial retrieval on error, untraced chunks.
+
+---
+
+## Retraction — v1.1 results
+
+All benchmark runs executed under **Protocol v1.1** (including mock-tier SUCCESS) are:
+
+| Field | Value |
+|-------|-------|
+| `provisional` | `true` |
+| `superseded_by` | `1.2` |
+| `official_scoring` | `false` |
+
+**v1.1 results MUST NOT be used as baseline, promotion evidence, or comparison target.** Only **E2-EVAL-STRICT** runs under v1.2 produce official numbers.
+
+---
+
+## Reporting policy
+
+All **STRICT** benchmark outcomes will be reported, including results that **fail to support the hypothesis**. E2 FAILURE under STRICT is a successful experiment when logged with preregistered criteria not met.
+
+**INTEGRATION** outputs are diagnostic only and MUST NOT be cited as benchmark results without the label **“non-scoring diagnostic mode.”**
+
+---
+
+## Research question
+
+**Does declared episodic content available to deterministic retrieval improve future goal behavior under lab conditions?**
+
+Organic consolidation pipeline correctness is **M1.5** (separate). E2-STRICT tests the evaluation function with a **frozen episode injection log**, not the consolidation pipeline itself.
+
+| Question | Answered by |
+|----------|-------------|
+| Can consolidated memory be retrieved? | M1.5 ✅ |
+| Does retrieval from **declared frozen episodes** change later **goal outcomes** (STRICT)? | **E2-EVAL-STRICT** |
+| Does **organic** consolidation → warm tier → retrieval → lift? | **E2-INTEGRATION** (non-scoring diagnostic) |
+| Does cross-session / heuristic retrieval behave as expected? | **E2-INTEGRATION** (non-scoring) |
+
+---
+
+## Evaluation tiers (enforcement-level)
+
+### E2-EVAL-STRICT — **only official scoring mode**
+
+| Property | Requirement |
+|----------|-------------|
+| Cross-session retrieval | **OFF** — hard boundary |
+| Heuristics (token-overlap, suppression, adaptive ranking) | **OFF** — module not active in STRICT path |
+| Retrieval function | Deterministic: `f(query, corpus_snapshot, frozen_episode_log, version_pins)` |
+| Retrieval failure / timeout | **Fail closed** — entire arm fails; no partial results scored |
+| Episode injection log | **Sealed** before arm execution; immutable thereafter |
+| Provenance | Every retrieved chunk fully traced; untraced → arm failure |
+| Output | `official_scoring: true`, `scoring_tier: "STRICT"`, `e2_outcome` permitted |
+
+### E2-INTEGRATION — **non-scoring diagnostic mode only**
+
+| Property | Requirement |
+|----------|-------------|
+| Cross-session retrieval | **ON** (per service config) |
+| Heuristics | **ON** (per service config) |
+| Output | `official_scoring: false`, `scoring_tier: "INTEGRATION"` |
+| `e2_outcome` | **MUST NOT** be emitted |
+| Comparison to STRICT | **FORBIDDEN** — not “better E2,” not alternate baseline |
+
+**Rule:** INTEGRATION results MUST NOT influence official benchmark outputs, promotion triggers, or external claims.
+
+---
+
+## Episode injection log — strict immutability
+
+The episode injection log is **input-only** for retrieval. It is **not** runtime memory and **must not** be mutated during evaluation execution.
+
+### Semantics
+
+```
+retrieval = f(query, corpus_snapshot_id, frozen_episode_log, version_pins)
+```
+
+### Enforcement mechanism (required implementation)
+
+`SealedEpisodeInjectionLog` (see `episodic_learning_eval.h`):
+
+1. Harness builds log entries from case table **before** arm clock starts.
+2. Harness calls `seal()` — sets internal `sealed_ = true`.
+3. After `seal()`:
+   - Any `append()` / `clear()` / mutating API → **`std::logic_error`** (runtime hard failure).
+   - Retrieval receives **`const SealedEpisodeInjectionLog&`** plus internal sealed check (const-reference alone is insufficient).
+4. Deep copy at seal: entries stored in immutable snapshot; no shared mutable backing store with Memory/RAG.
+
+**Prohibited:** mid-run injection, adaptive seeding, planner/retrieval writing to the log, consolidation side effects substituting for declared injections in STRICT mode.
+
+### Episode entry schema (frozen at seal)
+
+| Field | Required |
+|-------|----------|
+| `episode_id` | yes |
+| `source` | `synthetic` \| `user` \| `evaluation` \| `system` |
+| `content` | yes |
+| `content_hash` | yes |
+| `injected_at_ms` | yes (before arm start) |
+
+---
+
+## Version pinning (full reproducibility)
+
+`E2EvalConfig` MUST include and artifacts MUST log:
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `corpus_snapshot_id` | **yes** | E1 index / corpus fingerprint |
+| `model_version_or_weights_hash` | **yes** | LLM or mock model identity |
+| `embedding_model_version` | if applicable | e.g. TfIdf internal version |
+| `retrieval_engine_version` | if applicable | deterministic retrieval code/config hash |
+
+Missing required pin in STRICT → **harness init failure** (`validateStrictConfigForOfficialRun`) or **case/summary failure** (evaluator rejects config). **No implicit defaults.**
+
+---
+
+## Evaluation fingerprint (single reproducibility unit)
+
+Individual pins (`corpus_snapshot_id`, `model_version_or_weights_hash`, etc.) are necessary but not sufficient for drift detection.
+
+STRICT runs MUST compute and log **`evaluation_fingerprint`**:
+
+```
+evaluation_fingerprint = SHA-256(canonical_json)
+```
+
+Where `canonical_json` includes (stable key order):
+
+| Field | Value |
+|-------|-------|
+| `protocol_version` | e.g. `"1.2"` |
+| `scoring_function` | `kEpisodicLearningScoringFunction` |
+| `strict_retrieval_engine` | `kE2StrictRetrievalEngineVersion` |
+| `tier` | `"STRICT"` |
+| `versions` | full `E2VersionPin` object |
+
+Implementation: `computeEvaluationFingerprint()` in `e2_strict_enforcement.*`. Logged on every case row and summary in official harness output.
+
+---
+
+## Provenance enforcement
+
+Every retrieved chunk in STRICT MUST include:
+
+| Field | Requirement |
+|-------|-------------|
+| `source` | `corpus` \| `synthetic` \| `user` \| `evaluation` \| `system` |
+| `source_id` | non-empty identifier (chunk id, episode id, file id) |
+| `validation_status` | `valid` \| `invalid` \| `untraced` |
+
+### STRICT rule (single consistent policy)
+
+**At the evaluation boundary** (where retrieved chunks are presented to the evaluator / `strictProvenanceValid()`):
+
+**If any chunk has `validation_status == untraced` OR missing `source` / `source_id`:**
+
+→ Mark **evaluation arm failure** (`arm_scoring_status: "FAILED_PROVENANCE"`), fail closed, do not compute lift for that arm.
+
+Internal retrieval stages may enrich or repair metadata **before** this boundary. Partial metadata inside the pipeline is permitted; **incomplete provenance at the boundary is not**. There is no degraded-score mode and no partial-provenance threshold.
+
+Partial provenance is not scored in STRICT.
+
+---
+
+## Heuristics boundary (evaluation leakage prevention)
+
+Token-overlap ranking, suppression filters, score-based warm demotion, cross-session warm merge, and adaptive retrieval tuning:
+
+| Location | STRICT | INTEGRATION |
+|----------|--------|-------------|
+| `e2_eval_kernel` (eval + scorer + strict retrieval) | **FORBIDDEN** — not compiled in | **FORBIDDEN** |
+| `run_episodic_learning_benchmark` harness | MUST NOT score heuristics path as official | diagnostic only |
+| `rag.cpp` / runtime retrieval | **not in `e2_eval_kernel`** | allowed in product binary |
+
+### Mechanical enforcement (required)
+
+**Primary — link isolation (best):**
+
+| CMake target | Sources | Linked by |
+|--------------|---------|-----------|
+| `e2_eval_kernel` | `episodic_learning_eval`, `episodic_learning_cases`, `e2_strict_enforcement`, `e2_strict_retrieval` | `basic_agent` (PUBLIC), official harness |
+| `basic_agent` | full runtime including `rag.cpp` | GUI, integration tests |
+
+`e2_eval_kernel` defines `THOTH_E2_STRICT_KERNEL=1`. **`rag.cpp` is excluded.** Heuristic symbols are not available to eval-layer translation units.
+
+**Secondary — harness compile marker:**
+
+`run_episodic_learning_benchmark` defines `THOTH_E2_OFFICIAL_HARNESS=1` and MUST call `validateStrictConfigForOfficialRun()` before any scored arm.
+
+**Tertiary — runtime hard boundary (backup only):**
+
+Heuristic entry points MAY `abort()` / throw if invoked with `E2EvalConfig::tier == STRICT`. **Runtime flag alone is insufficient** as sole enforcement. Required in implementation checkpoint **A5** (see `cursor_list.md` § E2).
+
+### Gate priority (enforcement stack)
+
+| Tier | Mechanism | Role |
+|------|-----------|------|
+| **1** | `e2_eval_kernel` compile-time exclusion | **Source of truth** — pre-build guarantee |
+| **2** | Linker/symbol audit on scored-path object files | **Verification** — does not substitute for tier 1 |
+| **3** | Runtime guard, unit tests, wiring-state gate | Behavioral backup |
+
+Artifacts SHOULD include `scoring_block_reason` when scoring is blocked (e.g. `WIRING:A2`, `PROVENANCE:UNTRACED`, `LINK:RUNTIME_HEURISTIC`).
+
+### Pending wiring (not blocking protocol)
+
+Official harness arm execution still routes retrieval through `RAGPipeline` (runtime path) until migrated to `e2StrictRetrieve()`. Until migration + re-baseline, treat harness `e2_outcome` as **non-authoritative** even when pins validate.
+
+During migration checkpoints **A1–A2**, harness runs use **evaluation-disabled mode** (`scoring_enabled: false`, no `e2_outcome`, `official_scoring: false`) — not synthetic arm failures. See **`cursor_list.md` § E2** for full checkpoint plan.
+
+---
+
+## Retrieval failure behavior (STRICT)
+
+| Event | STRICT behavior |
+|-------|-----------------|
+| Retrieval service error | Arm **FAIL**; `arm_scoring_status: "FAILED_RETRIEVAL"` |
+| Retrieval timeout | Arm **FAIL** |
+| Empty result when case expects hits | Scored via table expectations (not a service error) |
+| Partial chunk set after error | **Not allowed** — fail closed, discard partial |
+
+---
+
+## Design: cold vs warm A/B (STRICT)
+
+Both arms share the same `corpus_snapshot_id` and `E2EvalConfig` version pins.
+
+| Arm | STRICT setup |
+|-----|--------------|
+| **Cold** | `SealedEpisodeInjectionLog` empty; deterministic retrieval |
+| **Warm** | Same snapshot + **pre-sealed** injection log from case table (explicit episodes only); new controller session id |
+
+**Isolation invariant:** No artifacts from the cold arm DB or execution path are reused by the warm arm except episodes **declared in the case table injection spec** and frozen before warm arm start.
+
+Cross-session SQLite warm reads are **not** the warm-arm mechanism in STRICT.
+
+---
+
+## Cases (v1 — fixed set)
+
+| ID | Injection (warm arm) | Goal | Expected retrieval hit | Expected lift |
+|----|----------------------|------|------------------------|---------------|
+| **E2-01** | `"My dog's name is Apollo."` | `"What is my dog's name?"` | `true` | `>= 0.10` |
+| **E2-02** | `"My assistant's codename is Zephyrx7."` | `"What is my assistant's codename?"` | `true` | `>= 0.10` |
+| **E2-03** | `"My dog's name is Apollo."` (both arms) | `"What is the capital of France?"` | `false` | `abs(lift) < 0.10` |
+
+Expectations live in `episodic_learning_cases.*`. Evaluator reads table only — no case-ID branching.
+
+---
+
+## Scoring freeze
+
+STRICT evaluates using **`ExecutiveController::calculate_trajectory_score()`** as pinned at run start. `final_success_score` equals that value.
+
+No changes to scoring function during an in-flight STRICT run.
+
+---
+
+## Locked pass / fail criteria (STRICT only)
+
+### Constants
+
+| Constant | Value |
+|----------|-------|
+| `LIFT_MARGIN` | **0.10** |
+| `BINARY_PASS` | cold not COMPLETED AND warm COMPLETED satisfies GTE on positive cases |
+
+### Table-driven per-case evaluation
+
+| Column | Meaning |
+|--------|---------|
+| `expect_retrieval_hit` | Observed injection/corpus hit matches boolean |
+| `lift_constraint` | `GTE` or `ABS_LT` |
+| `forbidden_retrieval_tokens[]` | Any match in either arm → case fail |
+| `include_in_mean_episodic_lift` | E2-01, E2-02 only |
+
+### E2 SUCCESS (STRICT — all required)
+
+1. All cases pass table expectations  
+2. No arm failed closed (retrieval, provenance, sealed-log violation)  
+3. `mean_episodic_lift > 0` over cases with `include_in_mean_episodic_lift == true`
+
+### E2 FAILURE (STRICT — any triggers)
+
+- Any case fails expectations  
+- Any fail-closed arm status  
+- `mean_episodic_lift <= 0`
+
+---
+
+## Harness contract
+
+| Item | Value |
+|------|-------|
+| Binary | `run_episodic_learning_benchmark` |
+| JSONL | `logs/episodic_learning_benchmark.jsonl` |
+| Official mode | `--tier strict` or default STRICT |
+| Diagnostic mode | `--tier integration` (non-scoring) |
+| E1 | One `run_id`; attribution on all STRICT arms |
+
+### STRICT artifact fields (required)
+
+- `scoring_tier`: `"STRICT"`
+- `official_scoring`: `true`
+- `e2_eval_config`: full `E2EvalConfig` JSON
+- `evaluation_fingerprint`: `{ fingerprint_hash, canonical_json }`
+- `episode_injection_log`: sealed snapshot
+- `retrieved_chunks[]`: with `source`, `source_id`, `validation_status`
+- `e2_outcome`: `SUCCESS` \| `FAILURE` (summary only)
+
+### INTEGRATION artifact fields (required)
+
+- `scoring_tier`: `"INTEGRATION"`
+- `official_scoring`: `false`
+- **No** `e2_outcome` field
+- Diagnostic trace fields only
+
+---
+
+## Enforcement summary
+
+| Violation | When detected | Result |
+|-----------|---------------|--------|
+| Mutate sealed episode log | Runtime | `std::logic_error`; arm FAIL |
+| Heuristic active in STRICT path | Build or runtime | Build fail or hard abort |
+| Cross-session read in STRICT | Runtime | Arm FAIL |
+| Retrieval error/timeout STRICT | Runtime | Arm FAIL (fail closed) |
+| Untraced chunk STRICT | Runtime | Arm FAIL (`FAILED_PROVENANCE`) |
+| Missing version pin | Harness init / evaluator | Run abort or case FAIL (no defaults) |
+| `strictDefaults()` used for official scoring | Evaluator | Case FAIL (`STRICT missing required version pins`) |
+| Emit `e2_outcome` in INTEGRATION | Harness | Build fail or assert |
+| Compare INTEGRATION to STRICT | Process / docs | Protocol violation |
+
+---
+
+## Test IDs
+
+| ID | Tier | Asserts |
+|----|------|---------|
+| E2-01 | STRICT | Retrieval hit + lift ≥ margin |
+| E2-02 | STRICT | Preference injection case |
+| E2-03 | STRICT | No pollution; \|lift\| < margin |
+| E2-04 | STRICT | JSONL + sidecar + version pins |
+| E2-05 | STRICT | Cognitive metrics attribution |
+| E2-06 | INTEGRATION | Diagnostic run; `official_scoring: false`; no `e2_outcome` |
+| E2-07 | STRICT | `validateStrictConfigForOfficialRun` + evaluation fingerprint |
+
+---
+
+## Out of scope (v1.2)
+
+- Full `runtime_retrieval_service` refactor (unless required to satisfy STRICT invariants during wiring review)
+- M4 restore, C6 Phase 3, E3 SCR, GUI
+- Using INTEGRATION results for promotion
+
+---
+
+## Implementation sequence
+
+**Checkpoint detail:** `cursor_list.md` § E2 (pause between each sub-checkpoint; build + tests green).
+
+1. **Protocol v1.2** — this document ✅  
+2. **Schema** — `E2EvalConfig`, `SealedEpisodeInjectionLog` in `episodic_learning_eval.h` ✅  
+3. **Evaluation kernel** — `e2_eval_kernel` CMake target, `e2_strict_enforcement`, `e2_strict_retrieval` ✅  
+4. **No implicit defaults** — `validateStrictConfigForOfficialRun`, evaluator pin rejection ✅  
+5. **Evaluation fingerprint** — `computeEvaluationFingerprint` logged by harness ✅  
+5.0 **Wiring contract** — evaluation-disabled mode (A1/A2), gate priority, scope limits in this doc ⏳  
+5.5 **Embedding pin correctness** — fix `\u0002` int→char coercion; semantic pin validation ⏳  
+6a **A1** — sealed log plumbing; E2-08; no scored harness loop ⏳  
+6b **A2** — decouple consolidation from STRICT path; E2-09; scope-limits doc ⏳  
+6c **A3** — `e2StrictRetrieve()` + boundary provenance; E2-10 ⏳  
+6d **A4** — executive RETRIEVAL → strict path; tier-1 + tier-2 isolation proof ⏳  
+6e **A5** — runtime guard in `rag.cpp` (required); E2-11 ⏳  
+7. **STRICT re-baseline run** — official SUCCESS/FAILURE only after 5.5 + 6a–6e  
+8. **Close-out** — `completed_improvements_log.md` (STRICT only); INTEGRATION tier harness (Phase C)
+
+---
+
+## System framing
+
+E2 is a **constrained execution environment with explicit failure semantics** — closer to a test kernel or minimal evaluation VM than a benchmark pipeline. Logical separation (tiers, sealed logs, provenance, fail-closed) is in place; **link isolation** (`e2_eval_kernel` vs runtime `rag.cpp`) prevents architecture drift from bypassing eval rules in the eval layer itself.
+
+---
+
+*Preregistered v1.2: deterministic STRICT lab function, sealed episode log, version pins, fail-closed retrieval, provenance enforcement, INTEGRATION non-scoring, v1.1 superseded.*

@@ -1,4 +1,5 @@
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -45,11 +46,16 @@
 #include "benchmark_reporter.h"
 #include "benchmark_environment.h"
 #include "benchmark_context.h"
+#include "benchmark_case_registry.h"
+#include "trajectory_ablation.h"
 #include "git_metadata.h"
 #include "ollama_snapshot.h"
 #include "cognitive_metrics.h"
 #include "basic_agent_plugin.h"
 #include "reflection_ab_cases.h"
+#include "episodic_learning_cases.h"
+#include "episodic_learning_eval.h"
+#include "e2_strict_enforcement.h"
 #include <json.hpp>
 
 namespace fs = std::filesystem;
@@ -3553,6 +3559,562 @@ static bool testE1BenchmarkContextBindIndexMerge() {
     return true;
 }
 
+/** E1-17: double bindIndex with different index_hash records index_mismatch; run_id unchanged. */
+static bool testE1BenchmarkContextDoubleBindMismatch() {
+    const fs::path logsDir = makeTempPath("thoth_e1_double_bind");
+    fs::create_directories(logsDir);
+
+    Thoth::BenchmarkRun run = Thoth::BenchmarkRun::create(makeE1SampleInputs(), makeE1TempLogsOptions(logsDir));
+    const std::string originalRunId = run.run_id();
+    const std::string originalEnvHash = run.environment_hash();
+
+    Thoth::IndexEnvironment firstIndex;
+    firstIndex.rag_index_header = {
+        {"model_name", "nomic-embed-text"},
+        {"embedding_dimension", 768},
+        {"embedding_version", 2},
+        {"chunk_count", 10},
+    };
+    run.bindIndex(firstIndex);
+    const std::string firstIndexHash = run.index_hash();
+
+    Thoth::IndexEnvironment secondIndex = firstIndex;
+    secondIndex.rag_index_header["chunk_count"] = 20;
+    run.bindIndex(secondIndex);
+
+    if (run.run_id() != originalRunId || run.environment_hash() != originalEnvHash) {
+        std::cerr << "testE1BenchmarkContextDoubleBindMismatch: run identity changed\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+    if (run.index_hash() == firstIndexHash || run.index_hash().empty()) {
+        std::cerr << "testE1BenchmarkContextDoubleBindMismatch: index_hash did not update\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    const auto& mismatch = run.environment().index.index_mismatch;
+    if (!mismatch.has_value()) {
+        std::cerr << "testE1BenchmarkContextDoubleBindMismatch: index_mismatch missing from environment\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+    if (mismatch->value("prior_hash", "") != firstIndexHash ||
+        mismatch->value("new_hash", "") != run.index_hash()) {
+        std::cerr << "testE1BenchmarkContextDoubleBindMismatch: index_mismatch hashes wrong\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    nlohmann::json sidecar;
+    {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        in >> sidecar;
+    }
+    const auto& sidecarIndex = sidecar["environment"]["index"];
+    if (!sidecarIndex.contains("index_mismatch")) {
+        std::cerr << "testE1BenchmarkContextDoubleBindMismatch: sidecar missing index_mismatch\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    bool foundBoundEvent = false;
+    {
+        std::ifstream in(logsDir / "benchmark_env.jsonl");
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.empty()) {
+                continue;
+            }
+            const nlohmann::json row = nlohmann::json::parse(line);
+            if (row.value("event", "") != "BENCHMARK_INDEX_BOUND") {
+                continue;
+            }
+            const auto& payload = row.value("payload", nlohmann::json::object());
+            if (payload.contains("index_mismatch")) {
+                foundBoundEvent = true;
+                if (payload["index_mismatch"].value("prior_hash", "") != firstIndexHash) {
+                    std::cerr << "testE1BenchmarkContextDoubleBindMismatch: JSONL prior_hash wrong\n";
+                    fs::remove_all(logsDir);
+                    return false;
+                }
+            }
+        }
+    }
+    if (!foundBoundEvent) {
+        std::cerr << "testE1BenchmarkContextDoubleBindMismatch: BENCHMARK_INDEX_BOUND missing index_mismatch\n";
+        fs::remove_all(logsDir);
+        return false;
+    }
+
+    fs::remove_all(logsDir);
+    return true;
+}
+
+static bool testG1dFilterTrajectoryCases() {
+    const auto all = Thoth::BenchmarkCaseRegistry::getCases();
+    const auto filtered = Thoth::filterTrajectoryDisambiguatesCases(all);
+    if (filtered.empty()) {
+        std::cerr << "testG1dFilterTrajectoryCases: expected non-empty filter\n";
+        return false;
+    }
+    for (const auto& c : filtered) {
+        if (c.case_type != "TRAJECTORY_DISAMBIGUATES") {
+            std::cerr << "testG1dFilterTrajectoryCases: wrong case type in filter\n";
+            return false;
+        }
+    }
+    if (filtered.size() >= all.size()) {
+        std::cerr << "testG1dFilterTrajectoryCases: filter did not reduce set\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testG1dArmConfigs() {
+    const Thoth::BenchmarkConfig cfgA =
+        Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::A);
+    const Thoth::BenchmarkConfig cfgB =
+        Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::B);
+    const Thoth::BenchmarkConfig cfgC =
+        Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::C);
+
+    if (cfgA.wt != 0.0f || cfgA.force_empty_trajectory) {
+        std::cerr << "testG1dArmConfigs: arm A config wrong\n";
+        return false;
+    }
+    if (cfgB.wt != 0.2f || cfgB.force_empty_trajectory) {
+        std::cerr << "testG1dArmConfigs: arm B config wrong\n";
+        return false;
+    }
+    if (cfgC.wt != 0.2f || !cfgC.force_empty_trajectory) {
+        std::cerr << "testG1dArmConfigs: arm C must force empty trajectory\n";
+        return false;
+    }
+    if (cfgA.wq != cfgB.wq || cfgA.wd != cfgB.wd) {
+        std::cerr << "testG1dArmConfigs: wq/wd must match across arms\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testG1dWinnerAndTieEpsilon() {
+    if (Thoth::computeTrajectoryAblationWinner(0.5f, 0.5f, 0.3f) != "TIE") {
+        std::cerr << "testG1dWinnerAndTieEpsilon: expected TIE at equality\n";
+        return false;
+    }
+    if (Thoth::computeTrajectoryAblationWinner(0.5005f, 0.5f, 0.3f) != "TIE") {
+        std::cerr << "testG1dWinnerAndTieEpsilon: expected TIE within epsilon\n";
+        return false;
+    }
+    if (Thoth::computeTrajectoryAblationWinner(0.502f, 0.5f, 0.3f) != "A") {
+        std::cerr << "testG1dWinnerAndTieEpsilon: expected A win outside epsilon\n";
+        return false;
+    }
+    if (Thoth::computeTrajectoryAblationWinner(0.3f, 0.8f, 0.4f) != "B") {
+        std::cerr << "testG1dWinnerAndTieEpsilon: expected B win\n";
+        return false;
+    }
+    return true;
+}
+
+/** G1d-03: TfIdf smoke — 2 trajectory cases × 3 arms; summary + winner counts. */
+static bool testG1dTrajectoryAblationSmoke() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_g1d_smoke.db").string();
+    Memory memory(cfg);
+
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    auto idx = new IndexManager(engine.get());
+
+    FileHandler fh;
+    const fs::path corpusFile =
+        fs::path(fh.getProjectRoot()) / "agent_workspace" / "rag" / "g1d_unit_test_corpus.txt";
+    fs::create_directories(corpusFile.parent_path());
+    {
+        std::ofstream out(corpusFile);
+        out << "ReAct Thought Action Observation loop for agent reasoning.\n";
+        out << "MemGPT paging memory operating system limits.\n";
+        out << "Generative Agents memory stream reflection architecture.\n";
+    }
+    idx->indexFile(corpusFile.string());
+    if (idx->getChunks().empty()) {
+        std::cerr << "testG1dTrajectoryAblationSmoke: index produced no chunks\n";
+        fs::remove(cfg.database_path);
+        fs::remove(corpusFile);
+        delete idx;
+        return false;
+    }
+
+    auto filtered = Thoth::filterTrajectoryDisambiguatesCases(Thoth::BenchmarkCaseRegistry::getCases());
+    if (filtered.size() < 2) {
+        std::cerr << "testG1dTrajectoryAblationSmoke: need >= 2 trajectory cases\n";
+        fs::remove(cfg.database_path);
+        fs::remove(corpusFile);
+        delete idx;
+        return false;
+    }
+    filtered.resize(2);
+
+    RAGPipeline rag(std::move(engine), idx, &cfg, &memory);
+    Thoth::BenchmarkRunner runner(rag);
+
+    const Thoth::BenchmarkResult result_a =
+        runner.run(Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::A), filtered);
+    const Thoth::BenchmarkResult result_b =
+        runner.run(Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::B), filtered);
+    const Thoth::BenchmarkResult result_c =
+        runner.run(Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::C), filtered);
+
+    if (result_a.cases.size() != 2 || result_b.cases.size() != 2 || result_c.cases.size() != 2) {
+        std::cerr << "testG1dTrajectoryAblationSmoke: case count mismatch\n";
+        fs::remove(cfg.database_path);
+        fs::remove(corpusFile);
+        delete idx;
+        return false;
+    }
+
+    const Thoth::TrajectoryAblationSummary summary =
+        Thoth::computeTrajectoryAblationSummary(filtered, result_a, result_b, result_c);
+
+    const int winnerTotal = summary.a_wins + summary.b_wins + summary.c_wins + summary.ties;
+    if (winnerTotal != 2) {
+        std::cerr << "testG1dTrajectoryAblationSmoke: winner counts != cases_run\n";
+        fs::remove(cfg.database_path);
+        fs::remove(corpusFile);
+        delete idx;
+        return false;
+    }
+    if (summary.decision == Thoth::G1dDecision::PENDING) {
+        std::cerr << "testG1dTrajectoryAblationSmoke: decision still PENDING\n";
+        fs::remove(cfg.database_path);
+        fs::remove(corpusFile);
+        delete idx;
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    fs::remove(corpusFile);
+    delete idx;
+    return true;
+}
+
+static bool e2PlantAndConsolidate(Memory& memory,
+                                  EmbeddingEngine* engine,
+                                  const std::string& sessionId,
+                                  const std::string& plantMessage) {
+    memory.configureConsolidation(nullptr, engine);
+    memory.setActiveSessionId(sessionId);
+    memory.addMessage("user", plantMessage);
+    for (int i = 1; i < 60; ++i) {
+        memory.addMessage("user", "filler turn " + std::to_string(i));
+    }
+    return !memory.getRecentWarmMemory(1).empty();
+}
+
+static Thoth::EpisodicLearningArmObservation runE2TestArm(
+    const Thoth::EpisodicLearningCase& spec,
+    const std::string& armLabel,
+    const Thoth::BenchmarkAttribution& attribution) {
+    setenv("THOTH_MOCK_EPISODIC", "1", 1);
+    setenv("THOTH_MOCK_LLM", "true", 1);
+
+    Config cfg;
+    cfg.max_reflections = 0;
+    cfg.database_path =
+        makeTempPath("thoth_e2_test_" + spec.id + "_" + armLabel).string();
+    fs::remove(cfg.database_path);
+
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    EmbeddingEngine* enginePtr = engine.get();
+
+    const bool needsPlant =
+        !spec.plant_message.empty() &&
+        (spec.cold_arm_pre_consolidated || armLabel == "warm");
+    if (needsPlant) {
+        e2PlantAndConsolidate(*memory, enginePtr, spec.plant_session_id, spec.plant_message);
+    }
+
+    auto idx = new IndexManager(enginePtr);
+    if (!spec.index_distractor_text.empty()) {
+        CodeChunk distractor;
+        distractor.code = spec.index_distractor_text;
+        distractor.fileName = "e2-distractor.md";
+        distractor.embedding = enginePtr->embed(distractor.code);
+        idx->addChunkToIndex(std::move(distractor));
+    }
+
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+
+    Thoth::EpisodicRetrievalProvenance retrievalProv;
+    rag->setEventCallback([&](const ControllerEvent& ev) { (void)ev; });
+
+    auto planner = std::make_shared<Thoth::EpisodicLearningMockPlanner>(spec.validation_token);
+    auto registry = std::make_shared<ToolRegistry>();
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    controller.set_max_reflections(0);
+    memory->setActiveSessionId(spec.id + "-" + armLabel + "-goal");
+
+    std::atomic<bool> terminal{false};
+    controller.set_event_callback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_FAILED ||
+            ev.type == EventType::PLAN_ABORTED) {
+            terminal.store(true);
+        }
+    });
+
+    controller.execute_goal(spec.goal, attribution);
+
+    int timeout = 150;
+    while (!terminal.load() && timeout > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        --timeout;
+    }
+
+    Thoth::EpisodicLearningArmObservation obs;
+    obs.arm_label = armLabel;
+    for (const auto& step : controller.get_current_plan().steps) {
+        if (step.type == StepType::RETRIEVAL && !step.result.is_null()) {
+            retrievalProv =
+                Thoth::provenanceFromRetrievalStepResult(step.result, spec.expectations);
+            break;
+        }
+    }
+    obs.retrieval = retrievalProv;
+    switch (controller.get_state()) {
+        case Thoth::ControllerState::COMPLETED:
+            obs.terminal_state = "COMPLETED";
+            obs.final_success_score = 1.0f;
+            break;
+        case Thoth::ControllerState::FAILED:
+            obs.terminal_state = "FAILED";
+            obs.final_success_score = 0.0f;
+            break;
+        default:
+            obs.terminal_state = "INCOMPLETE";
+            obs.final_success_score = 0.0f;
+            break;
+    }
+
+    fs::remove(cfg.database_path);
+    return obs;
+}
+
+static Thoth::E2EvalConfig makeE2StrictTestConfig() {
+    Thoth::E2EvalConfig cfg;
+    cfg.tier = Thoth::E2EvalTier::STRICT;
+    cfg.versions.corpus_snapshot_id = "e2-test-corpus";
+    cfg.versions.model_version_or_weights_hash = "mock";
+    cfg.versions.embedding_model_version = "tfidf-test";
+    cfg.versions.retrieval_engine_version = Thoth::kE2StrictRetrievalEngineVersion;
+    return cfg;
+}
+
+static bool testE2StrictConfigEnforcement() {
+    Thoth::E2EvalConfig incomplete = Thoth::E2EvalConfig::strictDefaults();
+    try {
+        Thoth::validateStrictConfigForOfficialRun(incomplete, true);
+        std::cerr << "testE2StrictConfigEnforcement: expected validation throw\n";
+        return false;
+    } catch (const Thoth::E2StrictValidationError&) {
+    }
+
+    const auto valid = makeE2StrictTestConfig();
+    try {
+        Thoth::validateStrictConfigForOfficialRun(valid, true);
+    } catch (const Thoth::E2StrictValidationError& e) {
+        std::cerr << "testE2StrictConfigEnforcement: valid config rejected: " << e.what() << '\n';
+        return false;
+    }
+
+    const auto fp = Thoth::computeEvaluationFingerprint(valid);
+    if (fp.fingerprint_hash.empty() || fp.canonical_json.empty()) {
+        std::cerr << "testE2StrictConfigEnforcement: empty fingerprint\n";
+        return false;
+    }
+
+    Thoth::EpisodicLearningExpectations positive;
+    positive.expect_warm_retrieval_hit = true;
+    positive.lift_constraint = Thoth::EpisodicLiftConstraint::GTE;
+    positive.lift_threshold = Thoth::kEpisodicLearningLiftMargin;
+
+    Thoth::EpisodicLearningArmObservation cold;
+    cold.terminal_state = "FAILED";
+    cold.final_success_score = 0.0f;
+
+    Thoth::EpisodicLearningArmObservation warm;
+    warm.terminal_state = "COMPLETED";
+    warm.final_success_score = 1.0f;
+    warm.retrieval.warm_retrieval_hit = true;
+
+    const auto rejected = Thoth::evaluateEpisodicLearningCase(
+        "pin-check", positive, cold, warm, incomplete);
+    if (rejected.passes || rejected.failure_reason.find("version pins") == std::string::npos) {
+        std::cerr << "testE2StrictConfigEnforcement: incomplete config should fail scoring\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testE2TableDrivenEvaluator() {
+    Thoth::EpisodicLearningExpectations positive;
+    positive.expect_warm_retrieval_hit = true;
+    positive.lift_constraint = Thoth::EpisodicLiftConstraint::GTE;
+    positive.lift_threshold = Thoth::kEpisodicLearningLiftMargin;
+
+    Thoth::EpisodicLearningArmObservation cold;
+    cold.terminal_state = "FAILED";
+    cold.final_success_score = 0.0f;
+    cold.retrieval.warm_retrieval_hit = false;
+
+    Thoth::EpisodicLearningArmObservation warm;
+    warm.terminal_state = "COMPLETED";
+    warm.final_success_score = 1.0f;
+    warm.retrieval.warm_retrieval_hit = true;
+    warm.retrieval.retrieved_memory_id = "mem-1";
+
+    const auto passEval = Thoth::evaluateEpisodicLearningCase(
+        "synthetic", positive, cold, warm, makeE2StrictTestConfig());
+    if (!passEval.passes || passEval.lift < Thoth::kEpisodicLearningLiftMargin) {
+        std::cerr << "testE2TableDrivenEvaluator: expected synthetic pass\n";
+        return false;
+    }
+
+    Thoth::EpisodicLearningExpectations negative;
+    negative.expect_warm_retrieval_hit = false;
+    negative.lift_constraint = Thoth::EpisodicLiftConstraint::ABS_LT;
+    negative.lift_threshold = Thoth::kEpisodicLearningLiftMargin;
+    negative.forbidden_retrieval_tokens = {"Apollo"};
+
+    Thoth::EpisodicLearningArmObservation warmFail = warm;
+    warmFail.retrieval.warm_retrieval_hit = true;
+    const auto failEval = Thoth::evaluateEpisodicLearningCase(
+        "synthetic-neg", negative, cold, warmFail, makeE2StrictTestConfig());
+    if (failEval.passes) {
+        std::cerr << "testE2TableDrivenEvaluator: expected negative retrieval fail\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testE2CaseById(const std::string& caseId) {
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::EpisodicLearningCase* spec = nullptr;
+    for (const auto& c : cases) {
+        if (c.id == caseId) {
+            spec = &c;
+            break;
+        }
+    }
+    if (!spec) {
+        std::cerr << "testE2CaseById: missing case " << caseId << '\n';
+        return false;
+    }
+
+    Thoth::BenchmarkAttribution attr{"e2-test-run", "e2-test-env"};
+    const auto cold = runE2TestArm(*spec, "cold", attr);
+    const auto warm = runE2TestArm(*spec, "warm", attr);
+    const auto eval = Thoth::evaluateEpisodicLearningCase(
+        spec->id, spec->expectations, cold, warm, makeE2StrictTestConfig());
+    if (!eval.passes) {
+        std::cerr << "testE2CaseById: " << caseId << " failed — " << eval.failure_reason << '\n';
+        return false;
+    }
+    return true;
+}
+
+/** E2-04: harness path — probe stack, sidecar identity, JSONL row. */
+static bool testE2EpisodicLearningBenchmarkSmoke() {
+    setenv("THOTH_MOCK_EPISODIC", "1", 1);
+    setenv("THOTH_MOCK_LLM", "true", 1);
+
+    const fs::path logsDir = makeTempPath("thoth_e2_smoke_logs");
+    fs::create_directories(logsDir);
+    const fs::path metricsLog = logsDir / "cognitive_metrics.jsonl";
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsLog.string().c_str(), 1);
+
+    auto probeEngine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager probeIdx(probeEngine.get());
+
+    Thoth::BenchmarkEnvironmentInputs inputs;
+    inputs.harness = "episodic_learning_benchmark";
+    inputs.tier = Thoth::BenchmarkTier::MOCK;
+    inputs.model.llm_model = "mock";
+    inputs.model.embedding_method = "TfIdf";
+    inputs.model.embedding_dimension = probeEngine->getDimension();
+    inputs.model.embedding_internal_version = probeEngine->getInternalVersion();
+    inputs.corpus_mode = Thoth::CorpusFingerprintMode::FAST;
+    inputs.thoth_env_flags = Thoth::collectThothEnvFlags();
+
+    Thoth::BenchmarkContextOptions opts;
+    opts.logs_directory = logsDir.string();
+    opts.auto_fill_git = false;
+    Thoth::BenchmarkRun run = Thoth::BenchmarkRun::create(inputs, opts);
+
+    Thoth::IndexEnvironment index;
+    index.rag_index_header = {
+        {"model_name", probeEngine->getModelName()},
+        {"embedding_dimension", probeEngine->getDimension()},
+        {"embedding_version", probeEngine->getInternalVersion()},
+        {"chunk_count", 0},
+    };
+    run.bindIndex(index);
+
+    if (run.index_hash().empty()) {
+        std::cerr << "testE2EpisodicLearningBenchmarkSmoke: index_hash empty\n";
+        fs::remove_all(logsDir);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        return false;
+    }
+
+    const Thoth::BenchmarkAttribution attr = run.attribution();
+    const auto cases = Thoth::getEpisodicLearningCases();
+    if (cases.empty()) {
+        std::cerr << "testE2EpisodicLearningBenchmarkSmoke: no cases\n";
+        fs::remove_all(logsDir);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        return false;
+    }
+
+    runE2TestArm(cases.front(), "warm", attr);
+
+    auto cleanup = [&]() {
+        fs::remove_all(logsDir);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_MOCK_EPISODIC");
+        unsetenv("THOTH_MOCK_LLM");
+    };
+
+    nlohmann::json sidecar;
+    {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        if (!in.is_open()) {
+            std::cerr << "testE2EpisodicLearningBenchmarkSmoke: sidecar missing\n";
+            cleanup();
+            return false;
+        }
+        in >> sidecar;
+    }
+    if (sidecar.value("run_id", "") != run.run_id() ||
+        sidecar.value("environment_hash", "") != run.environment_hash()) {
+        std::cerr << "testE2EpisodicLearningBenchmarkSmoke: sidecar mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    const auto row = readMetricsRowWithRunId(metricsLog, attr.run_id);
+    if (!row.has_value() || row->value("env_hash", "") != attr.env_hash) {
+        std::cerr << "testE2EpisodicLearningBenchmarkSmoke: metrics attribution mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    cleanup();
+    return true;
+}
 
 int main() {
     int failures = 0;
@@ -3624,6 +4186,7 @@ int main() {
     if (!testE1BenchmarkEnvironmentJsonRoundTrip()) failures++;
     if (!testE1BenchmarkContextCreateSidecar()) failures++;
     if (!testE1BenchmarkContextBindIndexMerge()) failures++;
+    if (!testE1BenchmarkContextDoubleBindMismatch()) failures++;
     if (!testE1GoalMetricsWithAttribution()) failures++;
     if (!testE1GoalMetricsWithoutAttribution()) failures++;
     if (!testE1GoalMetricsWorkerThreadAttribution()) failures++;
@@ -3632,6 +4195,16 @@ int main() {
     if (!testE1RobustnessBenchmarkSmoke()) failures++;
     if (!testE1ChatRagBenchmarkSmoke()) failures++;
     if (!testE1GragBenchmarkSmoke()) failures++;
+    if (!testG1dFilterTrajectoryCases()) failures++;
+    if (!testG1dArmConfigs()) failures++;
+    if (!testG1dWinnerAndTieEpsilon()) failures++;
+    if (!testG1dTrajectoryAblationSmoke()) failures++;
+    if (!testE2StrictConfigEnforcement()) failures++;
+    if (!testE2TableDrivenEvaluator()) failures++;
+    if (!testE2CaseById("E2-01")) failures++;
+    if (!testE2CaseById("E2-02")) failures++;
+    if (!testE2CaseById("E2-03")) failures++;
+    if (!testE2EpisodicLearningBenchmarkSmoke()) failures++;
 
     if (failures == 0) {
         std::cout << "All unit tests passed.\n";

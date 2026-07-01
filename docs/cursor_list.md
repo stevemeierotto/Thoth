@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-06-29 (M2 complete; reflection & external review)  
+**Last updated:** 2026-07-01 (E1 complete; **E2 kernel migration plan locked** — see **§ E2**)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
@@ -78,8 +78,8 @@ M1.5 proved the **consolidation pipe** (Apollo E2E). It did **not** prove that c
 
 | ID | Insight | Rationale |
 |----|---------|-----------|
-| **E1** | **Benchmark environment pinning** | Checkpoints **A–C ✅**, **D1–D5 ✅**. Spec: **`docs/benchmark_environment.md`**. Next: **E** (close-out). |
-| **E2** | **Episodic learning eval** | M1.5 = pipeline correctness. Need harness: same goal class pre/post consolidation, or multi-session repeat task, measuring success/latency/plan reuse when warm memory should help. Directly tests thesis. |
+| **E1** | **Benchmark environment pinning** | ✅ Complete 2026-07-01 — Checkpoints A–E; spec **`docs/benchmark_environment.md`**; unblocks E2, B1, V3 |
+| **E2** | **Episodic learning eval** | M1.5 = pipeline correctness. STRICT = deterministic retrieval from **declared frozen episodes** (not organic consolidation). Full checkpoint plan: **§ E2**; protocol **`docs/E2_PROTOCOL.md`**. |
 | **Doc** | **Sync `COGNATE_V2.html`** | Markdown has mock footnote for 51× depth; HTML export may not — align before any thesis-facing export. |
 | **Discipline** | **Mock vs Ollama split** | Fast CI (mock/TfIdf) must never be the sole evidence for learning or retrieval claims. Nightly `--full` + pinned env = authoritative tier (already in C4; enforce in eval culture). |
 | **F3 vs M4** | **F3 overlaps M4** | “Richer episodic memory” includes restore/replay — **M4 is prerequisite**, not parallel optional work. |
@@ -98,11 +98,10 @@ Agree on direction; adjust sequencing:
 ### Consolidated roadmap (reflection snapshot)
 
 ```
-Now      E1 Checkpoint E              (identity pass, scripts, close-out)
-Next     G1 diagnostic + E2          (trajectory ablation; episodic learning eval)
-Then     C6 Phase 3 + E3             (longitudinal metrics; SCR harness)
+Now      G1 diagnostic + E2          (trajectory ablation; episodic learning eval)
+Next     C6 Phase 3 + E3             (longitudinal metrics; SCR harness)
 Parallel B1 (if V3 Zenodo)           (hardened corpus)
-Later    M3 → M4                     (memory ops: prune admin + restore)
+Later    M4                         (range restore — M3 ✅)
 Later    F3 / F1                     (promote when eval shows bottleneck)
 Last     UI polish (§6), S1 apply_diff (owner discretion)
 ```
@@ -113,6 +112,108 @@ Last     UI polish (§6), S1 apply_diff (owner discretion)
 - **Zenodo V3** before B1 + pinned-env benchmark runs.
 - **F-series bulk promotion** — horizon items; eval should drive which F moves first.
 - **NODE / self-building** — defer per existing backlog discipline.
+
+---
+
+## E2 — Episodic learning eval kernel migration (active plan)
+
+**Status:** 🔶 In progress — protocol steps 1–5 complete; harness wiring pending  
+**Spec:** `docs/E2_PROTOCOL.md` v1.2 (preregistered constants; do not change mid-run)  
+**What this is:** Converting a coupled cognitive runtime into a **two-layer evaluation kernel** with determinism boundaries — not a refactor.
+
+| Layer | Role |
+|-------|------|
+| **`e2_eval_kernel`** | Deterministic lab function: sealed inputs → scored outputs. No heuristics, no hidden state. |
+| **`basic_agent` + `rag.cpp`** | Product cognition. **E2-INTEGRATION** tier = diagnostic only, never official evidence. |
+
+**Pause between every sub-checkpoint** (same discipline as E1 D1–D5): build green → tests green → confirm before next step.
+
+### Done (protocol steps 1–5)
+
+- `E2EvalConfig`, `SealedEpisodeInjectionLog`, version pins, evaluation fingerprint
+- `e2_eval_kernel` CMake target (compile-time exclusion of `rag.cpp`)
+- `validateStrictConfigForOfficialRun`, table-driven evaluator, mock harness scaffold
+- Unit tests E2-01–E2-07
+
+### Known bug (Phase 0 — blocking, before A1)
+
+Harness init assigns `embedding_model_version = probeEngine->getInternalVersion()` (returns `int` 2) into a `std::string` → `\u0002` control char, not `"2"`. Presence-only pin validation passes. **Fix + semantic validation required before authoritative runs.**
+
+### Gate architecture (priority order)
+
+Debugging should read **`scoring_block_reason`** in artifacts before reverse-engineering which gate fired.
+
+| Tier | Mechanism | Role |
+|------|-----------|------|
+| **1 — Source of truth** | `e2_eval_kernel` compile-time exclusion (`THOTH_E2_STRICT_KERNEL=1`; no `rag.cpp`) | **Pre-build guarantee** — fix here if anything disagrees |
+| **2 — Verification** | Linker/symbol audit (`nm -C` on scored-path `.o` + harness binary) | **Post-build check** — does not substitute for tier 1 |
+| **3 — Behavioral** | Runtime guard (A5), unit tests E2-08–E2-11, wiring-state gate | Catches reintroduction / wiring mistakes |
+
+Source grep for `RAGPipeline` / `retrieveRelevant` = fast sanity check only, **not** an exit criterion.
+
+### Scope limits — what STRICT claims (and does not)
+
+| Question | Answered by | Mechanism |
+|----------|-------------|-----------|
+| Can consolidated memory be retrieved? | **M1.5** ✅ | Organic consolidation pipeline |
+| Given **declared frozen episodes**, does deterministic retrieval change goal outcomes? | **E2-STRICT** (official, A3+) | Pre-sealed `SealedEpisodeInjectionLog` |
+| Does organic consolidation → warm tier → retrieval → lift? | **E2-INTEGRATION** (diagnostic) | Real `plantAndConsolidate` path — **non-scoring** |
+
+**STRICT warm ≠ organic consolidation.** Pre–Phase A harness used `plantAndConsolidate` → real episodic → warm tier → GRAG. Phase A warm arm = **pre-sealed case-table entries** (synthetic injection). Intentional for determinism; must be stated plainly in protocol and any publication.
+
+### Evaluation-disabled vs failed (A1/A2 wiring contract)
+
+Do **not** use fake `FAILED_*` to mean "not wired yet" — that conflates system defect with intentional non-evaluation.
+
+| Concept | Artifact signal |
+|---------|-----------------|
+| **Evaluation disabled** | `scoring_enabled: false`; no lift; no `e2_outcome`; `wiring_stage: "A1"` or `"A2"` |
+| **Evaluation failed** | Scoring attempted; `arm_scoring_status: FAILED_*`; lift withheld |
+
+| CP | Retrieval wired? | Harness | `e2_outcome` | `official_scoring` |
+|----|------------------|---------|--------------|-------------------|
+| **A1** | No | Sealed-log unit tests only; **no scored case loop** | Not emitted | `false` |
+| **A2** | No | Plumbing smoke; consolidation decoupled | Not emitted | `false` |
+| **A3+** | Yes (`e2StrictRetrieve`) | Full scored loop | Permitted if all gates pass | `true` |
+
+Pre-A3 harness output is **non-authoritative** regardless of exit code.
+
+### Provenance at evaluation boundary (A3+)
+
+**Rule:** Complete provenance required **at the evaluation boundary** (where chunks enter `strictProvenanceValid()`), not at every internal pipeline stage. Internal retrieval may enrich/repair metadata before the boundary; any untraced chunk **crossing the boundary** → `FAILED_PROVENANCE`, no lift, **no degraded-score mode**.
+
+### Implementation checkpoints
+
+| ID | Covers | Stop criteria |
+|----|--------|---------------|
+| **0** | Embedding pin `\u0002` fix + semantic validation + regression test | Readable pin; bad pin fails init |
+| **5.0** | Wiring contract + gate priority in `E2_PROTOCOL.md` | Doc only |
+| **A1** | Sealed log from case table (cold=empty, warm=case-spec) | **E2-08**; evaluation-disabled; no scored loop |
+| **A2** | Remove `plantAndConsolidate` from STRICT path; scope-limits doc | **E2-09**; `scoring_enabled: false`; no `e2_outcome` |
+| **A3** | `e2StrictRetrieve()` + boundary provenance gate | **E2-10**; first CP where official scoring **may** activate |
+| **A4** | Executive RETRIEVAL → strict path; remove `RAGPipeline` from scored STRICT arms | E2-01–E2-07; **tier-1 compile + tier-2 linker audit** |
+| **A5** | Runtime guard in `rag.cpp` under STRICT (required, not optional) | **E2-11** |
+| **B** | STRICT re-baseline (after 0 + A1–A5) | Authoritative SUCCESS/FAILURE only here |
+| **C** | `--tier integration` + E2-06 + `completed_improvements_log.md` close-out | INTEGRATION non-scoring |
+
+**Scope estimate:** Phase A ≈ **3–5 sub-sessions** (not one session) — largest change since E1 Checkpoint C.
+
+### Separation debt (acknowledged)
+
+STRICT / INTEGRATION share eval types and schema → **behavioral separation**, not fully structural. Acceptable for v1.2; future hardening (kernel-only harness binary, versioned ABI) deferred post–Phase C.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `docs/E2_PROTOCOL.md` | Preregistered protocol + gate priority + scope limits |
+| `external/basic_agent/include/episodic_learning_eval.h` | Schema |
+| `external/basic_agent/src/e2_strict_enforcement.cpp` | Pin validation, fingerprint |
+| `external/basic_agent/src/e2_strict_retrieval.cpp` | Deterministic retrieval |
+| `external/basic_agent/src/run_episodic_learning_benchmark.cpp` | Harness (migration target) |
+| `tests/unit_tests.cpp` | E2-01–E2-07 (+ E2-08–E2-11 planned) |
+
+**Run (current, non-authoritative until Phase B):** `./build/debug/external/basic_agent/run_episodic_learning_benchmark`
 
 ---
 
@@ -389,10 +490,10 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **B2** | Automate critical manual suite signals | ✅ | `run_test_suite.cpp` + `check_baseline.py` (2026-06-27); **C5** extends coverage |
 | **B3** | Reduce test log noise | 📋 | Repeated embedding migration log per fixture |
 | **B4** | Compiler warnings (~14 on debug build) | 📋 | Unused params in stubs/GUI |
-| **E1** | Benchmark environment pinning | 🔶 | A–C ✅, **D1–D5 ✅** — all harnesses wired; E1-12…16 smoke. Next: **E** — **`docs/benchmark_environment.md`** |
-| **E2** | Episodic memory learning eval | 📋 | Repeat-goal / multi-session harness: does consolidation improve later success? (beyond M1.5 pipe test) |
+| **E1** | Benchmark environment pinning | ✅ | A–E complete 2026-07-01 — **`docs/benchmark_environment.md`** |
+| **E2** | Episodic memory learning eval | 🔶 | Protocol v1.2 + eval kernel ✅; harness still on runtime path — **§ E2** for checkpoint plan (`docs/E2_PROTOCOL.md`) |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
-| **G1d** | Trajectory bucket diagnostic | 📋 | Ablation on `TRAJECTORY_DISAMBIGUATES` (`w_t=0` vs `0.2`, empty T) before **F5** |
+| **G1d** | Trajectory bucket diagnostic | 🔶 | Harness wired — `run_trajectory_ablation_benchmark`; Ollama 30-case run + decision pending — **`docs/trajectory_ablation_benchmark.md` v1.0** |
 
 ---
 
@@ -480,8 +581,8 @@ The third tier does not exist yet. It is the missing bridge between "it works" a
 | Step | Item | Rationale |
 |------|------|-----------|
 | **1** | **M3** — `/prune` admin command | Closes operational memory loop; unblocks debugging and consolidation demos |
-| **2** | **E1** — Environment pinning | Pin model version, Ollama version, corpus fingerprint. One day of work that saves months of unreproducible benchmarks. Must exist before E2 or B1 mean anything |
-| **3** | **E2** — Repeat-goal multi-session harness | Run the same goal cold then warm across sessions; measure delta systematically. This is the actual learning proof — the question M1.5 deliberately did not ask |
+| **2** | **E1** — Environment pinning | ✅ Complete 2026-07-01 — see `docs/benchmark_environment.md` |
+| **3** | **E2** — Kernel wiring migration | Phase 0 (pin bug) → A1–A5 sub-checkpoints → Phase B re-baseline. See **`cursor_list.md` § E2** + **`docs/E2_PROTOCOL.md`**. STRICT tests declared-episode retrieval, not organic consolidation (M1.5 covers that). |
 | **4** | **M4** — `MemoryPruner::restore(session_id, range)` | Built into already-verified eval environment. Foundation F3 needs; do not parallel-track with E2 |
 | **5** | **G1 diagnostic** — Trajectory scoring ablation | `w_t=0` vs `0.2` vs empty T ablation is cheap. Tells you tune vs drop vs redesign before touching anything else in retrieval. Do not promote F5 until this completes |
 | **6** | **E3** — SCR in CI | Wire Strategy Conformance Rate into continuous benchmark. Makes strategy promotion a regression signal not a one-off paper figure |
@@ -527,28 +628,20 @@ Done    C6 Phase 2 — plot script, LLM token counts, GUI export
 Done    V1 — manual GUI TEST_SUITE TC-01–TC-07 (2026-06-29, observability confirmed)
 Done    M1.5 — episodic verification (E2E retrieval, failure inject, latency, benchmark) ✅ 2026-06-26
 Done    M2 — age-based consolidation policy (config, Clock, structured decisions) ✅
-Next 1  M3–M4 — /prune admin + range restore (memory ops)
-Next 2  G1d + E1 — trajectory ablation; benchmark env pinning
-Next 3  C6 Phase 3 + E2 + E3 — longitudinal metrics; episodic lift; SCR harness
-Next 4  B1 (if V3 Zenodo) — hardened research corpus
+Next 1  **E2 Phase 0 + A1–A5** — kernel wiring migration (see **§ E2**); G1d Ollama run in parallel if capacity
+Next 2  E2 Phase B–C — STRICT re-baseline + INTEGRATION tier + close-out
+Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
+Next 4  M4 — range restore (M3 ✅)
+Next 5  B1 (if V3 Zenodo) — hardened research corpus
 Later   F3/F1 — when eval identifies bottleneck (§ Reflection)
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)
 Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
-External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
-Next    M3 — /prune admin command
-Next    E1 Checkpoint E — close-out (identity pass, Python scripts)
-Next    E2 — repeat-goal multi-session harness (the learning proof)
-Next    M4 — range restore (built into verified eval environment)
-Next    G1d — trajectory ablation benchmark (w_t=0 vs 0.2 vs empty T)
-Next    E3 — SCR wired into CI
-Next    C6 Phase 3 — accumulated multi-session longitudinal analysis
-Later   B1 — 30 hardened corpus cases (under pinned E1 environment)
-Later   V3 — Zenodo re-upload (after B1 + E1)
-Later   F-series — promoted by eval evidence, not schedule
+External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅; E1 ✅)
+Done    E1 — benchmark environment pinning (Checkpoints A–E, 2026-07-01)
 ```
 
-**GitHub (2026-07-01):** Thoth `de5a469`, Basic_agent `4c45aca` on `main` — E1 D3–D5 harness wiring pushed.
+**GitHub (2026-07-01):** Thoth workspace + Basic_agent submodule — E1 Checkpoints D3–D5 harness wiring pushed; **Checkpoint E** (double-bind, Python tooling, close-out) implemented locally.
 
 ---
 
@@ -578,6 +671,8 @@ Later   F-series — promoted by eval evidence, not schedule
 
 | Need | File |
 |------|------|
+| **E2 protocol + implementation checkpoints** | **`cursor_list.md` § E2**, **`docs/E2_PROTOCOL.md`** |
+| **E1 benchmark environment** | **`docs/benchmark_environment.md`** |
 | Full phase specs | `improvements.md` |
 | What's actually shipped | `completed_improvements_log.md` |
 | Honest gaps + external review | `audit.md` §5 |

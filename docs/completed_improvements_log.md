@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-01 (E1 Checkpoint D5 — `run_grag_benchmark` harness wiring)
+Last updated: 2026-07-01 (E1 Checkpoint E — benchmark environment pinning complete)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
@@ -23,9 +23,28 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - **Hierarchical Subgoals**: This is still in the planning phase.
 - **Trace Resumption**: Full resumption is currently only authoritative through the SQLite persistence layer; log replay is for observability.
 
-### E1 — Benchmark environment pinning (in progress)
+### E1 — Benchmark environment pinning ✅ complete
 
-**Spec:** `docs/benchmark_environment.md` (v3.1). **Step 6 (D1–D5) ✅** — all five harnesses wired and pushed (2026-07-01). **Next checkpoint: E** — index mismatch, Python scripts, five-harness identity pass, close-out.
+**Spec:** `docs/benchmark_environment.md` (v3.1). **Checkpoints A–E ✅** — closed 2026-07-01.
+
+#### Checkpoint E — 2026-07-01
+
+- **Scope:** Step 7 narrow double-bind mismatch in `BenchmarkRun::bindIndex()`; `scripts/compare_benchmark_env.py`; `check_baseline.py --require-env` (opt-in); five-harness identity + close-out pass; E1-17.
+- **Step 7:** Second `bindIndex()` with different `index_hash` populates `index_mismatch { prior_hash, new_hash }` on sidecar + `BENCHMARK_INDEX_BOUND` JSONL; `run_id` / `environment_hash` unchanged. No `IndexManager` or production path changes.
+- **Tests:** E1-17 green; E1-01–E1-16 green (`THOTH_MOCK_EPISODIC=1` full unit suite); `run_test_suite --dev` 7/7; `check_baseline.py --require-env` smoke; `compare_benchmark_env.py --strict` smoke on D1 sidecar.
+- **Files:** `benchmark_context.cpp`, `tests/unit_tests.cpp`, `scripts/compare_benchmark_env.py`, `check_baseline.py`, `docs/benchmark_environment.md`.
+
+**Five-harness identity pass (single table — close-out evidence):**
+
+| Harness | Trigger | run_id | env_hash | index_hash | Terminal | Cognitive metrics |
+|---------|---------|--------|----------|------------|----------|-------------------|
+| D1 `run_test_suite` | E1-12 + `--dev` smoke | ✅ sidecar + JSONL | ✅ matches sidecar | ✅ non-empty after bind | `TEST_SUITE_COMPLETE` | ✅ 1 row / goal; attribution match |
+| D2 `run_reflection_ab_benchmark` | E1-13 smoke | ✅ | ✅ | ✅ | (smoke path) | ✅ attribution match |
+| D3 `run_robustness_suite` | E1-14 smoke | ✅ | ✅ | ✅ | (smoke path) | ✅ attribution match (C5-09 = 6 rows documented) |
+| D4 `run_chat_rag_benchmark` | E1-15 smoke | ✅ | ✅ | ✅ | (smoke path) | **0** rows (retrieval-only) |
+| D5 `run_grag_benchmark` | E1-16 smoke | ✅ | ✅ | ✅ | (smoke path) | **0** rows (retrieval-only) |
+
+**Close-out:** All 9 boxes in `benchmark_environment.md` § Close-out criteria ticked. **E1 ✅ — proceed to E2 / G1d / B1.**
 
 #### Checkpoint D5 — 2026-07-01
 

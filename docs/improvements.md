@@ -57,7 +57,21 @@ Before making any changes:
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
-**Active work:** Remaining Phase 3–4 items are listed below with per-step status. **Phase 5 (Self-Building)** is an optional future expansion the owner may revisit — not scheduled active work. Benchmark case design: [`new_corpus_tests.md`](new_corpus_tests.md). See `completed_improvements_log.md` and `cursor_list.md`.
+**Active work:** Remaining Phase 3–4 items are listed below with per-step status. **Phase 5 (Self-Building)** is an optional future expansion the owner may revisit — not scheduled active work. **E1 benchmark environment pinning ✅ complete** (2026-07-01 — see `completed_improvements_log.md`); next eval track: **E2**, **G1d**, **C6 Phase 3**, **E3**. Benchmark case design: [`new_corpus_tests.md`](new_corpus_tests.md). See `completed_improvements_log.md` and `cursor_list.md`.
+
+---
+
+## Eval & benchmark track (E-series)
+
+| ID | Task | Status | Notes |
+|----|------|--------|-------|
+| **E1** | Benchmark environment pinning | ✅ | Checkpoints A–E complete 2026-07-01 — spec `docs/benchmark_environment.md`; sidecar + JSONL + harness attribution; Step 7 double-bind mismatch; `compare_benchmark_env.py`; `check_baseline.py --require-env` (opt-in) |
+| **E2** | Episodic memory learning eval | 🔶 | Protocol v1.2 + eval kernel ✅; harness wiring pending — **`cursor_list.md` § E2** + **`docs/E2_PROTOCOL.md`** |
+| **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI |
+
+**E1 close-out:** All harnesses (D1–D5) emit `run_id` + `env_hash` + `index_hash`; cognitive metrics attribution on D1–D3; retrieval-only harnesses D4–D5 emit 0 metrics rows. Unblocks **B1** and **V3** under pinned environment.
+
+**E2 active work:** Kernel wiring migration (Phase 0 pin bug → checkpoints A1–A5 → re-baseline). Implementation checkpoints and gate architecture: **`cursor_list.md` § E2**. Preregistered protocol: **`docs/E2_PROTOCOL.md`** v1.2.
 
 ---
 

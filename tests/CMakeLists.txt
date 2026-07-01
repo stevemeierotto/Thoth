@@ -51,6 +51,25 @@ if(TARGET run_robustness_suite)
     )
 endif()
 
+if(TARGET run_trajectory_ablation_benchmark)
+    add_test(NAME trajectory-ablation-benchmark COMMAND run_trajectory_ablation_benchmark --sample 2)
+    set_tests_properties(trajectory-ablation-benchmark PROPERTIES
+        LABELS "pr;fast;cognitive"
+        TIMEOUT 300
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        ENVIRONMENT "THOTH_TRAJECTORY_ABLATION_TFIDF=1"
+    )
+endif()
+
+if(TARGET run_episodic_learning_benchmark)
+    add_test(NAME episodic-learning-benchmark COMMAND run_episodic_learning_benchmark)
+    set_tests_properties(episodic-learning-benchmark PROPERTIES
+        LABELS "pr;fast;cognitive"
+        TIMEOUT 180
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+endif()
+
 option(THOTH_TEST_SUITE_FULL "Register nightly Ollama TEST_SUITE (--full) in CTest" OFF)
 if(THOTH_TEST_SUITE_FULL)
     add_test(NAME test-suite-full COMMAND run_test_suite --full)

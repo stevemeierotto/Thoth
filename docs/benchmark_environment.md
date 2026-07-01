@@ -1,9 +1,9 @@
 # E1 — Benchmark Environment Pinning
 
-**Status:** 🔶 Checkpoint D5 complete — next: **Checkpoint E** (index mismatch, Python scripts, close-out)
+**Status:** ✅ E1 complete — Checkpoint E closed (2026-07-01)
 **Spec version:** v3.1 (2026-06-26)  
 **Effort:** ~10–12 hours total, **split across checkpoints A–E** (see below)  
-**Roadmap:** Must complete before **E2**, **B1**, and **V3** Zenodo re-upload.
+**Roadmap:** Complete — unblocks **E2**, **B1**, and **V3** Zenodo re-upload.
 
 **Related:** `docs/cursor_list.md` § Reflection (E1 rationale), `check_baseline.py`, `logs/cognitive_metrics.jsonl`.
 
@@ -116,6 +116,7 @@ Harnesses emit a **terminal summary** via `BenchmarkRun::emit()` when the run fi
 | `run_robustness_suite` | `ROBUSTNESS_COMPLETE` | `ROBUSTNESS_ABORTED` |
 | `run_chat_rag_benchmark` | `CHAT_RAG_BENCHMARK_COMPLETE` | `CHAT_RAG_BENCHMARK_ABORTED` |
 | `run_grag_benchmark` | `GRAG_BENCHMARK_COMPLETE` | `GRAG_BENCHMARK_ABORTED` |
+| `run_episodic_learning_benchmark` | `EPISODIC_LEARNING_COMPLETE` | `EPISODIC_LEARNING_ABORTED` |
 
 Each harness wraps its case loop in an RAII recorder: `complete()` sets a flag and emits the **COMPLETE** event; if scope exits without `complete()` (early `return`, exception propagated to `main()`), the destructor emits **ABORTED** with whatever counts are available.
 
@@ -157,7 +158,13 @@ After D5 lands, verify all wired harnesses emit **`run_id`**, **`env_hash`**, an
 | **D3** | `run_robustness_suite` harness wiring + E1-14 smoke | ✅ E1-14 + harness green | 7 `execute_goal` calls; **6** metrics rows — C5-09 slow goal preempted (verified pre-D3 baseline at `fb4fd9f`: same 6 rows; one controller; join-on-replace, no terminal emit). |
 | **D4** | `run_chat_rag_benchmark` harness wiring + E1-15 smoke | ✅ E1-15 + Ollama happy path + abort smoke | Retrieval-only; **0** cognitive metrics rows; `run_id`/`env_hash` on 5 case + summary JSONL rows. |
 | **D5** | `run_grag_benchmark` harness wiring + E1-16 smoke | ✅ E1-16 + Ollama `--sample` + abort smoke | `BenchmarkRunIdentity` on `grag_benchmark.jsonl`; legacy `benchmark-{ts}` fallback preserved. |
-| **E** | Step 7 (index mismatch / `BENCHMARK_INDEX_BOUND`) + Step 8 (Python scripts, docs, close-out) | Script smoke; five-harness identity pass; close-out checklist | Final pass; low risk individually. |
+| **E** | Step 7 (index mismatch / `BENCHMARK_INDEX_BOUND`) + Step 8 (Python scripts, docs, close-out) | ✅ E1-17 + script smoke; five-harness identity pass; close-out checklist | Final pass; low risk individually. |
+
+### Step 7 scope (Checkpoint E — narrow only)
+
+**In scope:** When `BenchmarkRun::bindIndex()` is called a second time in the same run with a different `index_hash`, record `index_mismatch` `{ prior_hash, new_hash }` on the `BENCHMARK_INDEX_BOUND` payload and in sidecar `environment.index.index_mismatch`. Implementation is **`benchmark_context.cpp` only**.
+
+**Out of scope:** `IndexManager` drift monitoring during long sessions, production RAG paths, GUI changes, or any active monitoring outside the benchmark run object.
 
 ### Checkpoint D — harness sub-sessions (Step 6)
 
@@ -209,19 +216,21 @@ Add to `tests/unit_tests.cpp` as each checkpoint completes:
 | **E1-14** | D3 | Robustness harness path: probe stack → `execute_goal(attribution)` → sidecar + metrics; `index_hash` non-empty |
 | **E1-15** | D4 | Chat-RAG harness path: probe stack → `retrieveRelevant` → sidecar; `index_hash` non-empty (no Ollama) |
 | **E1-16** | D5 | GRAG harness path: probe stack → `reportToFile(BenchmarkRunIdentity)` → JSONL row + sidecar (uses `THOTH_WORKSPACE_PATH` in test) |
+| **E1-17** | E | Double `bindIndex()` with different index_hash → `index_mismatch` in sidecar + JSONL; `run_id` / `environment_hash` unchanged |
 
 ---
 
 ## Close-out criteria (E1 complete)
 
-- [ ] Every listed harness emits events with valid `run_id` + `env_hash` tied to sidecar
-- [ ] Harness-driven `GOAL_COGNITIVE_METRICS` rows carry matching `run_id` + `env_hash`
-- [ ] GUI goals omit benchmark fields (not an error)
-- [ ] `TIER_MISMATCH` emitted when tier drifts
-- [ ] `BENCHMARK_INDEX_BOUND` updates sidecar `index_hash` without replacing run record
-- [ ] `docs/benchmark_environment.md` human checklist: B1/V3 runs require git SHA ≠ unknown
-- [ ] `compare_benchmark_env.py` compares two sidecars
-- [ ] `check_baseline.py --require-env` documented; **off by default**
+- [x] Every listed harness emits events with valid `run_id` + `env_hash` tied to sidecar
+- [x] Harness-driven `GOAL_COGNITIVE_METRICS` rows carry matching `run_id` + `env_hash`
+- [x] GUI goals omit benchmark fields (not an error)
+- [x] `TIER_MISMATCH` emitted when tier drifts
+- [x] `BENCHMARK_INDEX_BOUND` updates sidecar `index_hash` without replacing run record
+- [x] Double `bindIndex()` with different hash records `index_mismatch` (Step 7 narrow scope)
+- [x] `docs/benchmark_environment.md` human checklist: B1/V3 runs require git SHA ≠ unknown
+- [x] `compare_benchmark_env.py` compares two sidecars
+- [x] `check_baseline.py --require-env` documented; **off by default**
 
 ---
 

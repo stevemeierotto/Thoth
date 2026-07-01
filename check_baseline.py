@@ -8,6 +8,10 @@ Usage:
         --bench agent_workspace/grag_benchmark.jsonl \\
         --applog agent_workspace/app_log.jsonl
 
+    python3 check_baseline.py --require-env
+        Opt-in: require logs/benchmark_env.latest.json with run_id, environment_hash,
+        index_hash; optionally cross-check terminal harness event in benchmark_env.jsonl.
+
 Prefer headless run:
   ./build/debug/tests/run_test_suite --dev   # fast (~10s)
   ./build/debug/tests/run_test_suite --full  # Ollama regression
@@ -109,12 +113,104 @@ def result(name, passed, reason=""):
     return passed
 
 
+def check_benchmark_env(sidecar_path: Path, jsonl_path: Path) -> bool:
+    """Opt-in E1 gate: sidecar must carry run_id, environment_hash, index_hash."""
+    print("\nENV: Benchmark environment sidecar (--require-env)")
+    all_passed = True
+
+    if not sidecar_path.is_file():
+        p = result("benchmark_env.latest.json exists", False, str(sidecar_path))
+        return False
+
+    try:
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        result("sidecar parses as JSON", False, str(exc))
+        return False
+
+    run_id = sidecar.get("run_id", "")
+    env_hash = sidecar.get("environment_hash", "")
+    index_hash = sidecar.get("index_hash", "")
+
+    p = result("run_id non-empty", bool(run_id), "missing run_id")
+    all_passed = all_passed and p
+    p = result("environment_hash non-empty", bool(env_hash), "missing environment_hash")
+    all_passed = all_passed and p
+    p = result("index_hash non-empty", bool(index_hash), "missing index_hash")
+    all_passed = all_passed and p
+
+    if jsonl_path.is_file() and run_id:
+        terminal_events = {
+            "TEST_SUITE_COMPLETE",
+            "TEST_SUITE_ABORTED",
+            "REFLECTION_AB_COMPLETE",
+            "REFLECTION_AB_ABORTED",
+            "ROBUSTNESS_COMPLETE",
+            "ROBUSTNESS_ABORTED",
+            "CHAT_RAG_BENCHMARK_COMPLETE",
+            "CHAT_RAG_BENCHMARK_ABORTED",
+            "GRAG_BENCHMARK_COMPLETE",
+            "GRAG_BENCHMARK_ABORTED",
+        }
+        matched_terminal = False
+        env_hash_match = False
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("run_id") != run_id:
+                continue
+            if row.get("env_hash") == env_hash:
+                env_hash_match = True
+            if row.get("event") in terminal_events:
+                matched_terminal = True
+
+        p = result(
+            "JSONL row shares env_hash for run_id",
+            env_hash_match,
+            f"no benchmark_env.jsonl row with run_id={run_id!r} and matching env_hash",
+        )
+        all_passed = all_passed and p
+        p = result(
+            "terminal harness event for run_id (optional cross-check)",
+            matched_terminal,
+            "no COMPLETE/ABORTED terminal event — run may have crashed or sidecar is from partial run",
+        )
+        all_passed = all_passed and p
+
+    return all_passed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Check Thoth TEST_SUITE signals from logs.")
     parser.add_argument("--trace", default="agent_workspace/decision_trace.jsonl")
     parser.add_argument("--bench", default="agent_workspace/grag_benchmark.jsonl")
     parser.add_argument("--applog", default="agent_workspace/app_log.jsonl")
+    parser.add_argument(
+        "--require-env",
+        action="store_true",
+        help="Opt-in: require logs/benchmark_env.latest.json with run_id, environment_hash, "
+        "index_hash; cross-check benchmark_env.jsonl when present (off by default)",
+    )
+    parser.add_argument(
+        "--env-sidecar",
+        default="logs/benchmark_env.latest.json",
+        help="Sidecar path for --require-env (default: logs/benchmark_env.latest.json)",
+    )
+    parser.add_argument(
+        "--env-jsonl",
+        default="logs/benchmark_env.jsonl",
+        help="JSONL path for --require-env cross-check (default: logs/benchmark_env.jsonl)",
+    )
     args = parser.parse_args()
+
+    if args.require_env:
+        ok = check_benchmark_env(Path(args.env_sidecar), Path(args.env_jsonl))
+        sys.exit(0 if ok else 1)
 
     print("\n══════════════════════════════════════════════")
     print("  Thoth TEST_SUITE — Log Checker")
