@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-01 (E1 Checkpoint C closed — E1-11 cross-thread guard)
+Last updated: 2026-07-01 (E1 Checkpoint D1 — `run_test_suite` harness wiring)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
@@ -25,7 +25,14 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 ### E1 — Benchmark environment pinning (in progress)
 
-**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D1** — wire `run_test_suite` first.
+**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D2** — wire `run_reflection_ab_benchmark`.
+
+#### Checkpoint D1 — 2026-07-01
+
+- **Scope:** `BasicAgentPlugin::buildTestSuiteBenchmarkInputs()` + `benchmarkIndexEnvironment()` (engine via `rag.engine` after move); `run_test_suite` captures env after `setRagFiles`, single `run_id` for suite; all `executeGoal` calls pass `run.attribution()`; stdout one-line env summary; `TestSuiteRunRecorder` RAII emits `TEST_SUITE_COMPLETE` or `TEST_SUITE_ABORTED` on all exit paths.
+- **Tests:** E1-12 green (harness helper path smoke — sidecar + `cognitive_metrics.jsonl` `run_id`/`env_hash` match); `run_test_suite --dev` all TC pass; sidecar + `benchmark_env.jsonl` + cognitive metrics aligned; `TEST_SUITE_ABORTED` verified via `THOTH_TEST_SUITE_BENCHMARK_ABORT_SMOKE=1` (main-thread early exit → JSONL terminal event).
+- **Files:** `basic_agent_plugin.h/cpp`, `tests/run_test_suite.cpp`, `tests/unit_tests.cpp`.
+- **Safe stop — next checkpoint: D2** (`run_reflection_ab_benchmark`).
 
 #### Checkpoint C — 2026-06-30 (closed 2026-07-01)
 

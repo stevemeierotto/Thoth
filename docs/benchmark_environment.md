@@ -1,6 +1,6 @@
 # E1 — Benchmark Environment Pinning
 
-**Status:** 🔶 Checkpoint C complete — next: **Checkpoint D1** (harness wiring)  
+**Status:** 🔶 Checkpoint D1 complete — next: **Checkpoint D2** (`run_reflection_ab_benchmark`)  
 **Spec version:** v3.1 (2026-06-26)  
 **Effort:** ~10–12 hours total, **split across checkpoints A–E** (see below)  
 **Roadmap:** Must complete before **E2**, **B1**, and **V3** Zenodo re-upload.
@@ -122,8 +122,9 @@ All writes to `logs/benchmark_env.latest.json` (create, `bindIndex()` merge, any
 | **A** | Steps 1–2: nested structs, `assembleEnvironment()`, `inferTier()`, `environment_hash`, `index_hash` | ✅ E1-01–E1-06 green | Pure logic, no I/O, nothing wired into existing call sites. Zero blast radius if untouched for days. |
 | **B** | Step 2b (design lock headers) + Step 3 (`BenchmarkContext`) + Step 5 (`GitMetadata`, corpus fingerprint, `OllamaSnapshot`) | ✅ E1-07–E1-08 green | New files only — no existing production call sites changed. |
 | **C** | Step 4 only: `BenchmarkAttribution` through `execute_goal()` → `CognitiveMetricsLogger` | ✅ E1-09–E1-11 green | Invasive hot-path step — isolated so signature + all callers land together. |
-| **D1–D5** | Step 6: one harness per sub-session | Harness-specific smoke + existing suite green before next sub-session | Already “one harness at a time”; each sub-session is its own stop/resume point. |
-| **E** | Step 7 (index mismatch / `BENCHMARK_INDEX_BOUND`) + Step 8 (Python scripts, docs, close-out) | **E1-12** + script smoke; close-out checklist | Final pass; low risk individually. |
+| **D1** | `run_test_suite` harness wiring + E1-12 smoke | ✅ E1-12 + `--dev` suite green | Template for D2–D5; RAII terminal event guard. |
+| **D2–D5** | Step 6: remaining harnesses | Harness-specific smoke + existing suite green before next sub-session | One harness per sub-session. |
+| **E** | Step 7 (index mismatch / `BENCHMARK_INDEX_BOUND`) + Step 8 (Python scripts, docs, close-out) | Script smoke; close-out checklist | Final pass; low risk individually. |
 
 ### Checkpoint D — harness sub-sessions (Step 6)
 
@@ -131,7 +132,7 @@ Wire **one harness per sub-session**; test before starting the next:
 
 | Sub | Harness | Notes |
 |-----|---------|-------|
-| **D1** | `run_test_suite` | `--dev` then `--full` |
+| **D1** | `run_test_suite` | ✅ `--dev` green |
 | **D2** | `run_reflection_ab_benchmark` | |
 | **D3** | `run_robustness_suite` | |
 | **D4** | `run_chat_rag_benchmark` | |
@@ -170,7 +171,7 @@ Add to `tests/unit_tests.cpp` as each checkpoint completes:
 | **E1-09** | C | `execute_goal(goal, attribution)` → metrics JSON includes `run_id`/`env_hash` |
 | **E1-10** | C | `execute_goal(goal)` without attribution → fields omitted |
 | **E1-11** | C | Attribution set before worker thread; `STEP_STARTED` + terminal events on worker; metrics JSON includes `run_id`/`env_hash` |
-| **E1-12** | E | End-to-end: harness create → goal → sidecar + metrics hash match |
+| **E1-12** | D1 | End-to-end harness helper path: create → `executeGoal(attribution)` → sidecar + metrics hash match |
 
 ---
 

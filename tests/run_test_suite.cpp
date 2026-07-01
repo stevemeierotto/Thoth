@@ -9,6 +9,7 @@
 #include "basic_agent_plugin.h"
 #include "file_handler.h"
 #include "executive_controller.h"
+#include "benchmark_context.h"
 
 #include <atomic>
 #include <chrono>
@@ -207,6 +208,34 @@ static bool report(const char* tc, const char* name, bool pass, const char* reas
     return pass;
 }
 
+/** RAII: emit TEST_SUITE_COMPLETE on normal exit, TEST_SUITE_ABORTED if scope exits early. */
+class TestSuiteRunRecorder {
+public:
+    TestSuiteRunRecorder(Thoth::BenchmarkRun& run, bool devTier) : run_(run), devTier_(devTier) {}
+
+    ~TestSuiteRunRecorder() {
+        if (!finished_) {
+            run_.emit("TEST_SUITE_ABORTED", payload());
+        }
+    }
+
+    void complete(int failures) {
+        failures_ = failures;
+        run_.emit("TEST_SUITE_COMPLETE", payload());
+        finished_ = true;
+    }
+
+private:
+    nlohmann::json payload() const {
+        return {{"failed", failures_}, {"tier", devTier_ ? "dev" : "full"}};
+    }
+
+    Thoth::BenchmarkRun& run_;
+    bool devTier_;
+    int failures_ = 0;
+    bool finished_ = false;
+};
+
 static void writeTestCorpus() {
     FileHandler fh;
     const fs::path corpus = fs::path(fh.getAgentWorkspacePath("rag/test_suite_corpus"));
@@ -277,6 +306,24 @@ int main(int argc, char** argv) {
     plugin.setSessionId("test_suite_headless");
     plugin.setRagFiles({corpusPath});
 
+    Thoth::BenchmarkRun benchmarkRun = Thoth::BenchmarkRun::create(
+        plugin.buildTestSuiteBenchmarkInputs(!devTier, corpusPath));
+    benchmarkRun.bindIndex(plugin.benchmarkIndexEnvironment());
+    const Thoth::BenchmarkAttribution suiteAttribution = benchmarkRun.attribution();
+
+    std::cout << "BENCHMARK_ENV run_id=" << benchmarkRun.run_id()
+              << " env_hash=" << benchmarkRun.environment_hash()
+              << " index_hash=" << benchmarkRun.index_hash()
+              << " tier=" << (devTier ? "dev" : "full") << "\n";
+
+    TestSuiteRunRecorder suiteRecorder(benchmarkRun, devTier);
+
+    if (const char* abortSmoke = std::getenv("THOTH_TEST_SUITE_BENCHMARK_ABORT_SMOKE");
+        abortSmoke && (std::string(abortSmoke) == "1" || std::string(abortSmoke) == "true")) {
+        std::cerr << "TEST_SUITE: benchmark abort smoke — exiting before complete()\n";
+        return 2;
+    }
+
     plugin.onEvent = [&](const ControllerEvent& ev) {
         if (ev.type == EventType::PLAN_COMPLETED) flags.plan_completed.store(true);
         if (ev.type == EventType::STEP_STARTED) flags.executing.store(true);
@@ -302,7 +349,8 @@ int main(int argc, char** argv) {
     std::cout << "Running TC-02 / TC-03 …\n";
     flags.plan_completed.store(false);
     flags.executing.store(false);
-    plugin.executeGoal("Analyze the ExecutiveController and summarize its state machine");
+    plugin.executeGoal("Analyze the ExecutiveController and summarize its state machine",
+                       suiteAttribution);
 
     const bool goalFinished = waitMs(goalWaitMs, [&] {
         return flags.plan_completed.load();
@@ -369,7 +417,7 @@ int main(int argc, char** argv) {
     flags.plan_completed.store(false);
     flags.executing.store(false);
     flags.retrieval_diagnostics.store(false);
-    plugin.executeGoal("Review the GRAG retrieval implementation");
+    plugin.executeGoal("Review the GRAG retrieval implementation", suiteAttribution);
     waitMs(execWaitMs, [&] { return flags.executing.load(); });
     plugin.processInput("What indexes does GRAG use?");
     waitMs(chatWaitMs, [] { return true; }); // allow retrieval + LLM to finish
@@ -414,7 +462,7 @@ int main(int argc, char** argv) {
     // ── TC-07: goal persists after completion ──────────────────────────────
     std::cout << "Running TC-07 …\n";
     flags.plan_completed.store(false);
-    plugin.executeGoal("Summarize GRAG directional scoring in one paragraph");
+    plugin.executeGoal("Summarize GRAG directional scoring in one paragraph", suiteAttribution);
     waitMs(goalWaitMs, [&] { return flags.plan_completed.load(); });
     plugin.processInput("What did you find?");
     {
@@ -446,5 +494,6 @@ int main(int argc, char** argv) {
     }
     std::cout << "══════════════════════════════════════════════\n\n";
 
+    suiteRecorder.complete(failures);
     return failures == 0 ? 0 : 1;
 }

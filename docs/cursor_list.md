@@ -78,7 +78,7 @@ M1.5 proved the **consolidation pipe** (Apollo E2E). It did **not** prove that c
 
 | ID | Insight | Rationale |
 |----|---------|-----------|
-| **E1** | **Benchmark environment pinning** | Checkpoints **A–C ✅** (pure env + `BenchmarkContext` + `execute_goal` attribution hook). Spec: **`docs/benchmark_environment.md`**. Next: **D1** (`run_test_suite`). |
+| **E1** | **Benchmark environment pinning** | Checkpoints **A–C ✅**, **D1 ✅** (`run_test_suite` + E1-12). Spec: **`docs/benchmark_environment.md`**. Next: **D2** (`run_reflection_ab_benchmark`). |
 | **E2** | **Episodic learning eval** | M1.5 = pipeline correctness. Need harness: same goal class pre/post consolidation, or multi-session repeat task, measuring success/latency/plan reuse when warm memory should help. Directly tests thesis. |
 | **Doc** | **Sync `COGNATE_V2.html`** | Markdown has mock footnote for 51× depth; HTML export may not — align before any thesis-facing export. |
 | **Discipline** | **Mock vs Ollama split** | Fast CI (mock/TfIdf) must never be the sole evidence for learning or retrieval claims. Nightly `--full` + pinned env = authoritative tier (already in C4; enforce in eval culture). |
@@ -388,7 +388,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **B2** | Automate critical manual suite signals | ✅ | `run_test_suite.cpp` + `check_baseline.py` (2026-06-27); **C5** extends coverage |
 | **B3** | Reduce test log noise | 📋 | Repeated embedding migration log per fixture |
 | **B4** | Compiler warnings (~14 on debug build) | 📋 | Unused params in stubs/GUI |
-| **E1** | Benchmark environment pinning | 🔶 | A–C ✅ — `BenchmarkAttribution` → `execute_goal` → metrics; E1-11 cross-thread guard. Next: **D1** (`run_test_suite`) — **`docs/benchmark_environment.md`** |
+| **E1** | Benchmark environment pinning | 🔶 | A–C ✅, **D1 ✅** — `run_test_suite` wired; E1-12 harness smoke; RAII `TEST_SUITE_COMPLETE`/`ABORTED`. Next: **D2** — **`docs/benchmark_environment.md`** |
 | **E2** | Episodic memory learning eval | 📋 | Repeat-goal / multi-session harness: does consolidation improve later success? (beyond M1.5 pipe test) |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
 | **G1d** | Trajectory bucket diagnostic | 📋 | Ablation on `TRAJECTORY_DISAMBIGUATES` (`w_t=0` vs `0.2`, empty T) before **F5** |
@@ -536,7 +536,7 @@ Last    Tier 7 self-building / apply_diff (owner discretion)
 Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
 External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅)
 Next    M3 — /prune admin command
-Next    E1 — environment pinning (A–C done; D1 `run_test_suite` next)
+Next    E1 — environment pinning (A–C, D1 done; D2 `run_reflection_ab_benchmark` next)
 Next    E2 — repeat-goal multi-session harness (the learning proof)
 Next    M4 — range restore (built into verified eval environment)
 Next    G1d — trajectory ablation benchmark (w_t=0 vs 0.2 vs empty T)

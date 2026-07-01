@@ -48,6 +48,7 @@
 #include "git_metadata.h"
 #include "ollama_snapshot.h"
 #include "cognitive_metrics.h"
+#include "basic_agent_plugin.h"
 #include <json.hpp>
 
 namespace fs = std::filesystem;
@@ -2837,6 +2838,131 @@ static bool testE1GoalMetricsWorkerThreadAttribution() {
     return true;
 }
 
+static std::optional<nlohmann::json> readMetricsRowWithRunId(const fs::path& logPath,
+                                                              const std::string& runId) {
+    if (!fs::exists(logPath)) {
+        return std::nullopt;
+    }
+    std::ifstream in(logPath);
+    std::string line;
+    std::optional<nlohmann::json> lastMatch;
+    while (std::getline(in, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        try {
+            const auto row = nlohmann::json::parse(line);
+            if (row.value("event", "") == "GOAL_COGNITIVE_METRICS" &&
+                row.value("run_id", "") == runId) {
+                lastMatch = row;
+            }
+        } catch (...) {
+        }
+    }
+    return lastMatch;
+}
+
+static bool waitMsHarnessPlan(std::atomic<bool>& planTerminal, int timeoutMs = 120000) {
+    const int stepMs = 100;
+    for (int waited = 0; waited < timeoutMs; waited += stepMs) {
+        if (planTerminal.load()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
+    }
+    return planTerminal.load();
+}
+
+/** E1-12: harness helper path — plugin buildTestSuiteBenchmarkInputs → executeGoal → metrics/sidecar. */
+static bool testE1HarnessBenchmarkSmoke() {
+    setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+    setenv("THOTH_MOCK_LLM", "true", 1);
+
+    FileHandler fh;
+    const fs::path corpus = fs::path(fh.getAgentWorkspacePath("rag/e1_harness_smoke"));
+    fs::create_directories(corpus);
+    {
+        std::ofstream out(corpus / "smoke.md");
+        out << "GRAG smoke corpus for E1-12 harness path test.\n";
+    }
+    const std::string corpusPath = corpus.string();
+    const std::string indexPath = (corpus / "e1_harness.rag_index.bin").string();
+    setenv("THOTH_TEST_SUITE_INDEX", indexPath.c_str(), 1);
+
+    const fs::path logsDir = makeTempPath("thoth_e1_harness_logs");
+    fs::create_directories(logsDir);
+    const fs::path metricsLog = logsDir / "cognitive_metrics.jsonl";
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsLog.string().c_str(), 1);
+
+    BasicAgentPlugin plugin;
+    plugin.setSessionId("e1-12");
+    plugin.setRagFiles({corpusPath});
+
+    const auto inputs = plugin.buildTestSuiteBenchmarkInputs(false, corpusPath);
+    Thoth::BenchmarkContextOptions opts;
+    opts.logs_directory = logsDir.string();
+    opts.auto_fill_git = false;
+    Thoth::BenchmarkRun run = Thoth::BenchmarkRun::create(inputs, opts);
+    run.bindIndex(plugin.benchmarkIndexEnvironment());
+    const Thoth::BenchmarkAttribution attr = run.attribution();
+
+    std::atomic<bool> planTerminal{false};
+    plugin.onEvent = [&](const ControllerEvent& ev) {
+        if (ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_FAILED) {
+            planTerminal.store(true);
+        }
+    };
+
+    plugin.executeGoal("E1-12 harness smoke goal", attr);
+
+    const bool finished = waitMsHarnessPlan(planTerminal);
+    auto cleanup = [&]() {
+        fs::remove_all(logsDir);
+        unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+        unsetenv("THOTH_TEST_SUITE_INDEX");
+        unsetenv("THOTH_MOCK_LLM");
+        unsetenv("THOTH_TEST_SUITE_DEV");
+    };
+
+    if (!finished) {
+        std::cerr << "testE1HarnessBenchmarkSmoke: goal did not finish\n";
+        cleanup();
+        return false;
+    }
+
+    nlohmann::json sidecar;
+    {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        if (!in.is_open()) {
+            std::cerr << "testE1HarnessBenchmarkSmoke: sidecar missing\n";
+            cleanup();
+            return false;
+        }
+        in >> sidecar;
+    }
+    if (sidecar.value("run_id", "") != run.run_id() ||
+        sidecar.value("environment_hash", "") != run.environment_hash()) {
+        std::cerr << "testE1HarnessBenchmarkSmoke: sidecar run identity mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    const auto row = readMetricsRowWithRunId(metricsLog, attr.run_id);
+    if (!row.has_value()) {
+        std::cerr << "testE1HarnessBenchmarkSmoke: metrics row missing for run_id\n";
+        cleanup();
+        return false;
+    }
+    if (row->value("env_hash", "") != attr.env_hash) {
+        std::cerr << "testE1HarnessBenchmarkSmoke: metrics env_hash mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    cleanup();
+    return true;
+}
+
 static Thoth::BenchmarkContextOptions makeE1TempLogsOptions(const fs::path& logsDir) {
     Thoth::BenchmarkContextOptions options;
     options.logs_directory = logsDir.string();
@@ -3082,6 +3208,7 @@ int main() {
     if (!testE1GoalMetricsWithAttribution()) failures++;
     if (!testE1GoalMetricsWithoutAttribution()) failures++;
     if (!testE1GoalMetricsWorkerThreadAttribution()) failures++;
+    if (!testE1HarnessBenchmarkSmoke()) failures++;
 
     if (failures == 0) {
         std::cout << "All unit tests passed.\n";
