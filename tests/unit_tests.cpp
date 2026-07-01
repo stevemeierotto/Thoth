@@ -3279,6 +3279,109 @@ static bool testE1ChatRagBenchmarkSmoke() {
     return true;
 }
 
+/** E1-16: GRAG harness path — probe stack → reportToFile(identity) → JSONL row + sidecar. */
+static bool testE1GragBenchmarkSmoke() {
+    const fs::path tempRoot = makeTempPath("thoth_e1_grag");
+    const fs::path workspaceDir = tempRoot / "agent_workspace";
+    const fs::path logsDir = tempRoot / "logs";
+    fs::create_directories(workspaceDir);
+    fs::create_directories(logsDir);
+
+    setenv("THOTH_WORKSPACE_PATH", workspaceDir.string().c_str(), 1);
+    setenv("THOTH_PROJECT_ROOT", tempRoot.string().c_str(), 1);
+
+    auto probeEngine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager probeIdx(probeEngine.get());
+
+    Thoth::BenchmarkEnvironmentInputs inputs;
+    inputs.harness = "grag_benchmark";
+    inputs.tier = Thoth::BenchmarkTier::MOCK;
+    inputs.model.llm_model = "mock";
+    inputs.model.embedding_method = "TfIdf";
+    inputs.model.embedding_dimension = probeEngine->getDimension();
+    inputs.model.embedding_internal_version = probeEngine->getInternalVersion();
+    inputs.corpus_mode = Thoth::CorpusFingerprintMode::FAST;
+    inputs.thoth_env_flags = Thoth::collectThothEnvFlags();
+
+    Thoth::BenchmarkContextOptions opts;
+    opts.logs_directory = logsDir.string();
+    opts.auto_fill_git = false;
+    Thoth::BenchmarkRun run = Thoth::BenchmarkRun::create(inputs, opts);
+
+    Thoth::IndexEnvironment index;
+    index.rag_index_header = {
+        {"model_name", probeEngine->getModelName()},
+        {"embedding_dimension", probeEngine->getDimension()},
+        {"embedding_version", probeEngine->getInternalVersion()},
+        {"chunk_count", 0},
+    };
+    run.bindIndex(index);
+
+    auto cleanup = [&]() {
+        unsetenv("THOTH_WORKSPACE_PATH");
+        unsetenv("THOTH_PROJECT_ROOT");
+        fs::remove_all(tempRoot);
+    };
+
+    if (run.index_hash().empty()) {
+        std::cerr << "testE1GragBenchmarkSmoke: index_hash empty after bind\n";
+        cleanup();
+        return false;
+    }
+
+    const Thoth::BenchmarkRunIdentity identity{run.run_id(), run.environment_hash()};
+
+    Thoth::ComparisonResult mockResult;
+    mockResult.rag_mean_ndcg = 0.4f;
+    mockResult.grag_mean_ndcg = 0.5f;
+
+    if (!Thoth::BenchmarkReporter::reportToFile(mockResult, 0, identity)) {
+        std::cerr << "testE1GragBenchmarkSmoke: reportToFile failed\n";
+        cleanup();
+        return false;
+    }
+
+    const fs::path jsonlPath = workspaceDir / "grag_benchmark.jsonl";
+    nlohmann::json row;
+    {
+        std::ifstream in(jsonlPath);
+        if (!in.is_open()) {
+            std::cerr << "testE1GragBenchmarkSmoke: grag_benchmark.jsonl missing\n";
+            cleanup();
+            return false;
+        }
+        std::string line;
+        std::getline(in, line);
+        row = nlohmann::json::parse(line);
+    }
+
+    if (row.value("run_id", "") != identity.run_id || row.value("env_hash", "") != identity.env_hash) {
+        std::cerr << "testE1GragBenchmarkSmoke: JSONL identity mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    nlohmann::json sidecar;
+    {
+        std::ifstream in(logsDir / "benchmark_env.latest.json");
+        if (!in.is_open()) {
+            std::cerr << "testE1GragBenchmarkSmoke: sidecar missing\n";
+            cleanup();
+            return false;
+        }
+        in >> sidecar;
+    }
+    if (sidecar.value("run_id", "") != run.run_id() ||
+        sidecar.value("environment_hash", "") != run.environment_hash()) {
+        std::cerr << "testE1GragBenchmarkSmoke: sidecar run identity mismatch\n";
+        cleanup();
+        return false;
+    }
+
+    cleanup();
+    return true;
+}
+
 static Thoth::BenchmarkContextOptions makeE1TempLogsOptions(const fs::path& logsDir) {
     Thoth::BenchmarkContextOptions options;
     options.logs_directory = logsDir.string();
@@ -3528,6 +3631,7 @@ int main() {
     if (!testE1ReflectionAbBenchmarkSmoke()) failures++;
     if (!testE1RobustnessBenchmarkSmoke()) failures++;
     if (!testE1ChatRagBenchmarkSmoke()) failures++;
+    if (!testE1GragBenchmarkSmoke()) failures++;
 
     if (failures == 0) {
         std::cout << "All unit tests passed.\n";

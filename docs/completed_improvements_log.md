@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-01 (E1 Checkpoint D4 — `run_chat_rag_benchmark` harness wiring)
+Last updated: 2026-07-01 (E1 Checkpoint D5 — `run_grag_benchmark` harness wiring)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
@@ -25,7 +25,17 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 ### E1 — Benchmark environment pinning (in progress)
 
-**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: D5** — wire `run_grag_benchmark`.
+**Spec:** `docs/benchmark_environment.md` (v3.1). **Next checkpoint: E** — index mismatch, Python scripts, five-harness identity pass, close-out.
+
+#### Checkpoint D5 — 2026-07-01
+
+- **Scope:** `run_grag_benchmark` — Ollama preflight; env capture after research corpus index; `BenchmarkRunIdentity` passed to `BenchmarkReporter::reportToFile` (adopts E1 `run_id`/`env_hash`; legacy `benchmark-{timestamp}` fallback when identity empty); `GragBenchmarkRunRecorder` RAII; `sample_mode`/`cases_run` in `GRAG_BENCHMARK_COMPLETE` payload only (not env hash).
+- **Pre-flight trace:** No `execute_goal`, `LLMPlanner`, `THOTH_MOCK_LLM`, or test-suite mock plumbing. `--sample` only truncates case list. `BenchmarkRunner` “mock” episode steps are SQLite trajectory fixtures for embedding — not LLM mocks. Real Ollama External embeddings throughout.
+- **E1-16:** Full JSONL row assertion via existing `THOTH_WORKSPACE_PATH` (no new FileHandler hook).
+- **Metrics note:** **0** `GOAL_COGNITIVE_METRICS` rows — retrieval-only.
+- **Tests:** E1-16 green; `--sample` happy path (10 cases, exit 0); `GRAG_BENCHMARK_ABORTED` via `THOTH_GRAG_BENCHMARK_ABORT_SMOKE=1`.
+- **Files:** `run_grag_benchmark.cpp`, `benchmark_reporter.h/cpp`, `tests/unit_tests.cpp`, `docs/benchmark_environment.md`.
+- **Safe stop — next checkpoint: E**.
 
 #### Checkpoint D4 — 2026-07-01
 
