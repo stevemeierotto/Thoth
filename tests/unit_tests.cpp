@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -3906,9 +3907,141 @@ static Thoth::E2EvalConfig makeE2StrictTestConfig() {
     cfg.tier = Thoth::E2EvalTier::STRICT;
     cfg.versions.corpus_snapshot_id = "e2-test-corpus";
     cfg.versions.model_version_or_weights_hash = "mock";
-    cfg.versions.embedding_model_version = "tfidf-test";
+    cfg.versions.embedding_model_version = "TfIdf:2";
     cfg.versions.retrieval_engine_version = Thoth::kE2StrictRetrievalEngineVersion;
     return cfg;
+}
+
+static std::optional<Thoth::EpisodicLearningCase> findEpisodicCaseById(const std::string& id) {
+    for (const auto& spec : Thoth::getEpisodicLearningCases()) {
+        if (spec.id == id) {
+            return spec;
+        }
+    }
+    return std::nullopt;
+}
+
+static bool testE2StrictInjectionLogFromCaseTable() {
+    constexpr std::int64_t kBuilderTs = 1'700'000'000'000LL;
+
+    Thoth::SealedEpisodeInjectionLog mutableLog;
+    Thoth::EpisodeInjectionEntry probe;
+    probe.episode_id = "ep";
+    probe.source = "evaluation";
+    probe.content = "x";
+    probe.content_hash = "h";
+    probe.injected_at_ms = kBuilderTs;
+    mutableLog.append(std::move(probe));
+    try {
+        mutableLog.seal();
+        Thoth::EpisodeInjectionEntry probe2;
+        probe2.episode_id = "ep2";
+        probe2.source = "evaluation";
+        probe2.content = "y";
+        probe2.content_hash = "h2";
+        probe2.injected_at_ms = kBuilderTs;
+        mutableLog.append(std::move(probe2));
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: append after seal should throw\n";
+        return false;
+    } catch (const std::logic_error&) {
+    }
+
+    const auto e201 = findEpisodicCaseById("E2-01");
+    const auto e203 = findEpisodicCaseById("E2-03");
+    if (!e201 || !e203) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: missing golden cases\n";
+        return false;
+    }
+
+    if (e203->plant_message.empty() || e203->plant_session_id.empty() ||
+        !e203->cold_arm_pre_consolidated) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: E2-03 fixture incomplete — "
+                     "plant_message, plant_session_id, cold_arm_pre_consolidated required\n";
+        return false;
+    }
+
+    const auto cold01 =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e201, "cold", kBuilderTs);
+    if (!cold01.isSealed() || !cold01.entries().empty()) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: E2-01 cold should be empty sealed\n";
+        return false;
+    }
+
+    const auto warm01 =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs);
+    if (!warm01.isSealed() || warm01.entries().size() != 1) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: E2-01 warm should have one entry\n";
+        return false;
+    }
+    const auto& warmEntry = warm01.entries().front();
+    if (warmEntry.content != e201->plant_message ||
+        warmEntry.episode_id != e201->plant_session_id || warmEntry.source != "evaluation" ||
+        warmEntry.injected_at_ms != kBuilderTs ||
+        warmEntry.content_hash != Thoth::sha256Hex(e201->plant_message)) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: E2-01 warm entry mismatch\n";
+        return false;
+    }
+
+    const auto cold03 =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e203, "cold", kBuilderTs);
+    if (!cold03.isSealed() || cold03.entries().size() != 1) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: E2-03 cold should have one entry\n";
+        return false;
+    }
+    if (cold03.entries().front().content != e203->plant_message) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: E2-03 cold content mismatch\n";
+        return false;
+    }
+
+    const std::string jsonA =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs).toJson().dump();
+    const std::string jsonB =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs).toJson().dump();
+    if (jsonA != jsonB) {
+        std::cerr << "testE2StrictInjectionLogFromCaseTable: builder not deterministic\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testE2EmbeddingVersionPin() {
+    // Regression: assigning int 2 to std::string via char coercion yields \x02, not "2".
+    {
+        Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+        cfg.versions.embedding_model_version = std::string(1, static_cast<char>(2));
+        try {
+            Thoth::validateStrictConfigForOfficialRun(cfg, true);
+            std::cerr << "testE2EmbeddingVersionPin: expected reject for control-char pin\n";
+            return false;
+        } catch (const Thoth::E2StrictValidationError&) {
+        }
+    }
+
+    // Harness path: TfIdf engine internal version → canonical printable pin.
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+    const std::string pin =
+        Thoth::makeEmbeddingModelVersionPin("TfIdf", engine.getInternalVersion());
+    if (pin != "TfIdf:2") {
+        std::cerr << "testE2EmbeddingVersionPin: unexpected pin '" << pin << "'\n";
+        return false;
+    }
+    if (!Thoth::isPrintableVersionPin(pin)) {
+        std::cerr << "testE2EmbeddingVersionPin: canonical pin not printable\n";
+        return false;
+    }
+
+    Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    cfg.versions.embedding_model_version = pin;
+    try {
+        Thoth::validateStrictConfigForOfficialRun(cfg, true);
+    } catch (const Thoth::E2StrictValidationError& e) {
+        std::cerr << "testE2EmbeddingVersionPin: valid harness pin rejected: " << e.what()
+                  << '\n';
+        return false;
+    }
+
+    return true;
 }
 
 static bool testE2StrictConfigEnforcement() {
@@ -4199,6 +4332,8 @@ int main() {
     if (!testG1dArmConfigs()) failures++;
     if (!testG1dWinnerAndTieEpsilon()) failures++;
     if (!testG1dTrajectoryAblationSmoke()) failures++;
+    if (!testE2StrictInjectionLogFromCaseTable()) failures++;
+    if (!testE2EmbeddingVersionPin()) failures++;
     if (!testE2StrictConfigEnforcement()) failures++;
     if (!testE2TableDrivenEvaluator()) failures++;
     if (!testE2CaseById("E2-01")) failures++;

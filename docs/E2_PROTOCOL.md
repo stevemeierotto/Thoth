@@ -110,6 +110,43 @@ retrieval = f(query, corpus_snapshot_id, frozen_episode_log, version_pins)
 
 **Prohibited:** mid-run injection, adaptive seeding, planner/retrieval writing to the log, consolidation side effects substituting for declared injections in STRICT mode.
 
+---
+
+## Kernel ownership (STRICT)
+
+The **evaluation kernel** owns retrieval truth. The **Executive** owns runtime behavior. The harness may compare them for diagnostics but **must never substitute** executive/RAG diagnostics for kernel provenance at the STRICT evaluation boundary.
+
+After checkpoint **A3**, every `RetrievedChunkRecord` scored in STRICT mode must originate from `e2StrictRetrieve()` — not from `RAGPipeline` step results or GRAG diagnostics.
+
+---
+
+## STRICT retrieval boundary
+
+Conceptual heart of E2-STRICT — sealed input, deterministic kernel, traced output:
+
+```
+  SealedEpisodeInjectionLog (frozen case-table episodes)
+              │
+              │  const&  — no mutation after seal()
+              ▼
+       e2StrictRetrieve(query, corpus index, config)
+              │
+              │  pure function: no SQLite, Executive, RAG, or side effects
+              ▼
+       RetrievedChunkRecord[]  (chunk_id, source, source_id, validation_status)
+              │
+              │  evaluation boundary
+              ▼
+  provenanceFromStrictRetrievalResult()  →  strictProvenanceValid()
+              │
+              ▼
+       (Phase B+) table-driven evaluator / lift
+```
+
+**Executive / RAGPipeline** may still run during Phase A migration for harness shape continuity; their RETRIEVAL outputs are **non-authoritative** and **ignored** at this boundary until checkpoint **A4** wires the executive to the strict path.
+
+**Vacuous retrieval guard:** if kernel `retrieval_status == SUCCESS`, expectations require episodic retrieval, and `chunk_count == 0` → `FAILED_RETRIEVAL` (not a vacuous provenance pass on empty `chunks[]`).
+
 ### Episode entry schema (frozen at seal)
 
 | Field | Required |
@@ -214,6 +251,41 @@ Token-overlap ranking, suppression filters, score-based warm demotion, cross-ses
 
 Heuristic entry points MAY `abort()` / throw if invoked with `E2EvalConfig::tier == STRICT`. **Runtime flag alone is insufficient** as sole enforcement. Required in implementation checkpoint **A5** (see `cursor_list.md` § E2).
 
+The runtime guard is **diagnostic only** — it detects violations; it **never redirects, repairs, or substitutes** kernel retrieval.
+
+### Enforcement philosophy
+
+Compile-time exclusion prevents accidental linkage. Static audits verify intended dispatch. The runtime guard detects architectural regressions during execution. **No single mechanism is considered sufficient on its own.**
+
+| Layer | Role |
+|-------|------|
+| **Compile-time** (tier 1) | Prevents accidental linkage of heuristics into the eval kernel |
+| **Static audit** (tier 2) | Verifies STRICT dispatch references the kernel, not RAG |
+| **Runtime guard** (tier 3) | Detects miswired STRICT execution reaching heuristic entry points |
+
+**No silent fallback (architectural invariant):** Under STRICT, retrieval either uses `e2StrictRetrieve()` or **fails immediately**. STRICT **never degrades** into heuristic retrieval.
+
+**Authoritative STRICT signal:** Execution/evaluation context (`E2EvalConfig` propagated with the plan or arm) — **not** environment variables alone.
+
+**Signal precedence:**
+
+| Layer | Determines |
+|-------|------------|
+| **Compile-time** (`e2_eval_kernel`, `THOTH_E2_STRICT_KERNEL`) | Which retrieval capabilities exist in a given binary/target — heuristic code excluded from kernel TUs |
+| **Runtime context** (`E2EvalConfig::tier` on execution/evaluation context) | Which retrieval **mode is requested** for this arm/plan/step |
+| **Impossible/contradictory combinations** | Architectural configuration errors — **fail closed** (e.g. STRICT mode reaching heuristic entry → guard hard fail, not silent fallback) |
+
+Environment variables (`THOTH_*`) are harness convenience only — **never authoritative** for STRICT mode selection or guard arming.
+
+**Failure domains (intentional distinction):**
+
+| Domain | Source | Meaning |
+|--------|--------|---------|
+| **Operational retrieval failure** | A3+ kernel / boundary (`FAILED_RETRIEVAL`, `FAILED_PROVENANCE`, …) | Expected typed retrieval outcome within the STRICT lab function |
+| **Architectural invariant violation** | A5 runtime guard (`LINK:RUNTIME_HEURISTIC`) | STRICT execution reached heuristic retrieval — **broken wiring**, not a retrieval result |
+
+**A3 → A4 → A5 transition:** A3 temporarily allowed Executive execution for harness continuity while STRICT evaluation ignored Executive retrieval. **A4 retires that pattern** by wiring Executive directly to the kernel. **After A4, any heuristic retrieval under STRICT is an architectural regression** — A5 enforces this. No runtime carve-out for pre-A4 continuity behavior.
+
 ### Gate priority (enforcement stack)
 
 | Tier | Mechanism | Role |
@@ -226,9 +298,18 @@ Artifacts SHOULD include `scoring_block_reason` when scoring is blocked (e.g. `W
 
 ### Pending wiring (not blocking protocol)
 
-Official harness arm execution still routes retrieval through `RAGPipeline` (runtime path) until migrated to `e2StrictRetrieve()`. Until migration + re-baseline, treat harness `e2_outcome` as **non-authoritative** even when pins validate.
+Phase A migration checkpoints wire the harness incrementally. **Official benchmark authority begins only at Phase B re-baseline** (`official_scoring: true`, `e2_outcome` permitted) — **after A4 proves harness–executive retrieval equivalence**.
 
-During migration checkpoints **A1–A2**, harness runs use **evaluation-disabled mode** (`scoring_enabled: false`, no `e2_outcome`, `official_scoring: false`) — not synthetic arm failures. See **`cursor_list.md` § E2** for full checkpoint plan.
+| Checkpoint | Kernel retrieval @ boundary | Official scoring |
+|------------|----------------------------|------------------|
+| A1–A2 | No | No |
+| A3 | Yes (`e2StrictRetrieve`) | No — kernel verification only |
+| A4–A5 | Yes (+ executive / runtime guard) | No |
+| **Phase B** | Yes | **Yes** — authoritative SUCCESS/FAILURE |
+
+Until Phase B, treat all harness output as **non-authoritative** regardless of exit code.
+
+During checkpoints **A1–A2**, harness runs use **evaluation-disabled mode** (`scoring_enabled: false`, no `e2_outcome`, `official_scoring: false`). During **A3–A5**, harness runs use **kernel-verified mode** (`retrieval_enabled: true`, `evaluation_boundary_verified: true`, still `official_scoring: false`, no `e2_outcome`). See **`cursor_list.md` § E2** for full checkpoint plan.
 
 ---
 
@@ -238,7 +319,8 @@ During migration checkpoints **A1–A2**, harness runs use **evaluation-disabled
 |-------|-----------------|
 | Retrieval service error | Arm **FAIL**; `arm_scoring_status: "FAILED_RETRIEVAL"` |
 | Retrieval timeout | Arm **FAIL** |
-| Empty result when case expects hits | Scored via table expectations (not a service error) |
+| `SUCCESS` but zero chunks when episodic retrieval required | **`FAILED_RETRIEVAL`** (vacuous guard — not a provenance pass) |
+| Empty result when case expects no episodic hit | Scored via table expectations (not a service error) |
 | Partial chunk set after error | **Not allowed** — fail closed, discard partial |
 
 ---
@@ -255,6 +337,12 @@ Both arms share the same `corpus_snapshot_id` and `E2EvalConfig` version pins.
 **Isolation invariant:** No artifacts from the cold arm DB or execution path are reused by the warm arm except episodes **declared in the case table injection spec** and frozen before warm arm start.
 
 Cross-session SQLite warm reads are **not** the warm-arm mechanism in STRICT.
+
+**Checkpoint A1 (implementation):** No retrieval, scoring, executive, or RAG behavior changes during A1. That checkpoint exists solely to prove deterministic construction of STRICT sealed injection logs from the frozen case table (`buildStrictInjectionLogFromCaseTable`). Cold arm: empty sealed log unless `cold_arm_pre_consolidated` declares a pre-existing episode (E2-03).
+
+**Checkpoint A3 (implementation):** Wire `e2StrictRetrieve()` at the evaluation boundary; map results via `provenanceFromStrictRetrievalResult()`. **`official_scoring` remains false** — A3 proves kernel retrieval correctness, not benchmark outcome. Executive may run for harness continuity; its outputs are non-authoritative for STRICT evaluation. **This continuity pattern is temporary and retired at A4.** See **§ STRICT retrieval boundary** and **`cursor_list.md` § Checkpoint A3**.
+
+**Checkpoint A5 (implementation):** Runtime guard at heuristic retrieval entry points — diagnostic fuse only; **`official_scoring` remains false**. Enforces post-A4 invariant: STRICT must not reach heuristics. See **`cursor_list.md` § Checkpoint A5**.
 
 ---
 
@@ -344,7 +432,7 @@ No changes to scoring function during an in-flight STRICT run.
 | Violation | When detected | Result |
 |-----------|---------------|--------|
 | Mutate sealed episode log | Runtime | `std::logic_error`; arm FAIL |
-| Heuristic active in STRICT path | Build or runtime | Build fail or hard abort |
+| Heuristic active in STRICT path | Build or runtime | Build fail or hard abort (`LINK:RUNTIME_HEURISTIC`) — **architectural violation**, not `FAILED_RETRIEVAL` |
 | Cross-session read in STRICT | Runtime | Arm FAIL |
 | Retrieval error/timeout STRICT | Runtime | Arm FAIL (fail closed) |
 | Untraced chunk STRICT | Runtime | Arm FAIL (`FAILED_PROVENANCE`) |
@@ -386,13 +474,15 @@ No changes to scoring function during an in-flight STRICT run.
 3. **Evaluation kernel** — `e2_eval_kernel` CMake target, `e2_strict_enforcement`, `e2_strict_retrieval` ✅  
 4. **No implicit defaults** — `validateStrictConfigForOfficialRun`, evaluator pin rejection ✅  
 5. **Evaluation fingerprint** — `computeEvaluationFingerprint` logged by harness ✅  
-5.0 **Wiring contract** — evaluation-disabled mode (A1/A2), gate priority, scope limits in this doc ⏳  
-5.5 **Embedding pin correctness** — fix `\u0002` int→char coercion; semantic pin validation ⏳  
-6a **A1** — sealed log plumbing; E2-08; no scored harness loop ⏳  
+5.0 **Wiring contract** — evaluation-disabled (A1/A2), kernel-verified (A3–A5), gate priority, scope limits in this doc ⏳  
+5.5 **Embedding pin correctness** — fix `\u0002` int→char coercion; semantic pin validation ✅  
+6a **A1** — `buildStrictInjectionLogFromCaseTable`; E2-08 + determinism; evaluation-disabled harness only ✅  
+   *No retrieval, scoring, executive, or RAG changes during A1 — deterministic STRICT sealed log construction from the frozen case table only.*  
 6b **A2** — decouple consolidation from STRICT path; E2-09; scope-limits doc ⏳  
-6c **A3** — `e2StrictRetrieve()` + boundary provenance; E2-10 ⏳  
+6c **A3** — `e2StrictRetrieve()` @ evaluation boundary; `provenanceFromStrictRetrievalResult`; E2-10; `retrieval_enabled: true`; **not** official scoring ⏳  
+   *Kernel consumes sealed log and produces boundary provenance independent of Executive/RAG. No ranking redesign unless E2-10 blocked. No `e2_outcome`.*
 6d **A4** — executive RETRIEVAL → strict path; tier-1 + tier-2 isolation proof ⏳  
-6e **A5** — runtime guard in `rag.cpp` (required); E2-11 ⏳  
+6e **A5** — runtime guard (diagnostic fuse); A3→A4 transition enforced; E2-11; signal precedence; no silent fallback ⏳  
 7. **STRICT re-baseline run** — official SUCCESS/FAILURE only after 5.5 + 6a–6e  
 8. **Close-out** — `completed_improvements_log.md` (STRICT only); INTEGRATION tier harness (Phase C)
 

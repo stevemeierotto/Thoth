@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-01 (E1 complete; **E2 kernel migration plan locked** — see **§ E2**)  
+**Last updated:** 2026-07-02 (E2 **Phase A plans complete** — A5 v2; approved, subject to revision — see **§ E2**)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
@@ -128,6 +128,8 @@ Last     UI polish (§6), S1 apply_diff (owner discretion)
 
 **Pause between every sub-checkpoint** (same discipline as E1 D1–D5): build green → tests green → confirm before next step.
 
+**Checkpoint plans** (A1, A2, A3, …) are **approved — subject to revision** as implementation proceeds. Only **`E2_PROTOCOL.md` v1.2** pass/fail rules are preregistered/locked until v1.3.
+
 ### Done (protocol steps 1–5)
 
 - `E2EvalConfig`, `SealedEpisodeInjectionLog`, version pins, evaluation fingerprint
@@ -137,7 +139,7 @@ Last     UI polish (§6), S1 apply_diff (owner discretion)
 
 ### Known bug (Phase 0 — blocking, before A1)
 
-Harness init assigns `embedding_model_version = probeEngine->getInternalVersion()` (returns `int` 2) into a `std::string` → `\u0002` control char, not `"2"`. Presence-only pin validation passes. **Fix + semantic validation required before authoritative runs.**
+~~Harness init assigns `embedding_model_version = probeEngine->getInternalVersion()` (returns `int` 2) into a `std::string` → `\u0002` control char, not `"2"`.~~ **✅ Fixed 2026-07-01** — `makeEmbeddingModelVersionPin("TfIdf", …)` + `requirePrintablePin` in `validateStrictConfigForOfficialRun`; regression test `testE2EmbeddingVersionPin`.
 
 ### Gate architecture (priority order)
 
@@ -151,52 +153,826 @@ Debugging should read **`scoring_block_reason`** in artifacts before reverse-eng
 
 Source grep for `RAGPipeline` / `retrieveRelevant` = fast sanity check only, **not** an exit criterion.
 
+**Enforcement philosophy** (see **`E2_PROTOCOL.md` § Enforcement philosophy**): compile-time exclusion prevents accidental linkage; static audits verify intended dispatch; runtime guard detects regressions at execution. **No single tier is sufficient alone.** STRICT never silently falls back to heuristic retrieval.
+
 ### Scope limits — what STRICT claims (and does not)
 
 | Question | Answered by | Mechanism |
 |----------|-------------|-----------|
 | Can consolidated memory be retrieved? | **M1.5** ✅ | Organic consolidation pipeline |
-| Given **declared frozen episodes**, does deterministic retrieval change goal outcomes? | **E2-STRICT** (official, A3+) | Pre-sealed `SealedEpisodeInjectionLog` |
+| Given **declared frozen episodes**, does deterministic retrieval change goal outcomes? | **E2-STRICT** (official, **Phase B** only) | Pre-sealed `SealedEpisodeInjectionLog` |
 | Does organic consolidation → warm tier → retrieval → lift? | **E2-INTEGRATION** (diagnostic) | Real `plantAndConsolidate` path — **non-scoring** |
 
 **STRICT warm ≠ organic consolidation.** Pre–Phase A harness used `plantAndConsolidate` → real episodic → warm tier → GRAG. Phase A warm arm = **pre-sealed case-table entries** (synthetic injection). Intentional for determinism; must be stated plainly in protocol and any publication.
 
-### Evaluation-disabled vs failed (A1/A2 wiring contract)
+### Wiring modes — disabled vs kernel-verified vs official (Phase A / B)
 
 Do **not** use fake `FAILED_*` to mean "not wired yet" — that conflates system defect with intentional non-evaluation.
 
 | Concept | Artifact signal |
 |---------|-----------------|
-| **Evaluation disabled** | `scoring_enabled: false`; no lift; no `e2_outcome`; `wiring_stage: "A1"` or `"A2"` |
-| **Evaluation failed** | Scoring attempted; `arm_scoring_status: FAILED_*`; lift withheld |
+| **Evaluation disabled (A1–A2)** | `scoring_enabled: false`; `retrieval_enabled: false`; no lift; no `e2_outcome`; `wiring_stage: "A1"` or `"A2"` |
+| **Kernel retrieval verified (A3–A5)** | `retrieval_enabled: true`; `evaluation_boundary_verified: true`; `official_scoring: false`; `scoring_enabled: false`; no `e2_outcome`; no benchmark SUCCESS/FAILURE claims |
+| **Official benchmark (Phase B+)** | `official_scoring: true`; `scoring_enabled: true`; `e2_outcome` permitted when all gates pass |
+| **Evaluation failed (Phase B+ only)** | Official scoring attempted; `arm_scoring_status: FAILED_*`; lift withheld |
 
-| CP | Retrieval wired? | Harness | `e2_outcome` | `official_scoring` |
-|----|------------------|---------|--------------|-------------------|
-| **A1** | No | Sealed-log unit tests only; **no scored case loop** | Not emitted | `false` |
-| **A2** | No | Plumbing smoke; consolidation decoupled | Not emitted | `false` |
-| **A3+** | Yes (`e2StrictRetrieve`) | Full scored loop | Permitted if all gates pass | `true` |
+| CP | Kernel retrieval? | Harness | `e2_outcome` | `official_scoring` |
+|----|-------------------|---------|--------------|-------------------|
+| **A1** | No | Builder self-test only (`E2_STRICT_INJECTION_LOG_DIAG`); **no `runCaseArm`** | Not emitted | `false` |
+| **A2** | No | Plumbing smoke: **`runCaseArm`** per case; sealed log built/logged; **no kernel retrieval** | Not emitted | `false` |
+| **A3** | Yes (`e2StrictRetrieve` @ boundary) | **`runCaseArm`** + kernel boundary diag; executive outputs **non-authoritative** | Not emitted | `false` |
+| **A4–A5** | Yes (executive wired / guarded) | Migration continues; still pre-baseline | Not emitted | `false` |
+| **B** | Yes | Full scored loop | Permitted if all gates pass | `true` |
 
-Pre-A3 harness output is **non-authoritative** regardless of exit code.
+**`THOTH_E2_WIRING_STAGE` values (documented contract):**
+
+| Value | Meaning | Protocol? |
+|-------|---------|-----------|
+| `A1` | Builder-only diagnostic (opt-in regression after A2 lands) | ✅ Checkpoint |
+| `A2` | Consolidation decoupled; arm plumbing smoke; evaluation-disabled | ✅ Checkpoint |
+| `A3` | Kernel retrieval consumes sealed log; boundary provenance verified; **not** official scoring | ✅ Checkpoint |
+| `A4` | Context injection + single dispatch + executive → same `e2StrictRetrieve()`; full equivalence; **not** official scoring | ✅ Checkpoint |
+| `A5` | Diagnostic fuse; post-A4 regression enforcement; guard-only `rag.cpp` change; **not** official scoring | ✅ Checkpoint |
+| *(unset after A5)* | Defaults to current checkpoint; Phase B next | ✅ |
+| `SCORING` | **Temporary dev knob only** — legacy full loop. **Must not exist in any authoritative benchmark configuration** (Phase B re-baseline, publication, CI nightly). Not protocol. | ❌ Internal dev only |
+
+Pre–**Phase B** harness output is **non-authoritative** regardless of exit code.
+
+**JSONL event names (A1 implemented — do not introduce alternates):**
+
+| Event | Used for |
+|-------|----------|
+| `E2_STRICT_INJECTION_LOG_DIAG` | Per case/arm sealed-log row; **A2** adds plumbing fields after `runCaseArm`; **A3** adds kernel boundary fields (`retrieval_enabled`, `strict_retrieval_status`, chunk summary) |
+| `E2_WIRING_CHECKPOINT` | Checkpoint summary row + `BenchmarkRun` emit via `completeWiringCheckpoint()` |
 
 ### Provenance at evaluation boundary (A3+)
 
-**Rule:** Complete provenance required **at the evaluation boundary** (where chunks enter `strictProvenanceValid()`), not at every internal pipeline stage. Internal retrieval may enrich/repair metadata before the boundary; any untraced chunk **crossing the boundary** → `FAILED_PROVENANCE`, no lift, **no degraded-score mode**.
+**Rule:** Complete provenance required **at the evaluation boundary** (where kernel chunks enter `strictProvenanceValid()`), not at every internal pipeline stage. After A3, **STRICT provenance must never come from executive diagnostics** — only from `e2StrictRetrieve()` via `provenanceFromStrictRetrievalResult()`. Any untraced chunk **crossing the boundary** → `FAILED_PROVENANCE`, no lift, **no degraded-score mode**.
+
+**Vacuous retrieval guard (implement at boundary / evaluator):** if `retrieval_status == SUCCESS` **and** expectations require episodic retrieval **and** `chunk_count == 0` → `FAILED_RETRIEVAL` (retrieval owns emptiness; provenance owns trace completeness). Prevents `chunks = []` from passing `strictProvenanceValid()` vacuously.
+
+See **`docs/E2_PROTOCOL.md` § STRICT retrieval boundary** for the canonical diagram.
 
 ### Implementation checkpoints
 
 | ID | Covers | Stop criteria |
 |----|--------|---------------|
-| **0** | Embedding pin `\u0002` fix + semantic validation + regression test | Readable pin; bad pin fails init |
+| **0** | Embedding pin `\u0002` fix + semantic validation + regression test | ✅ 2026-07-01 |
 | **5.0** | Wiring contract + gate priority in `E2_PROTOCOL.md` | Doc only |
-| **A1** | Sealed log from case table (cold=empty, warm=case-spec) | **E2-08**; evaluation-disabled; no scored loop |
-| **A2** | Remove `plantAndConsolidate` from STRICT path; scope-limits doc | **E2-09**; `scoring_enabled: false`; no `e2_outcome` |
-| **A3** | `e2StrictRetrieve()` + boundary provenance gate | **E2-10**; first CP where official scoring **may** activate |
-| **A4** | Executive RETRIEVAL → strict path; remove `RAGPipeline` from scored STRICT arms | E2-01–E2-07; **tier-1 compile + tier-2 linker audit** |
-| **A5** | Runtime guard in `rag.cpp` under STRICT (required, not optional) | **E2-11** |
-| **B** | STRICT re-baseline (after 0 + A1–A5) | Authoritative SUCCESS/FAILURE only here |
+| **A1** | STRICT sealed log builder from case table | ✅ 2026-07-02 — **E2-08**; `buildStrictInjectionLogFromCaseTable`; evaluation-disabled harness |
+| **A2** | Remove `plantAndConsolidate` from STRICT path; scope-limits doc | See **§ Checkpoint A2** — **E2-09**; Option A test discipline |
+| **A3** | `e2StrictRetrieve()` + boundary provenance; layer ownership contract | **E2-10**; `retrieval_enabled: true`; purity verified; **not** official scoring |
+| **A4** | Executive delegates to same `e2StrictRetrieve()`; context injection + single dispatch + full equivalence | E2-01–E2-07; static dispatch audit + golden-case runtime proof |
+| **A5** | Diagnostic fuse; A3→A4 transition enforced; failure-domain separation; first `rag.cpp` touch (guard only) | **E2-11** |
+| **B** | STRICT re-baseline (after 0 + A1–A5) | Authoritative SUCCESS/FAILURE **only after A4 proves harness–executive retrieval equivalence** |
 | **C** | `--tier integration` + E2-06 + `completed_improvements_log.md` close-out | INTEGRATION non-scoring |
 
 **Scope estimate:** Phase A ≈ **3–5 sub-sessions** (not one session) — largest change since E1 Checkpoint C.
+
+**Phase A decomposition (one edge per checkpoint):**
+
+```
+A1  →  build sealed log
+A2  →  carry sealed log (harness plumbing)
+A3  →  kernel consumes sealed log          (Harness → e2StrictRetrieve)
+A4  →  executive consumes kernel           (Executive → e2StrictRetrieve)
+A5  →  prevent regressions                 (runtime guard)
+B   →  authorize scoring
+C   →  integration tier
+```
+
+### Checkpoint A1 — STRICT sealed log plumbing (approved — subject to revision)
+
+**Expert verdict:** Approved. One isolated checkpoint, one proof obligation, then stop — same discipline as E1 D1–D5.
+
+**Purpose:** Prove deterministic construction of STRICT sealed injection logs from the frozen case table. **No retrieval, scoring, executive, or RAG behavior changes are permitted during A1.**
+
+| In scope | Out of scope |
+|----------|--------------|
+| Pure builder logic + unit tests | `e2StrictRetrieve()` (A3) |
+| Evaluation-disabled harness gate | `plantAndConsolidate` removal (A2) |
+| Diagnostic JSONL of sealed logs | Lift, `e2_outcome`, `official_scoring: true` |
+| | Executive / `RAGPipeline` changes |
+
+**Time estimate:** **45–90 minutes** focused implementation + ~10 min build/test (one short sub-session).
+
+#### A1.1 — Builder API
+
+Add **`buildStrictInjectionLogFromCaseTable(case, armLabel, builder_timestamp_ms)`** (name must include **STRICT** — integration-tier builders may follow later).
+
+Returns a **sealed** `SealedEpisodeInjectionLog`. No I/O.
+
+#### A1.2 — Arm semantics (case table is authoritative)
+
+**Cold arm is not always empty.** `cold_arm_pre_consolidated` models pre-existing memory on the cold arm.
+
+```
+cold arm:
+  if cold_arm_pre_consolidated && plant_message non-empty
+      → one injected episode (sealed)
+  else
+      → empty sealed log
+
+warm arm:
+  if plant_message non-empty
+      → one injected episode (sealed)
+  else
+      → empty sealed log
+```
+
+**E2-03:** `cold_arm_pre_consolidated == true` → cold arm gets the Apollo entry (pollution negative control). Matches protocol — not "cold means empty."
+
+Each entry fields: `episode_id` ← `plant_session_id`, `source` ← `"evaluation"`, `content` ← `plant_message`, `content_hash` ← `sha256Hex(content)`, `injected_at_ms` ← shared builder timestamp.
+
+#### A1.3 — Deterministic timestamps
+
+**Do not** call `now()` per entry. **`injected_at_ms` must come from a single deterministic builder timestamp** passed into the builder (or a test clock). All entries in one invocation share that value. Removes timing flakiness; simplifies later provenance comparison.
+
+#### A1.4 — Immutability (implementation watch)
+
+After seal, expose **const** access only (`const std::vector<EpisodeInjectionEntry>& entries()` — already the API shape). **No** mutable `entries()` or non-const vector references post-seal; otherwise `seal()` is weaker than intended.
+
+#### A1.5 — E2-08 unit tests
+
+| Test | Asserts |
+|------|---------|
+| Seal immutability | `append()` after `seal()` throws |
+| E2-01 cold | Empty entries, `sealed: true` |
+| E2-01 warm | One entry; content + hash match case table |
+| E2-03 cold | One entry present (`cold_arm_pre_consolidated`) |
+| **Builder determinism** | Same case + arm + timestamp → **byte-identical** `toJson().dump()` on two builds (field equality, not pointer equality). Catches accidental UUIDs, per-entry timestamps, etc. |
+
+Tests do **not** assert `arm_scoring_status` or lift.
+
+#### A1.6 — Harness gate (evaluation-disabled, not failed)
+
+| Field | A1 value |
+|-------|----------|
+| `official_scoring` | `false` |
+| `scoring_enabled` | `false` |
+| `wiring_stage` | `"A1"` |
+| `e2_outcome` | **not emitted** |
+
+Arms are **not scored** — not failed. Optional diagnostic JSONL rows with sealed log JSON per case/arm. Main scored case loop **skipped**. Exit 0 if E2-08 + self-test pass.
+
+#### A1.7 — Exit criteria (stop before A2)
+
+1. Build green  
+2. `thoth-unit-tests` green including E2-08 + determinism test  
+3. Harness runs evaluation-disabled (no `e2_outcome`)  
+4. **Builder determinism:** same case + arm + timestamp ⇒ byte-identical sealed JSON  
+5. **Pause for confirmation** — bugs after A1 likely live in retrieval wiring (A3+), not log construction  
+
+#### A1 files (expected)
+
+`episodic_learning_eval.h/.cpp`, `run_episodic_learning_benchmark.cpp`, `tests/unit_tests.cpp`, `docs/E2_PROTOCOL.md` (A1 scope sentence), `cursor_list.md` (mark ✅ on close-out)
+
+### Checkpoint A2 — STRICT consolidation decoupling (approved — subject to revision)
+
+**Expert verdict:** Approved with Option A test discipline + **one-sealed-log-per-arm** invariant. One checkpoint, one proof obligation, then stop.
+
+**Purpose:** Prove STRICT no longer depends on **runtime episodic creation** (`plantAndConsolidate` or any equivalent). Arms declare input only via a **single** sealed log per invocation. **No retrieval, scoring, executive, or RAG behavior changes.**
+
+**Dataflow (one edge per checkpoint):**
+
+```
+A1:  case table → sealed log                    (builder only)
+A2:  case table → sealed log → runCaseArm       (plumbing; log not consumed by retrieval)
+A3:  sealed log → e2StrictRetrieve() → chunks  (retrieval wired — A3 only)
+```
+
+**Known pre-A2 gap (to fix in A2):** `main()` treats `A1` and `A2` identically (builder diag only, no `runCaseArm`). A2 must **split branches**: A1 stays builder-only; A2 runs arm plumbing smoke.
+
+| In scope | Out of scope |
+|----------|--------------|
+| Remove `plantAndConsolidate` from `runCaseArm` | `e2StrictRetrieve()` (A3) |
+| **One sealed log per arm** — built once, `const&` for arm lifetime | Sealed log consumed by retrieval (A3) |
+| **No episodic storage writes** during STRICT arm execution | `RAGPipeline` / executive changes (A4) |
+| Split A1 vs A2 branches; default `wiring_stage=A2` | Official scoring / `e2_outcome` (**Phase B**) |
+| E2-09 + **E2-09b** (ownership) + scope-limit doc | Tier-2 linker audit (A4) |
+| **Option A:** `runE2TestArm` no plant; skip `testE2CaseById` E2-01–E2-03 until **A4** | |
+| `SCORING` env — dev only; **never authoritative** | |
+
+**Time estimate:** **60–120 minutes** focused implementation + ~10 min build/test.
+
+#### A2.0 — Core invariants (A3 may rely on these)
+
+1. **Exactly one** `SealedEpisodeInjectionLog` is constructed **per arm invocation** via `buildStrictInjectionLogFromCaseTable` — not per helper, not lazily re-built on nested calls.
+2. **`runCaseArm` owns the log:** build at arm entry → pass **`const SealedEpisodeInjectionLog&`** (or const pointer) to all downstream helpers for that arm's lifetime. No copies, no rebuilds, no mutable aliases.
+3. **Read-only after construction:** treat as immutable input for the arm (sealed + const-ref ownership — A2 establishes this contract even before A3 consumes it).
+4. **No episodic mutation:** STRICT arm execution **must not write to episodic storage in any form** during A2 — not only `plantAndConsolidate`, but also any replacement (`injectEpisode()`, direct warm-tier writes, consolidation triggers, etc.). Closes the "different function, same coupling" loophole.
+
+#### A2.1 — `runCaseArm` decoupling
+
+- Remove `needsPlant` / `plantAndConsolidate(...)` from `runCaseArm`.
+- **Once at arm entry:** `const SealedEpisodeInjectionLog sealedLog = buildStrictInjectionLogFromCaseTable(spec, armLabel, ts)` — suite-level `ts` for JSONL consistency with A1.
+- Thread `sealedLog` as **`const&`** through arm body; helpers take `const SealedEpisodeInjectionLog&` if they need the log (A3 retrieval helper stub may accept but not use yet).
+- **Forbid** second `buildStrictInjectionLogFromCaseTable` call anywhere in `runCaseArm` call tree (enforce via E2-09b).
+- Log `sealedLog.toJson()` on **`E2_STRICT_INJECTION_LOG_DIAG`** (+ optional plumbing fields after executive run).
+- Keep `plantAndConsolidate` **uncalled** on STRICT path (retain for future INTEGRATION / Phase C only).
+
+#### A2.2 — Harness branch split
+
+```
+THOTH_E2_WIRING_STAGE unset → default "A2" (after A2 lands)
+
+A1:  builder diag only (E2_STRICT_INJECTION_LOG_DIAG + E2_WIRING_CHECKPOINT); no runCaseArm
+A2:  for each case → runCaseArm(cold) + runCaseArm(warm);
+     log E2_STRICT_INJECTION_LOG_DIAG (sealed log + plumbing fields) per arm; no evaluateEpisodicLearningCase
+SCORING:  legacy full loop — dev knob only; MUST NOT be used for authoritative runs (Phase B, publication, CI)
+```
+
+#### A2.3 — Arm semantics (unchanged from A1.2)
+
+A2 does **not** change builder logic. Sealed log **shape** remains what E2-08 proved deterministic; A2 adds **ownership and wiring** only.
+
+#### A2.4 — Option A: unit test discipline
+
+- Update **`runE2TestArm`** to match harness: **no** `e2PlantAndConsolidate`; same one-log-per-arm invariant.
+- **Skip** `testE2CaseById("E2-01")`, `"E2-02"`, `"E2-03"` until **A4** (executive RETRIEVAL via strict kernel):
+
+  `// TODO A4: re-enable testE2CaseById E2-01–E2-03 once executive RETRIEVAL delegates to e2StrictRetrieve()`
+
+  Kernel retrieval for those cases is covered by **E2-10** at A3.
+- E2-04 smoke / E2-08 / E2-09 / E2-09b remain green.
+
+#### A2.5 — E2-09 / E2-09b unit tests
+
+| ID | Asserts |
+|----|---------|
+| **E2-09** | No `plantAndConsolidate` / `e2PlantAndConsolidate` on STRICT arm paths (source contract) |
+| **E2-09** | Default A2 harness: exit 0; `E2_WIRING_CHECKPOINT` + arm rows; gate fields; no `e2_outcome` |
+| **E2-09** | Sealed log on arm row matches A1 builder (E2-01 warm, E2-03 cold spot-check) |
+| **E2-09** | Reuse A1 events only — extend `E2_STRICT_INJECTION_LOG_DIAG` schema if needed; **no new event names** |
+| **E2-09b** | **Ownership:** builder invoked **exactly once** per arm execution (test hook / call counter on builder wrapper, or refactor arm entry to single visible build site grepable by E2-09) |
+| **E2-09b** | Arm diagnostic JSON sealed log **byte-identical** to standalone builder output for same inputs (proves same log, not a rebuild) |
+
+Does **not** assert retrieval hits, lift, or arm `COMPLETED`.
+
+**Tier-2 linker audit:** Not required for A2. Reserved for A4.
+
+#### A2.6 — Gate contract (harness)
+
+| Field | A2 value |
+|-------|----------|
+| `official_scoring` | `false` |
+| `scoring_enabled` | `false` |
+| `wiring_stage` | `"A2"` |
+| `e2_outcome` | **not emitted** |
+
+Arms run for plumbing; **not scored** — not failed.
+
+#### A2.7 — Scope-limits doc (`E2_PROTOCOL.md`)
+
+Add under § cold/warm A/B:
+
+> **Scope limit — STRICT vs organic consolidation:** E2-STRICT warm arms use **pre-sealed case-table episodes** (`buildStrictInjectionLogFromCaseTable`), not the product consolidation pipeline (`plantAndConsolidate` → episodic → warm tier). M1.5 validates organic consolidation produces retrievable memory; E2-STRICT validates deterministic retrieval from **declared frozen input**. Organic consolidation → warm → retrieval → lift is **E2-INTEGRATION** (diagnostic, non-scoring) only.
+
+Add under implementation / checkpoint A2:
+
+> **One sealed log per arm:** exactly one `buildStrictInjectionLogFromCaseTable` call per arm invocation; passed by const reference thereafter. STRICT arm execution must not mutate episodic storage during A2.
+
+Cold row footnote: empty unless `cold_arm_pre_consolidated` (E2-03).
+
+#### A2.8 — Exit criteria (stop before A3)
+
+1. Build green  
+2. `thoth-unit-tests` green: E2-08 + **E2-09** + **E2-09b**; `testE2CaseById` E2-01–E2-03 **skipped** with TODO A4 comment  
+3. Harness default A2: arm plumbing smoke; gate contract satisfied; no `e2_outcome`  
+4. Sealed logs on arm rows match A1 builder for same case/arm/ts  
+5. Zero `plantAndConsolidate` / `e2PlantAndConsolidate` on STRICT arm paths  
+6. **No writes to episodic storage** during STRICT arm execution (architectural point of A2 — no plant, no inject-replacement, no consolidation side effects)  
+7. **One sealed log per arm** — E2-09b ownership invariant holds  
+8. Scope-limit + ownership sentences in `E2_PROTOCOL.md`  
+9. **Pause for confirmation** — retrieval miss or arm `FAILED` in A2 smoke is expected; scoring is disabled  
+
+#### A2 files (expected)
+
+`run_episodic_learning_benchmark.cpp`, `tests/unit_tests.cpp`, `docs/E2_PROTOCOL.md`, `cursor_list.md` — **no** `rag.cpp`, `executive_controller.*`, `e2_strict_retrieval.*`
+
+### Checkpoint A3 — STRICT kernel retrieval + boundary provenance (approved — subject to revision, **v2**)
+
+**Expert verdict:** Approved after scope tightening — one proof obligation (kernel consumes sealed log), then stop. Same discipline as A1/A2. Plan may be revised before or during implementation.
+
+**One-sentence definition:** A3 proves deterministic kernel retrieval consumes sealed evaluation episodes and produces complete boundary provenance **independent of Executive or RAGPipeline behavior**.
+
+**Single proof obligation:** Can deterministic retrieval consume the sealed log?
+
+**Explicitly not A3:** scoring, SUCCESS, lift, benchmark outcome, executive correctness → **A4**, **A5**, **Phase B**.
+
+**Purpose:** Prove **`e2StrictRetrieve()`** consumes the A2 sealed log and produces fully traced `RetrievedChunkRecord[]` at the **evaluation boundary**. A3 proves **kernel retrieval correctness** — it does **not** attempt to prove **benchmark correctness**.
+
+**Dataflow (one edge per checkpoint):**
+
+```
+A1:  case table → sealed log
+A2:  case table → sealed log → runCaseArm              (plumbing; log not consumed)
+A3:  sealed log → e2StrictRetrieve() → chunks @ boundary
+A4:  executive RETRIEVAL → strict path
+B:   official_scoring: true; authoritative e2_outcome
+```
+
+| In scope | Out of scope |
+|----------|--------------|
+| Wire `e2StrictRetrieve()` with sealed log + index | Official scoring / `e2_outcome` (**Phase B**) |
+| `provenanceFromStrictRetrievalResult()` — replace `provenanceFromRetrievalStepResult()` on STRICT boundary | Executive `executeRetrieval()` changes (**A4**) |
+| **Layer ownership contract** (see A3.0) | Ranking redesign (**log only** if E2-10 exposes gap) |
+| Vacuous-retrieval guard (derived from existing case-table fields) | `evaluateEpisodicLearningCase` / lift / case pass-fail loop |
+| Harness `wiring_stage=A3`; log kernel boundary fields | `testE2CaseById` full pass (**A4**) |
+| **E2-10** (retrieval, boundary, fail-closed, **retrieval-only** determinism) | Tier-2 linker audit (**A4**) |
+| **Purity verified** (formal exit criterion — see A3.7) | `rag.cpp` runtime guard (**A5**) |
+| **`runCaseArm` continues**; executive **ignored** on STRICT boundary | Index construction lifecycle (harness/test responsibility) |
+
+**Time estimate:** **90–150 minutes** focused implementation + ~10 min build/test.
+
+#### A3.0 — Layer ownership contract
+
+Each layer consumes **only** the output of the layer before it. No layer bypasses or reaches around its predecessor.
+
+```
+builder            →  SealedEpisodeInjectionLog   (A1)
+retrieval kernel   →  RetrievedChunkRecord[]       (A3, from sealed log)
+boundary mapper    →  provenance                   (A3, from retrieval result)
+```
+
+| Rule | Meaning |
+|------|---------|
+| Builder never sees retrieval | A1 builder has no `e2StrictRetrieve` calls |
+| Kernel never sees provenance/scoring | `e2_strict_retrieval.*` does not call evaluator or `provenanceFromStrictRetrievalResult` |
+| Boundary mapper never re-derives from case table | `provenanceFromStrictRetrievalResult` maps **only** what the kernel returned — no reading `spec.plant_message` to fabricate hits the kernel did not surface |
+
+**Ownership violation** = any code that skips a layer (e.g. boundary mapper inferring hits from spec fields absent from kernel chunks). Blocks A3 exit.
+
+Inherit **A2.0** (one sealed log, const-ref, no episodic writes).
+
+#### A3.0a — Source of retrieval expectations (no new schema)
+
+**Decision:** Expectations (hit tokens, forbidden tokens, “episodic required”) are derived from the **existing case specification** — not a new schema field. `spec.plant_message`, `spec.cold_arm_pre_consolidated`, and **A1.2 arm semantics** encode what should/shouldn't be retrievable per arm.
+
+**Vacuous-retrieval guard** — “episodic required” computed from existing fields, e.g.:
+
+- Warm arm + non-empty `plant_message` → episodic content expected on retrieval success  
+- Cold arm + `cold_arm_pre_consolidated` + non-empty `plant_message` → episodic content expected  
+
+If implementation discovers no existing field can express a needed expectation → **explicit protocol change**, not a quiet addition. Requires checklist item **A3.0b** (schema field, protocol doc, A1 builder update, regression test) and **pause for confirmation** (retroactively touches A1).
+
+#### A3.0b — Schema change gate (only if A3.0a blocked)
+
+| Step | Work |
+|------|------|
+| Name field | Document in `E2_PROTOCOL.md` + `episodic_learning_eval.h` |
+| Update A1 builder | If field affects sealed log shape |
+| Regression | Extend E2-08 |
+| Confirm | Pause before proceeding |
+
+#### A3.0c — Determinism responsibilities (no overlap with A1)
+
+| Checkpoint | Owns | Tested by |
+|------------|------|-----------|
+| **A1** | Builder determinism — same case + arm + timestamp ⇒ byte-identical sealed log JSON | E2-08 / A1.5 (existing) |
+| **A3** | Retrieval determinism — same **already-sealed** log + same index ⇒ byte-identical chunk ids + ordering from `e2StrictRetrieve()` | E2-10 determinism sub-case |
+
+E2-10 determinism: build sealed log **once**, reuse as fixed input; call `e2StrictRetrieve()` twice — **never** re-invoke the builder. Prevents E2-10 from silently re-testing A1.5.
+
+#### A3.0d — Index contract
+
+`e2StrictRetrieve()` treats the supplied index as **immutable for the duration of the call**. Index construction, caching, freshness, and lifecycle are **outside A3's proof obligation** — harness or test code builds the index before calling the kernel.
+
+A3 asserts only: **given a fixed index and a fixed sealed log, retrieval is deterministic and pure.**
+
+#### A3.0e — Executive execution (harness continuity only)
+
+The Executive may still run during A3 harness cases — **strictly for harness continuity and future A4 comparison** (baseline to diff against later).
+
+| Rule | Meaning |
+|------|---------|
+| STRICT evaluation ignores Executive retrieval | No Executive-derived chunk, score, or provenance field may feed `obs.retrieval` on the STRICT boundary path |
+| Not a dependency | A3 proof holds even if the Executive step were removed |
+
+#### A3.0f — Purity (design + verified exit criterion)
+
+`e2StrictRetrieve()` is a **pure function**: inputs `query`, sealed log, index, config, `top_k`; outputs `E2StrictRetrievalResult`. **No writes, global state, caches, SQLite, Executive, or RAG.**
+
+Purity is a **formal exit criterion** (equal weight to test pass), not guidance-only.
+
+#### A3.1 — Boundary mapping
+
+Add **`provenanceFromStrictRetrievalResult(retrieval, expectations)`** in `episodic_learning_eval.h/.cpp`:
+
+- Copy kernel `RetrievedChunkRecord[]` into `prov.chunks` (kernel output only).
+- Derive hit/forbidden-token fields by matching **kernel chunk content** against expectations derived per **A3.0a**.
+- Vacuous guard: `retrieval_status == SUCCESS` + episodic required (A3.0a) + `chunk_count == 0` → `FAILED_RETRIEVAL`.
+- On STRICT A3+ paths, **forbid** `provenanceFromRetrievalStepResult()` as boundary source of truth.
+
+#### A3.2 — `runCaseArm` wiring
+
+At arm entry (A2 invariants preserved):
+
+1. Build sealed log once → `const&` for arm lifetime.
+2. Build index (distractor unchanged — lifecycle outside kernel).
+3. `e2StrictRetrieve({ query: spec.goal, episode_log, index, engine, config, top_k })`.
+4. Populate **`obs.retrieval`** via `provenanceFromStrictRetrievalResult()` only.
+5. Executive may run afterward for continuity — **do not** merge executive RETRIEVAL into STRICT provenance.
+
+#### A3.3 — Harness branch
+
+```
+THOTH_E2_WIRING_STAGE unset → default "A3" (after A3 lands)
+
+A1:  builder diag only
+A2:  runCaseArm plumbing; no kernel retrieval
+A3:  runCaseArm + e2StrictRetrieve @ boundary; log kernel fields on E2_STRICT_INJECTION_LOG_DIAG
+     NO evaluateEpisodicLearningCase; NO e2_outcome
+SCORING: legacy dev knob — never authoritative
+```
+
+#### A3.4 — Gate contract (harness)
+
+| Field | A3 value |
+|-------|----------|
+| `official_scoring` | `false` |
+| `scoring_enabled` | `false` |
+| `retrieval_enabled` | `true` |
+| `evaluation_boundary_verified` | `true` |
+| `wiring_stage` | `"A3"` |
+| `e2_outcome` | **not emitted** |
+
+#### A3.5 — E2-10 unit tests (four categories)
+
+| Category | Asserts |
+|----------|---------|
+| **Retrieval** | E2-01 warm retrieves Apollo; E2-01 cold does not; E2-02 warm hit; E2-03 distractor / no episodic hit |
+| **Boundary** | `provenanceFromStrictRetrievalResult` mapping correct; statuses propagate; **no case-table bypass** |
+| **Fail-closed** | Unsealed log → `FAILED_STRICT_BOUNDARY`; non-STRICT tier → `FAILED_STRICT_BOUNDARY`; exception → `FAILED_RETRIEVAL`, zero chunks |
+| **Determinism** | Pre-built sealed log + fixed index → two `e2StrictRetrieve()` calls → identical chunk ids + ordering (**no builder re-invoke**) |
+
+Does **not** assert: executive `COMPLETED`, lift, `testE2CaseById`, harness `e2_outcome`.
+
+**If E2-10 retrieval cases fail due to ranking:** document — **do not** expand A3 scope unless demonstration is impossible.
+
+#### A3.6 — Protocol doc (`E2_PROTOCOL.md`)
+
+§ STRICT retrieval boundary, § Kernel ownership, A3 scope-limit sentence. Add layer ownership diagram/table if not already present.
+
+#### A3.7 — Exit criteria (stop before A4)
+
+1. Build green  
+2. Tests green: E2-08 + E2-09 + E2-09b + **E2-10**; `testE2CaseById` E2-01–E2-03 still **skipped** (A4)  
+3. Harness default A3: kernel boundary logged; gate contract satisfied; **no `e2_outcome`**  
+4. No `provenanceFromRetrievalStepResult()` on STRICT boundary path in harness  
+5. A2 invariants preserved  
+6. **Purity verified** — `e2StrictRetrieve()` has no side effects, no `RAGPipeline` / `ExecutiveController` / episodic / SQLite dependency. Verify via: **(a)** code review / grep for forbidden includes or calls; **(b)** unit test calling function twice in isolation (no harness fixtures with hidden state) → identical output  
+7. No ranking redesign unless E2-10 blocked and escalated  
+8. **Ownership contract respected** — no layer reaches past its predecessor  
+9. **Pause for confirmation** — Phase B owns the official-scoring switch  
+
+#### A3 files (expected)
+
+`e2_strict_retrieval.h/.cpp`, `episodic_learning_eval.h/.cpp`, `run_episodic_learning_benchmark.cpp`, `tests/unit_tests.cpp`, `docs/E2_PROTOCOL.md`, `cursor_list.md` — **no** `workflow_engine.cpp`, `rag.cpp`, `executive_controller.*`
+
+### Checkpoint A4 — Executive RETRIEVAL → strict kernel (approved — subject to revision, **v3**)
+
+**Expert verdict:** Approved (~9.8/10) — v3 adds architectural explicitness (context injection, single dispatch, full equivalence including failures, caller independence) **without expanding scope**. Plan may be revised before or during implementation.
+
+**One-sentence definition:** A4 proves the **Executive RETRIEVAL step** delegates **directly** to the **same `e2StrictRetrieve()` implementation** the harness uses — with **identical retrieval outcomes** (success and failure) on representative golden cases.
+
+**Single proof obligation (unchanged):** Does the Executive use the **exact same deterministic retrieval kernel** as the evaluation harness?
+
+**Explicitly not A4:** official scoring / authoritative `e2_outcome` (**Phase B**); runtime guard in `rag.cpp` (**A5**); ranking redesign; lift / benchmark SUCCESS validation; INTEGRATION tier harness (**Phase C**).
+
+**Purpose:** Close the gap between **harness boundary wiring (A3)** and **runtime step dispatch**. After A4, mock LLM `required_token` validation reads RETRIEVAL step output that is **equivalent** to harness kernel output — enabling end-to-end arm completion without `plantAndConsolidate`.
+
+**Dataflow (staged migration — one edge):**
+
+```
+A3   Harness        →  e2StrictRetrieve()
+A4   Executive      →  e2StrictRetrieve()     (same implementation; independent callers)
+A5   Runtime guard  →  prevent RAG bypass if miswired
+B    Scoring        →  official_scoring + e2_outcome
+```
+
+| In scope | Out of scope |
+|----------|--------------|
+| **STRICT retrieval context injection** — sealed log ownership + lifetime (A4.0a) | Official scoring / `e2_outcome` (**Phase B**) |
+| **Single dispatch decision point** — STRICT vs NON-STRICT (A4.0b) | `rag.cpp` abort/throw guard (**A5**) |
+| Executive **direct** delegation to `e2StrictRetrieve()` | Ranking / merge tuning in kernel |
+| **Kernel identity** — exactly one STRICT retrieval implementation | Lift validation (Phase B) |
+| **Full retrieval equivalence** — success + failure paths (A4.0e) | Phase B re-baseline run |
+| **Caller independence** — kernel result independent of caller identity | Phase C INTEGRATION |
+| **Re-enable `testE2CaseById` E2-01–E2-03** + E2-04–E2-07 green | New JSONL event names |
+| **Static dispatch audit** + golden-case runtime proof | |
+| **NON-STRICT negative test** — legacy RAG preserved | |
+| Harness `wiring_stage=A4`; equivalence logged on `E2_STRICT_INJECTION_LOG_DIAG` | |
+| Tier-1 compile isolation (`e2_eval_kernel` unchanged) | |
+
+**Time estimate:** **2–4 hours** (context injection plumbing + equivalence tests + static audit).
+
+#### A4.0 — Core invariants (inherit A3)
+
+1. **Kernel identity** — Exactly **one** authoritative STRICT retrieval implementation: `e2StrictRetrieve()`. Harness and Executive are **independent callers** — not parallel implementations. **Forbidden:** `executeRetrievalStrict()`, private merge helpers, or any fork that could diverge silently.
+
+2. **Direct delegation with explicit marshalling rules** — Executive RETRIEVAL calls the kernel directly.
+   - **Allowed (input marshalling):** adapting `StepExecutionContext` → `E2StrictRetrievalInput`; argument construction; parameter passing; **format-only** mapping of kernel output to step JSON field names.
+   - **Forbidden (output transformation):** modifying retrieval results; reordering chunks; filtering; augmenting; alternate merge logic; alternate provenance logic.
+   - **Prohibited chain:** Executive → wrapper → modified retrieval → `e2StrictRetrieve()`.
+
+3. **Caller independence (referential transparency)** — For identical inputs (`query`, sealed log, index, config, `top_k`), `e2StrictRetrieve()` must return **identical** results regardless of caller (harness vs Executive). Caller identity must **never** influence retrieval.
+
+4. **Full retrieval equivalence (required exit criterion)** — On representative golden arms (E2-01–E2-03), harness and Executive must agree on **all** retrieval outcomes:
+   - Success: chunk ids, ordering, provenance fields, chunk count
+   - Failure: `retrieval.status`, fail-closed behavior, `FAILED_RETRIEVAL`, `FAILED_PROVENANCE`, `FAILED_STRICT_BOUNDARY`, vacuous-retrieval guard outcomes, and any other terminal retrieval status
+   - Mismatch on **either** success or failure path **blocks A4 exit**.
+
+5. **No episodic writes** — A2 invariant holds.
+
+6. **NON-STRICT preserved** — Product / non-STRICT paths **must continue** to use legacy `RAGPipeline::retrieveRelevant` (negative regression test required).
+
+#### A4.0a — STRICT retrieval context injection contract
+
+Eliminates ambiguity: **where does the Executive get its sealed log?**
+
+| Question | Answer |
+|----------|--------|
+| **Who creates the sealed log?** | **`runCaseArm` / harness arm entry** — exactly one `buildStrictInjectionLogFromCaseTable(spec, armLabel, ts)` per arm invocation (A2 ownership). |
+| **Who owns it?** | The **arm execution scope** — `const SealedEpisodeInjectionLog` built once; **`const&` or const pointer** for arm lifetime. No duplicate builds. |
+| **How does it reach the Executive?** | Harness **injects** the sealed log pointer (and `E2EvalConfig`, index/engine handles) into **Workflow/Executive step context** before `execute_goal` / RETRIEVAL dispatch. Executive reads context; it does **not** build or seal logs. |
+| **Lifetime** | Valid from arm entry through last RETRIEVAL step of that arm; invalidated when arm scope ends. Executive must not retain pointer beyond arm lifetime. |
+| **Evaluation only** | This injection path exists **only** for E2 evaluation / golden-case harness execution (`run_episodic_learning_benchmark`, `runE2TestArm` under STRICT). |
+| **Production** | Normal product goal execution **does not** create or inject sealed evaluation logs. GUI / chat paths do not use `buildStrictInjectionLogFromCaseTable` unless explicitly in an eval harness. |
+
+#### A4.0b — Single dispatch decision point (long-term invariant)
+
+| Rule | Meaning |
+|------|---------|
+| **Exactly one decision** | One authoritative branch selects STRICT kernel vs NON-STRICT `RAGPipeline` retrieval — typically inside `WorkflowEngine::executeRetrieval` (or one named delegate it calls unconditionally). |
+| **No scattered flags** | Avoid multiple independent `if (strict)` checks across Executive, harness, and RAG that could disagree. Tier/mode flows **into** the single decision point. |
+| **Documented invariant** | STRICT mode selection has **one** authoritative decision point — document location in code comment + `E2_PROTOCOL.md` A4 sentence. |
+
+#### A4.0c — STRICT retrieval context ownership (diagram)
+
+```
+Evaluation harness (runCaseArm arm entry)
+        │
+        │  owns: one build per arm
+        ▼
+buildStrictInjectionLogFromCaseTable()
+        │
+        ▼
+SealedEpisodeInjectionLog  (const, sealed, arm lifetime)
+        │
+        │  inject pointer + E2EvalConfig into step context
+        ▼
+WorkflowEngine / Executive context
+        │
+        │  marshal → E2StrictRetrievalInput (allowed)
+        ▼
+e2StrictRetrieve()                    ← same function as A3 harness boundary
+        │
+        │  no output transformation (forbidden)
+        ▼
+Executive RETRIEVAL step result
+```
+
+**No layer creates a duplicate sealed log.** Builder (A1) → kernel (A3) → executive caller (A4) — same ownership chain as A3 layer contract, extended with context injection.
+
+#### A4.0d — Golden-case equivalence scope (not exhaustive)
+
+| Clarification | Meaning |
+|---------------|---------|
+| **Representative tests** | E2-01–E2-03 (all arms) are **architectural equivalence tests** — they prove harness and Executive call the same kernel with the same outcomes. |
+| **Not exhaustive** | They do **not** prove every production Executive retrieval scenario, every goal type, or every future case table entry. |
+| **A4 claim** | A4 proves **kernel dispatch equivalence** on golden cases — not universal production retrieval coverage. |
+
+#### A4.1 — Executive wiring
+
+Target: **`WorkflowEngine::executeRetrieval`** — the **single dispatch decision point** (A4.0b).
+
+| Step | Work |
+|------|------|
+| **Context receive** | Read injected `const SealedEpisodeInjectionLog*`, `E2EvalConfig`, index/engine from step context (A4.0a) |
+| **STRICT branch** | Marshal to `E2StrictRetrievalInput`; call `e2StrictRetrieve()` **directly**; map to step `result.data.chunks` (**format-only**) |
+| **Non-STRICT branch** | Unchanged — `RAGPipeline::retrieveRelevant` |
+| **Fail-closed** | Kernel non-OK → failed RETRIEVAL step; failure status must match harness boundary behavior (equivalence includes failures) |
+
+Harness `runCaseArm`: **retain** A3 boundary retrieval — compare harness vs executive on **success and failure** paths for golden arms; mismatch → fail.
+
+#### A4.2 — Harness branch
+
+```
+THOTH_E2_WIRING_STAGE unset → default "A4" (after A4 lands)
+
+A3:  kernel @ harness boundary; executive ignored for provenance
+A4:  context injection + executive RETRIEVAL → e2StrictRetrieve(); harness boundary retained for equivalence proof
+     NO evaluateEpisodicLearningCase; NO e2_outcome
+SCORING: legacy dev knob — never authoritative
+```
+
+#### A4.3 — Gate contract (harness)
+
+| Field | A4 value |
+|-------|----------|
+| `official_scoring` | `false` |
+| `scoring_enabled` | `false` |
+| `retrieval_enabled` | `true` |
+| `evaluation_boundary_verified` | `true` |
+| `executive_strict_retrieval` | `true` |
+| `harness_executive_retrieval_equivalent` | `true` (required on golden arms — success + failure) |
+| `wiring_stage` | `"A4"` |
+| `e2_outcome` | **not emitted** |
+
+Separates **retrieval correctness** from **benchmark authority**.
+
+#### A4.4 — RAG bypass evidence (static + runtime — do not conflate)
+
+| Evidence type | What it proves | How |
+|---------------|----------------|-----|
+| **Static (tier-2 audit)** | STRICT **dispatch code** at the **single decision point** references `e2StrictRetrieve()`, not `RAGPipeline::retrieveRelevant` in the STRICT branch | Audit `executeRetrieval` (or delegate) TU + grep; no parallel strict retrieval fork |
+| **Runtime (golden cases)** | STRICT execution produces retrieval **identical** to harness — **including failure paths** | E2-01–E2-03 equivalence on status, chunks, and fail-closed outcomes |
+
+**Defensible claim (A4 exit):** No STRICT execution path invokes `RAGPipeline::retrieveRelevant`, as demonstrated by **static dispatch inspection** and **golden-case runtime equivalence** — not linker absence alone.
+
+Does **not** substitute for tier-1 `e2_eval_kernel` compile exclusion.
+
+#### A4.5 — Unit / case tests
+
+| ID | Asserts |
+|----|---------|
+| **E2-01–E2-03** | `testE2CaseById` re-enabled — Executive RETRIEVAL consumes STRICT kernel output; mock LLM token check passes on success paths |
+| **E2-04–E2-07** | Remain green |
+| **E2-08–E2-10** | Regression |
+| **Equivalence (success)** | Golden arms: harness == executive (ordering, ids, provenance, chunk count) |
+| **Equivalence (failure)** | Injected fault or negative cases: harness == executive on `retrieval.status`, fail-closed, vacuous guard (where applicable) |
+| **Caller independence** | Same inputs via harness-direct vs executive path → identical kernel-equivalent outcome |
+| **Negative (NON-STRICT)** | Non-STRICT path still calls `RAGPipeline::retrieveRelevant` |
+| **Static audit** | Single dispatch point; STRICT branch → kernel symbol |
+
+**Does not assert:** lift margins, `e2_outcome`, benchmark SUCCESS/FAILURE, exhaustive production coverage.
+
+#### A4.6 — Exit criteria (stop before A5)
+
+1. Build green  
+2. `thoth-unit-tests` green: **E2-01–E2-07** + E2-08–E2-10 + full equivalence + caller independence + NON-STRICT negative  
+3. Harness default A4; **no `e2_outcome`**  
+4. **Context injection contract** implemented and documented (A4.0a) — no duplicate sealed logs  
+5. **Single dispatch decision point** documented (A4.0b)  
+6. **Static dispatch audit** passes  
+7. **Golden-case runtime equivalence** — harness == executive on **success and failure** retrieval outcomes  
+8. **Kernel identity** + **caller independence** verified  
+9. A2 + A3 invariants preserved  
+10. **Pause for confirmation** — **Phase B** after A4 equivalence; **A5** adds runtime guard  
+
+#### A4 files (expected)
+
+`workflow_engine.cpp`, `executive_controller.cpp` (context injection plumbing only if needed), `run_episodic_learning_benchmark.cpp`, `tests/unit_tests.cpp`, static audit script/test, `docs/E2_PROTOCOL.md`, `cursor_list.md` — **no** `rag.cpp` behavior change (**A5**)
+
+### Checkpoint A5 — Runtime guard (approved — subject to revision, **v2**)
+
+**Expert verdict:** Approved — architecturally complete. v2 resolves A3→A4→A5 transition, failure-domain separation, guard contract, signal precedence, defense-in-depth rationale, observable golden regression, and blast radius — **without expanding scope**. Plan may be revised before or during implementation.
+
+**One-sentence definition:** A5 adds a **tier-3 diagnostic fuse** at heuristic retrieval entry points so that if STRICT execution is **accidentally routed** into heuristic retrieval, the system **fails immediately** rather than silently continuing.
+
+**Single proof obligation (unchanged):**
+
+> If STRICT execution is accidentally routed into heuristic retrieval, does the system fail immediately rather than silently continuing?
+
+**Do not add to A5:** retrieval redesign; Executive wiring; scoring; benchmark authority; `e2_outcome`; ranking work; integration work (Phase C).
+
+**Explicitly not A5:** proving Executive wiring is correct (A4); kernel retrieval (A3); official scoring (Phase B).
+
+**Purpose:** **Defense-in-depth fuse** — protects against bypass or **regression of A4**, not a new retrieval algorithm. The guard **detects** architectural violations; it **never redirects, repairs, or substitutes** kernel retrieval.
+
+#### A5.0 — Architectural timeline: A3 → A4 → A5
+
+| Phase | Executive under STRICT eval | Heuristic retrieval under STRICT |
+|-------|----------------------------|----------------------------------|
+| **A3** | May run for **harness continuity**; Executive retrieval **ignored** for STRICT evaluation | Not authoritative; kernel boundary is truth |
+| **A4** | **Wired directly** to `e2StrictRetrieve()` — continuity pattern **retired** | Must not be invoked on happy path |
+| **A5** | (A4 unchanged) | **Any reach = architectural regression** — guard enforces hard fail |
+
+**No runtime carve-out** for pre-A4 A3 continuity. After A4 lands, heuristic retrieval under STRICT is always a wiring defect — A5 makes that defect **observable and fatal**.
+
+#### A5.0a — Two failure domains (intentional)
+
+| Domain | Checkpoint | Behavior | Example statuses / signals |
+|--------|------------|----------|----------------------------|
+| **Operational retrieval failure** | A3+ kernel / boundary | Expected typed outcomes within STRICT lab function | `FAILED_RETRIEVAL`, `FAILED_PROVENANCE`, `FAILED_STRICT_BOUNDARY` |
+| **Architectural invariant violation** | A5 runtime guard | Broken wiring — **not** a retrieval result | Hard abort/throw; `LINK:RUNTIME_HEURISTIC` |
+
+These domains are **deliberately different**. Guard trips are **not** retrieval failures and must not be mapped to `FAILED_*` arm scoring as if the kernel ran.
+
+#### A5.0b — Runtime guard contract (architectural)
+
+| Contract element | Specification |
+|------------------|---------------|
+| **Where** | At heuristic retrieval **entry point(s)** — minimum: `RAGPipeline::retrieveRelevant` (`rag.cpp`); additional sites only if protocol documents reachable leakage |
+| **What it inspects** | **Authoritative execution/evaluation context** — propagated `E2EvalConfig::tier` (or equivalent plan/arm context object) |
+| **How STRICT is identified** | `E2EvalTier::STRICT` on that authoritative context — same signal A4 dispatch uses |
+| **Env vars** | **`THOTH_*` alone are never authoritative** — may exist for harness convenience; must not arm guard without context tier |
+| **On violation** | Immediate hard failure — **detect only**; no redirect to kernel, no repair, no partial heuristic results |
+| **On NON-STRICT** | Guard **silent** — heuristic retrieval proceeds unchanged |
+
+No implementation detail beyond this contract in the checkpoint plan.
+
+#### A5.0c — Signal precedence
+
+| Layer | Role |
+|-------|------|
+| **Compile-time** (`e2_eval_kernel`, no `rag.cpp` in kernel TUs) | Determines **available capabilities** — heuristics not in eval kernel |
+| **Runtime context** (`E2EvalConfig::tier` on execution context) | Determines **requested retrieval mode** for this arm/plan/step |
+| **Contradictory combination** (STRICT context + heuristic entry reached) | **Architectural configuration error** — fail closed via guard; not silent fallback |
+
+Compile-time and runtime answer **different questions**. Both must agree for a healthy STRICT run; mismatch at heuristic entry is A5's domain.
+
+#### A5.0d — Why A5 is not redundant with A4
+
+| Layer | Purpose | A5 relationship |
+|-------|---------|-----------------|
+| **Compile-time exclusion** | Prevent incorrect binary composition | Unchanged by A5 |
+| **Static dispatch audit (A4)** | Verify intended dispatch path | A5 catches **bypass/regression of** A4 at runtime |
+| **Runtime guard (A5)** | Detect architectural regressions **during execution** | Independent fuse — same philosophy as protocol § Enforcement philosophy |
+
+A4 proves the happy path is wired correctly. A5 ensures a later change cannot **silently** route STRICT into heuristics without detection.
+
+#### A5.0e — Core invariants (preserve all prior strengths)
+
+1. **Diagnostic only** — never redirects, repairs, or substitutes execution.  
+2. **No silent fallback** — STRICT uses `e2StrictRetrieve()` or fails immediately; never degrades to heuristic retrieval.  
+3. **Guard ≠ success path** — golden A4 runs complete **without** guard violation (observable — see A5.4).  
+4. **NON-STRICT preserved** — heuristic retrieval still works when tier is not STRICT (E2-11 smoke).  
+5. **A2 + A3 + A4 invariants preserved** — guard is additive only.  
+6. **`official_scoring: false`**, no `e2_outcome`.
+
+#### A5.0f — Blast radius (architectural)
+
+**A5 is the first Phase A checkpoint that modifies production heuristic retrieval (`rag.cpp`).**
+
+Therefore:
+
+- Change must be **intentionally minimal** — only the runtime guard contract (A5.0b).  
+- **No other retrieval behavior** should change under NON-STRICT.  
+- Review focus: **isolation of the guard** — not retrieval algorithm, ranking, or Executive dispatch.
+
+#### A5.1 — Implementation scope (minimal)
+
+Add guard contract (A5.0b) at documented entry point(s) only. Minimal context plumbing **only if** A4 did not already propagate authoritative tier to heuristic layer. **Do not** re-open A4 dispatch design.
+
+#### A5.2 — Harness branch
+
+```
+THOTH_E2_WIRING_STAGE unset → default "A5" (after A5 lands)
+
+A4:  executive → e2StrictRetrieve(); equivalence proven; A3 continuity retired
+A5:  same as A4 + guard live
+     NO evaluateEpisodicLearningCase; NO e2_outcome
+SCORING: legacy dev knob — never authoritative
+```
+
+#### A5.3 — Gate contract (harness)
+
+| Field | A5 value |
+|-------|----------|
+| `official_scoring` | `false` |
+| `scoring_enabled` | `false` |
+| `retrieval_enabled` | `true` |
+| `evaluation_boundary_verified` | `true` |
+| `executive_strict_retrieval` | `true` (from A4) |
+| `runtime_heuristic_guard` | `true` |
+| `wiring_stage` | `"A5"` |
+| `e2_outcome` | **not emitted** |
+
+#### A5.4 — E2-11 and observable golden regression
+
+| Category | Asserts | Observable success criterion |
+|----------|---------|------------------------------|
+| **STRICT miswire (positive)** | Intentional heuristic invocation under STRICT eval context | Process **hard-fails** (abort/throw) — test catches failure; no heuristic chunks returned |
+| **NON-STRICT heuristic works** | Heuristic path without STRICT context | Retrieval **completes with results** — not merely absence of abort |
+| **Golden regression (falsifiable)** | E2-01–E2-10 on correct A4 wiring | Tests **exit 0 / pass** — normal completion **without** guard violation. Guard trip would cause hard fail → test failure. **No new spies/counters required** unless already present |
+| **No silent fallback** | Review + negative STRICT miswire test | STRICT never returns heuristic chunks without guard or kernel |
+
+**Does not assert:** lift, `e2_outcome`, benchmark authority, exhaustive production coverage.
+
+#### A5.5 — Exit criteria (stop before Phase B)
+
+1. Build green  
+2. **E2-11** passes (STRICT miswire hard-fail + NON-STRICT heuristic smoke)  
+3. **Prior regression suite green** — E2-01–E2-10 + A4 equivalence tests  
+4. **Golden STRICT regression completes without guard trip** — observable as normal test pass (falsifiable: trip → hard fail → suite red)  
+5. **Runtime guard rejects** intentional heuristic invocation under STRICT context  
+6. **No behavioral changes outside the guard** — NON-STRICT heuristic retrieval unchanged (review + E2-11)  
+7. A3→A4 transition documented; **no carve-out** for retired A3 continuity  
+8. Signal precedence + failure domains documented (`E2_PROTOCOL.md` + this section)  
+9. A2 + A3 + A4 invariants preserved  
+10. **Pause for confirmation** — Phase B re-baseline next  
+
+**Time estimate:** **30–60 minutes**.
+
+#### A5 files (expected)
+
+`rag.cpp` (guard only), minimal context plumbing if required, `tests/unit_tests.cpp`, `docs/E2_PROTOCOL.md`, `cursor_list.md` — **no** changes to `e2StrictRetrieve`, executive dispatch, scoring loop, or non-guard heuristic behavior
+
+### Phase B — STRICT re-baseline (reference — not Phase A)
+
+**Authorizes scoring only after A4 proves retrieval equivalence between the Executive and the evaluation harness.** Phase B is the single switch where `official_scoring: true` and authoritative `e2_outcome` begin — not A3, not A4, not A5.
 
 ### Separation debt (acknowledged)
 
