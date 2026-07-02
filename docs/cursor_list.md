@@ -191,8 +191,8 @@ Do **not** use fake `FAILED_*` to mean "not wired yet" — that conflates system
 | `A1` | Builder-only diagnostic (opt-in regression after A2 lands) | ✅ Checkpoint |
 | `A2` | Consolidation decoupled; arm plumbing smoke; evaluation-disabled | ✅ Checkpoint |
 | `A3` | Kernel retrieval consumes sealed log; boundary provenance verified; **not** official scoring | ✅ Checkpoint |
-| `A4` | Context injection + single dispatch + executive → same `e2StrictRetrieve()`; full equivalence; **not** official scoring | ✅ Checkpoint |
-| `A5` | Diagnostic fuse; post-A4 regression enforcement; guard-only `rag.cpp` change; **not** official scoring | ✅ Checkpoint |
+| `A4` | Context injection + single dispatch + executive → same `e2StrictRetrieve()`; full equivalence; **not** official scoring | ✅ 2026-07-02 |
+| `A5` | Diagnostic fuse; post-A4 regression enforcement; guard-only `rag.cpp` change; **not** official scoring | ✅ 2026-07-02 — E2-11; `runtime_heuristic_guard` |
 | *(unset after A5)* | Defaults to current checkpoint; Phase B next | ✅ |
 | `SCORING` | **Temporary dev knob only** — legacy full loop. **Must not exist in any authoritative benchmark configuration** (Phase B re-baseline, publication, CI nightly). Not protocol. | ❌ Internal dev only |
 
@@ -220,10 +220,10 @@ See **`docs/E2_PROTOCOL.md` § STRICT retrieval boundary** for the canonical dia
 | **0** | Embedding pin `\u0002` fix + semantic validation + regression test | ✅ 2026-07-01 |
 | **5.0** | Wiring contract + gate priority in `E2_PROTOCOL.md` | Doc only |
 | **A1** | STRICT sealed log builder from case table | ✅ 2026-07-02 — **E2-08**; `buildStrictInjectionLogFromCaseTable`; evaluation-disabled harness |
-| **A2** | Remove `plantAndConsolidate` from STRICT path; scope-limits doc | See **§ Checkpoint A2** — **E2-09**; Option A test discipline |
-| **A3** | `e2StrictRetrieve()` + boundary provenance; layer ownership contract | **E2-10**; `retrieval_enabled: true`; purity verified; **not** official scoring |
+| **A2** | Remove `plantAndConsolidate` from STRICT path; scope-limits doc | ✅ 2026-07-02 — **E2-09** + **E2-09b**; Option A test discipline |
+| **A3** | `e2StrictRetrieve()` + boundary provenance; layer ownership contract | ✅ 2026-07-02 — **E2-10**; `retrieval_enabled: true`; purity verified; **not** official scoring. **Close-out:** token-overlap episode gating + **provisional 0.25 threshold** documented in `E2_PROTOCOL.md` § STRICT kernel scoring (A3) |
 | **A4** | Executive delegates to same `e2StrictRetrieve()`; context injection + single dispatch + full equivalence | E2-01–E2-07; static dispatch audit + golden-case runtime proof |
-| **A5** | Diagnostic fuse; A3→A4 transition enforced; failure-domain separation; first `rag.cpp` touch (guard only) | **E2-11** |
+| **A5** | Diagnostic fuse; A3→A4 transition enforced; failure-domain separation; first `rag.cpp` touch (guard only) | ✅ 2026-07-02 — **E2-11** |
 | **B** | STRICT re-baseline (after 0 + A1–A5) | Authoritative SUCCESS/FAILURE **only after A4 proves harness–executive retrieval equivalence** |
 | **C** | `--tier integration` + E2-06 + `completed_improvements_log.md` close-out | INTEGRATION non-scoring |
 
@@ -608,11 +608,11 @@ SCORING: legacy dev knob — never authoritative
 
 Does **not** assert: executive `COMPLETED`, lift, `testE2CaseById`, harness `e2_outcome`.
 
-**If E2-10 retrieval cases fail due to ranking:** document — **do not** expand A3 scope unless demonstration is impossible.
+**If E2-10 retrieval cases fail due to ranking:** document — **do not** expand A3 scope unless demonstration is impossible. **A3 landed:** episode gating uses deterministic token overlap (not embeddings) for purity; see **`E2_PROTOCOL.md` § STRICT kernel scoring (A3)**. Threshold **0.25 is provisional** (v1.2 trio gap ~0.17 vs ~0.83) — revisit at B1 or v1.3.
 
 #### A3.6 — Protocol doc (`E2_PROTOCOL.md`)
 
-§ STRICT retrieval boundary, § Kernel ownership, A3 scope-limit sentence. Add layer ownership diagram/table if not already present.
+§ STRICT retrieval boundary, § Kernel ownership, § **STRICT kernel scoring (A3)**, A3 scope-limit sentence. Layer ownership diagram/table present under § STRICT retrieval boundary / Kernel ownership.
 
 #### A3.7 — Exit criteria (stop before A4)
 

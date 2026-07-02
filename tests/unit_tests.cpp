@@ -57,6 +57,8 @@
 #include "episodic_learning_cases.h"
 #include "episodic_learning_eval.h"
 #include "e2_strict_enforcement.h"
+#include "e2_strict_retrieval.h"
+#include "workflow_engine.h"
 #include <json.hpp>
 
 namespace fs = std::filesystem;
@@ -3800,25 +3802,30 @@ static bool testG1dTrajectoryAblationSmoke() {
     return true;
 }
 
-static bool e2PlantAndConsolidate(Memory& memory,
-                                  EmbeddingEngine* engine,
-                                  const std::string& sessionId,
-                                  const std::string& plantMessage) {
-    memory.configureConsolidation(nullptr, engine);
-    memory.setActiveSessionId(sessionId);
-    memory.addMessage("user", plantMessage);
-    for (int i = 1; i < 60; ++i) {
-        memory.addMessage("user", "filler turn " + std::to_string(i));
-    }
-    return !memory.getRecentWarmMemory(1).empty();
+static Thoth::E2EvalConfig makeE2StrictTestConfig() {
+    Thoth::E2EvalConfig cfg;
+    cfg.tier = Thoth::E2EvalTier::STRICT;
+    cfg.versions.corpus_snapshot_id = "e2-test-corpus";
+    cfg.versions.model_version_or_weights_hash = "mock";
+    cfg.versions.embedding_model_version = "TfIdf:2";
+    cfg.versions.retrieval_engine_version = Thoth::kE2StrictRetrievalEngineVersion;
+    return cfg;
 }
 
 static Thoth::EpisodicLearningArmObservation runE2TestArm(
     const Thoth::EpisodicLearningCase& spec,
     const std::string& armLabel,
-    const Thoth::BenchmarkAttribution& attribution) {
+    const Thoth::BenchmarkAttribution& attribution,
+    Thoth::SealedEpisodeInjectionLog* sealedLogOut = nullptr) {
     setenv("THOTH_MOCK_EPISODIC", "1", 1);
     setenv("THOTH_MOCK_LLM", "true", 1);
+
+    constexpr std::int64_t kBuilderTs = 1'700'000'000'000LL;
+    const Thoth::SealedEpisodeInjectionLog sealedLog =
+        Thoth::buildStrictInjectionLogFromCaseTable(spec, armLabel, kBuilderTs);
+    if (sealedLogOut) {
+        *sealedLogOut = sealedLog;
+    }
 
     Config cfg;
     cfg.max_reflections = 0;
@@ -3830,31 +3837,24 @@ static Thoth::EpisodicLearningArmObservation runE2TestArm(
     auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
     EmbeddingEngine* enginePtr = engine.get();
 
-    const bool needsPlant =
-        !spec.plant_message.empty() &&
-        (spec.cold_arm_pre_consolidated || armLabel == "warm");
-    if (needsPlant) {
-        e2PlantAndConsolidate(*memory, enginePtr, spec.plant_session_id, spec.plant_message);
-    }
+    (void)sealedLog;
 
     auto idx = new IndexManager(enginePtr);
     if (!spec.index_distractor_text.empty()) {
-        CodeChunk distractor;
-        distractor.code = spec.index_distractor_text;
-        distractor.fileName = "e2-distractor.md";
-        distractor.embedding = enginePtr->embed(distractor.code);
-        idx->addChunkToIndex(std::move(distractor));
+        Thoth::addEpisodicEvalCorpusChunk(enginePtr, idx, spec.index_distractor_text);
     }
 
     auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
 
-    Thoth::EpisodicRetrievalProvenance retrievalProv;
     rag->setEventCallback([&](const ControllerEvent& ev) { (void)ev; });
+
+    const Thoth::E2EvalConfig strictConfig = makeE2StrictTestConfig();
 
     auto planner = std::make_shared<Thoth::EpisodicLearningMockPlanner>(spec.validation_token);
     auto registry = std::make_shared<ToolRegistry>();
     Thoth::ExecutiveController controller(planner, registry, rag, memory);
     controller.set_max_reflections(0);
+    controller.set_e2_strict_eval_context(&sealedLog, &strictConfig);
     memory->setActiveSessionId(spec.id + "-" + armLabel + "-goal");
 
     std::atomic<bool> terminal{false};
@@ -3875,14 +3875,21 @@ static Thoth::EpisodicLearningArmObservation runE2TestArm(
 
     Thoth::EpisodicLearningArmObservation obs;
     obs.arm_label = armLabel;
-    for (const auto& step : controller.get_current_plan().steps) {
-        if (step.type == StepType::RETRIEVAL && !step.result.is_null()) {
-            retrievalProv =
-                Thoth::provenanceFromRetrievalStepResult(step.result, spec.expectations);
-            break;
-        }
+
+    const bool episodicRequired =
+        Thoth::strictEpisodicContentRequired(spec, armLabel);
+    if (const auto execResult =
+            Thoth::executiveStrictRetrievalFromPlan(controller.get_current_plan())) {
+        obs.retrieval = Thoth::provenanceFromStrictRetrievalResult(
+            *execResult, spec.expectations, episodicRequired);
+        obs.arm_scoring_status = obs.retrieval.arm_scoring_status;
+    } else {
+        obs.retrieval.arm_scoring_status = Thoth::E2ArmScoringStatus::FAILED_RETRIEVAL;
+        obs.arm_scoring_status = Thoth::E2ArmScoringStatus::FAILED_RETRIEVAL;
     }
-    obs.retrieval = retrievalProv;
+
+    controller.clear_e2_strict_eval_context();
+
     switch (controller.get_state()) {
         case Thoth::ControllerState::COMPLETED:
             obs.terminal_state = "COMPLETED";
@@ -3900,16 +3907,6 @@ static Thoth::EpisodicLearningArmObservation runE2TestArm(
 
     fs::remove(cfg.database_path);
     return obs;
-}
-
-static Thoth::E2EvalConfig makeE2StrictTestConfig() {
-    Thoth::E2EvalConfig cfg;
-    cfg.tier = Thoth::E2EvalTier::STRICT;
-    cfg.versions.corpus_snapshot_id = "e2-test-corpus";
-    cfg.versions.model_version_or_weights_hash = "mock";
-    cfg.versions.embedding_model_version = "TfIdf:2";
-    cfg.versions.retrieval_engine_version = Thoth::kE2StrictRetrievalEngineVersion;
-    return cfg;
 }
 
 static std::optional<Thoth::EpisodicLearningCase> findEpisodicCaseById(const std::string& id) {
@@ -4133,6 +4130,667 @@ static bool testE2TableDrivenEvaluator() {
     return true;
 }
 
+static bool testE2A2StrictArmNoPlantSourceContract() {
+    FileHandler fh;
+    const fs::path harnessPath = fs::path(fh.getProjectRoot()) / "external" / "basic_agent" /
+                                 "src" / "run_episodic_learning_benchmark.cpp";
+    std::ifstream in(harnessPath);
+    if (!in.is_open()) {
+        std::cerr << "testE2A2StrictArmNoPlantSourceContract: cannot read harness source\n";
+        return false;
+    }
+
+    const std::string source((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+
+    const auto runCaseArmPos = source.find("E2CaseArmPlumbingResult runCaseArm");
+    if (runCaseArmPos == std::string::npos) {
+        std::cerr << "testE2A2StrictArmNoPlantSourceContract: runCaseArm not found\n";
+        return false;
+    }
+
+    const auto mainPos = source.find("\nint main()", runCaseArmPos);
+    const std::size_t runCaseArmEnd =
+        mainPos == std::string::npos ? source.size() : mainPos;
+    const std::string runCaseArmBody =
+        source.substr(runCaseArmPos, runCaseArmEnd - runCaseArmPos);
+
+    if (runCaseArmBody.find("plantAndConsolidate") != std::string::npos) {
+        std::cerr << "testE2A2StrictArmNoPlantSourceContract: runCaseArm still calls "
+                     "plantAndConsolidate\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testE2A2SealedLogOwnership() {
+    constexpr std::int64_t kBuilderTs = 1'700'000'000'000LL;
+    const auto e201 = findEpisodicCaseById("E2-01");
+    const auto e203 = findEpisodicCaseById("E2-03");
+    if (!e201 || !e203) {
+        std::cerr << "testE2A2SealedLogOwnership: missing golden cases\n";
+        return false;
+    }
+
+    Thoth::BenchmarkAttribution attr{"e2-ownership-run", "e2-ownership-env"};
+
+    int builderCalls = 0;
+    Thoth::setStrictInjectionLogBuilderCallCounterForTests(&builderCalls);
+
+    Thoth::SealedEpisodeInjectionLog armLog;
+    runE2TestArm(*e201, "warm", attr, &armLog);
+
+    Thoth::clearStrictInjectionLogBuilderCallCounterForTests();
+
+    if (builderCalls != 1) {
+        std::cerr << "testE2A2SealedLogOwnership: expected one builder call, got "
+                  << builderCalls << '\n';
+        return false;
+    }
+
+    const std::string standalone =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs).toJson().dump();
+    if (armLog.toJson().dump() != standalone) {
+        std::cerr << "testE2A2SealedLogOwnership: arm log not byte-identical to standalone "
+                     "builder\n";
+        return false;
+    }
+
+    const std::string coldStandalone =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e203, "cold", kBuilderTs).toJson().dump();
+    Thoth::SealedEpisodeInjectionLog coldArmLog;
+    builderCalls = 0;
+    Thoth::setStrictInjectionLogBuilderCallCounterForTests(&builderCalls);
+    runE2TestArm(*e203, "cold", attr, &coldArmLog);
+    Thoth::clearStrictInjectionLogBuilderCallCounterForTests();
+
+    if (builderCalls != 1) {
+        std::cerr << "testE2A2SealedLogOwnership: E2-03 cold expected one builder call\n";
+        return false;
+    }
+    if (coldArmLog.toJson().dump() != coldStandalone) {
+        std::cerr << "testE2A2SealedLogOwnership: E2-03 cold arm log mismatch\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testE2A2HarnessWiringSmoke() {
+    const auto e201 = findEpisodicCaseById("E2-01");
+    if (!e201) {
+        std::cerr << "testE2A2HarnessWiringSmoke: missing E2-01\n";
+        return false;
+    }
+
+    constexpr std::int64_t kBuilderTs = 1'700'000'000'000LL;
+    const std::string expectedWarmLog =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs).toJson().dump();
+
+    Thoth::BenchmarkAttribution attr{"e2-a2-smoke-run", "e2-a2-smoke-env"};
+    Thoth::SealedEpisodeInjectionLog warmArmLog;
+    const auto warmObs = runE2TestArm(*e201, "warm", attr, &warmArmLog);
+
+    if (warmArmLog.toJson().dump() != expectedWarmLog) {
+        std::cerr << "testE2A2HarnessWiringSmoke: warm sealed log mismatch vs A1 builder\n";
+        return false;
+    }
+
+    if (warmObs.arm_label != "warm") {
+        std::cerr << "testE2A2HarnessWiringSmoke: unexpected arm label\n";
+        return false;
+    }
+
+    return true;
+}
+
+struct E2RetrievalTestFixture {
+    Config cfg;
+    std::unique_ptr<EmbeddingEngine> engine;
+    std::unique_ptr<IndexManager> idx;
+
+    explicit E2RetrievalTestFixture(const Thoth::EpisodicLearningCase& spec) {
+        cfg.max_reflections = 0;
+        cfg.database_path = makeTempPath("e2_strict_retrieval").string();
+        engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+        idx = std::make_unique<IndexManager>(engine.get());
+        if (!spec.index_distractor_text.empty()) {
+            Thoth::addEpisodicEvalCorpusChunk(engine.get(), idx.get(), spec.index_distractor_text);
+        }
+    }
+};
+
+static Thoth::E2StrictRetrievalResult runStrictKernelArm(
+    const Thoth::EpisodicLearningCase& spec,
+    const std::string& armLabel,
+    const Thoth::SealedEpisodeInjectionLog& sealedLog,
+    E2RetrievalTestFixture& fixture) {
+    Thoth::E2StrictRetrievalInput input;
+    input.query = spec.goal;
+    input.episode_log = &sealedLog;
+    input.config = makeE2StrictTestConfig();
+    input.index = fixture.idx.get();
+    input.engine = fixture.engine.get();
+    input.top_k = 5;
+    return Thoth::e2StrictRetrieve(input);
+}
+
+static bool strictKernelHasEpisodicHit(const Thoth::E2StrictRetrievalResult& retrieval,
+                                       const Thoth::EpisodicLearningCase& spec,
+                                       const std::string& armLabel) {
+    const bool episodicRequired =
+        Thoth::strictEpisodicContentRequired(spec, armLabel);
+    const auto prov = Thoth::provenanceFromStrictRetrievalResult(
+        retrieval, spec.expectations, episodicRequired);
+    return prov.warm_retrieval_hit;
+}
+
+static bool testE2StrictRetrievalKernel() {
+    constexpr std::int64_t kBuilderTs = 1'700'000'000'000LL;
+
+    const auto e201 = findEpisodicCaseById("E2-01");
+    const auto e202 = findEpisodicCaseById("E2-02");
+    const auto e203 = findEpisodicCaseById("E2-03");
+    if (!e201 || !e202 || !e203) {
+        std::cerr << "testE2StrictRetrievalKernel: missing golden cases\n";
+        return false;
+    }
+
+    // --- Retrieval (E2-01 / E2-02 / E2-03) ---
+    {
+        E2RetrievalTestFixture fixture(*e201);
+        const auto warmLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs);
+        const auto coldLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e201, "cold", kBuilderTs);
+
+        const auto warmRetrieval = runStrictKernelArm(*e201, "warm", warmLog, fixture);
+        const auto coldRetrieval = runStrictKernelArm(*e201, "cold", coldLog, fixture);
+
+        if (warmRetrieval.status != Thoth::E2ArmScoringStatus::OK) {
+            std::cerr << "testE2StrictRetrievalKernel: E2-01 warm retrieval failed\n";
+            return false;
+        }
+        if (!strictKernelHasEpisodicHit(warmRetrieval, *e201, "warm")) {
+            std::cerr << "testE2StrictRetrievalKernel: E2-01 warm expected Apollo hit\n";
+            return false;
+        }
+        if (strictKernelHasEpisodicHit(coldRetrieval, *e201, "cold")) {
+            std::cerr << "testE2StrictRetrievalKernel: E2-01 cold should not hit Apollo\n";
+            return false;
+        }
+    }
+
+    {
+        E2RetrievalTestFixture fixture(*e202);
+        const auto warmLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e202, "warm", kBuilderTs);
+        const auto warmRetrieval = runStrictKernelArm(*e202, "warm", warmLog, fixture);
+        if (!strictKernelHasEpisodicHit(warmRetrieval, *e202, "warm")) {
+            std::cerr << "testE2StrictRetrievalKernel: E2-02 warm expected hit\n";
+            return false;
+        }
+    }
+
+    {
+        E2RetrievalTestFixture fixture(*e203);
+        const auto warmLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e203, "warm", kBuilderTs);
+        const auto coldLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e203, "cold", kBuilderTs);
+        const auto warmRetrieval = runStrictKernelArm(*e203, "warm", warmLog, fixture);
+        const auto coldRetrieval = runStrictKernelArm(*e203, "cold", coldLog, fixture);
+        if (strictKernelHasEpisodicHit(warmRetrieval, *e203, "warm") ||
+            strictKernelHasEpisodicHit(coldRetrieval, *e203, "cold")) {
+            std::cerr << "testE2StrictRetrievalKernel: E2-03 expected no episodic Apollo hit\n";
+            return false;
+        }
+    }
+
+    // --- Boundary mapping ---
+    {
+        E2RetrievalTestFixture fixture(*e201);
+        const auto warmLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs);
+        const auto retrieval = runStrictKernelArm(*e201, "warm", warmLog, fixture);
+        const auto prov = Thoth::provenanceFromStrictRetrievalResult(
+            retrieval, e201->expectations,
+            Thoth::strictEpisodicContentRequired(*e201, "warm"));
+        if (prov.chunks.size() != retrieval.chunks.size()) {
+            std::cerr << "testE2StrictRetrievalKernel: boundary chunk count mismatch\n";
+            return false;
+        }
+        if (prov.arm_scoring_status != Thoth::E2ArmScoringStatus::OK) {
+            std::cerr << "testE2StrictRetrievalKernel: boundary status not OK\n";
+            return false;
+        }
+    }
+
+    // --- Fail-closed ---
+    {
+        E2RetrievalTestFixture fixture(*e201);
+        const auto sealedLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs);
+
+        Thoth::SealedEpisodeInjectionLog unsealed;
+        Thoth::EpisodeInjectionEntry entry;
+        entry.episode_id = "x";
+        entry.source = "evaluation";
+        entry.content = "y";
+        entry.content_hash = "z";
+        entry.injected_at_ms = kBuilderTs;
+        unsealed.append(std::move(entry));
+
+        Thoth::E2StrictRetrievalInput input;
+        input.query = e201->goal;
+        input.episode_log = &unsealed;
+        input.config = makeE2StrictTestConfig();
+        input.index = fixture.idx.get();
+        input.engine = fixture.engine.get();
+        input.top_k = 5;
+        const auto unsealedResult = Thoth::e2StrictRetrieve(input);
+        if (unsealedResult.status != Thoth::E2ArmScoringStatus::FAILED_STRICT_BOUNDARY) {
+            std::cerr << "testE2StrictRetrievalKernel: unsealed log should fail boundary\n";
+            return false;
+        }
+
+        Thoth::E2EvalConfig integration = Thoth::E2EvalConfig::integrationDefaults();
+        integration.versions = makeE2StrictTestConfig().versions;
+        input.config = integration;
+        input.episode_log = &sealedLog;
+        const auto tierResult = Thoth::e2StrictRetrieve(input);
+        if (tierResult.status != Thoth::E2ArmScoringStatus::FAILED_STRICT_BOUNDARY) {
+            std::cerr << "testE2StrictRetrievalKernel: non-STRICT tier should fail boundary\n";
+            return false;
+        }
+
+        input.config = makeE2StrictTestConfig();
+        input.top_k = 0;
+        const auto badTopK = Thoth::e2StrictRetrieve(input);
+        if (badTopK.status != Thoth::E2ArmScoringStatus::FAILED_RETRIEVAL ||
+            !badTopK.chunks.empty()) {
+            std::cerr << "testE2StrictRetrievalKernel: invalid top_k should fail closed\n";
+            return false;
+        }
+    }
+
+    // --- Determinism (pre-built sealed log; no builder re-invoke) ---
+    {
+        E2RetrievalTestFixture fixture(*e201);
+        const Thoth::SealedEpisodeInjectionLog fixedLog =
+            Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", kBuilderTs);
+        const auto first = runStrictKernelArm(*e201, "warm", fixedLog, fixture);
+        const auto second = runStrictKernelArm(*e201, "warm", fixedLog, fixture);
+        if (first.status != second.status || first.chunks.size() != second.chunks.size()) {
+            std::cerr << "testE2StrictRetrievalKernel: determinism status/count mismatch\n";
+            return false;
+        }
+        for (std::size_t i = 0; i < first.chunks.size(); ++i) {
+            if (first.chunks[i].chunk_id != second.chunks[i].chunk_id) {
+                std::cerr << "testE2StrictRetrievalKernel: determinism chunk order mismatch\n";
+                return false;
+            }
+        }
+    }
+
+    // --- Purity source contract ---
+    {
+        FileHandler fh;
+        const fs::path kernelPath = fs::path(fh.getProjectRoot()) / "external" / "basic_agent" /
+                                    "src" / "e2_strict_retrieval.cpp";
+        std::ifstream in(kernelPath);
+        if (!in.is_open()) {
+            std::cerr << "testE2StrictRetrievalKernel: cannot read kernel source\n";
+            return false;
+        }
+        const std::string kernelSource((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+        if (kernelSource.find("executive_controller") != std::string::npos ||
+            kernelSource.find("RAGPipeline") != std::string::npos ||
+            kernelSource.find("memory.h") != std::string::npos ||
+            kernelSource.find("sqlite") != std::string::npos) {
+            std::cerr << "testE2StrictRetrievalKernel: kernel purity violation in source\n";
+            return false;
+        }
+    }
+
+    // --- Harness STRICT boundary must not use executive provenance ---
+    {
+        FileHandler fh;
+        const fs::path harnessPath = fs::path(fh.getProjectRoot()) / "external" / "basic_agent" /
+                                     "src" / "run_episodic_learning_benchmark.cpp";
+        std::ifstream in(harnessPath);
+        const std::string source((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
+        const auto pos = source.find("E2CaseArmPlumbingResult runCaseArm");
+        const auto end = source.find("\nint main()", pos);
+        const std::string body = source.substr(pos, end - pos);
+        if (body.find("provenanceFromRetrievalStepResult") != std::string::npos) {
+            std::cerr << "testE2StrictRetrievalKernel: runCaseArm still uses executive "
+                         "provenance helper\n";
+            return false;
+        }
+        if (body.find("provenanceFromStrictRetrievalResult") == std::string::npos) {
+            std::cerr << "testE2StrictRetrievalKernel: runCaseArm missing strict boundary mapper\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool testE2ExecutiveStrictEquivalence() {
+    constexpr std::int64_t kBuilderTs = 1'700'000'000'000LL;
+
+    const auto e201 = findEpisodicCaseById("E2-01");
+    const auto e202 = findEpisodicCaseById("E2-02");
+    const auto e203 = findEpisodicCaseById("E2-03");
+    if (!e201 || !e202 || !e203) {
+        std::cerr << "testE2ExecutiveStrictEquivalence: missing golden cases\n";
+        return false;
+    }
+
+    Thoth::BenchmarkAttribution attr{"e2-a4-equiv-run", "e2-a4-equiv-env"};
+
+    for (const auto* spec : {&*e201, &*e202, &*e203}) {
+        for (const char* armLabel : {"cold", "warm"}) {
+            const Thoth::SealedEpisodeInjectionLog sealedLog =
+                Thoth::buildStrictInjectionLogFromCaseTable(*spec, armLabel, kBuilderTs);
+            E2RetrievalTestFixture fixture(*spec);
+            const auto harnessResult = runStrictKernelArm(*spec, armLabel, sealedLog, fixture);
+
+            setenv("THOTH_MOCK_EPISODIC", "1", 1);
+            setenv("THOTH_MOCK_LLM", "true", 1);
+
+            Config cfg;
+            cfg.max_reflections = 0;
+            cfg.database_path =
+                makeTempPath("e2_a4_exec_" + spec->id + "_" + armLabel).string();
+            fs::remove(cfg.database_path);
+
+            auto memory = std::make_shared<Memory>(cfg);
+            auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+            auto idx = new IndexManager(engine.get());
+            if (!spec->index_distractor_text.empty()) {
+                Thoth::addEpisodicEvalCorpusChunk(
+                    engine.get(), idx, spec->index_distractor_text);
+            }
+
+            auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+            const Thoth::E2EvalConfig strictConfig = makeE2StrictTestConfig();
+            auto planner =
+                std::make_shared<Thoth::EpisodicLearningMockPlanner>(spec->validation_token);
+            auto registry = std::make_shared<ToolRegistry>();
+            Thoth::ExecutiveController controller(planner, registry, rag, memory);
+            controller.set_max_reflections(0);
+            controller.set_e2_strict_eval_context(&sealedLog, &strictConfig);
+            memory->setActiveSessionId(spec->id + "-" + armLabel + "-goal");
+
+            std::atomic<bool> terminal{false};
+            controller.set_event_callback([&](const ControllerEvent& ev) {
+                if (ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_FAILED ||
+                    ev.type == EventType::PLAN_ABORTED) {
+                    terminal.store(true);
+                }
+            });
+            controller.execute_goal(spec->goal, attr);
+
+            int timeout = 150;
+            while (!terminal.load() && timeout > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                --timeout;
+            }
+
+            const auto execResult =
+                Thoth::executiveStrictRetrievalFromPlan(controller.get_current_plan());
+            controller.clear_e2_strict_eval_context();
+            fs::remove(cfg.database_path);
+            delete idx;
+
+            if (!execResult) {
+                std::cerr << "testE2ExecutiveStrictEquivalence: missing executive result for "
+                          << spec->id << ' ' << armLabel << '\n';
+                return false;
+            }
+            if (!Thoth::e2StrictRetrievalResultsEquivalent(harnessResult, *execResult)) {
+                std::cerr << "testE2ExecutiveStrictEquivalence: mismatch " << spec->id << ' '
+                          << armLabel << " harness_status="
+                          << Thoth::e2ArmScoringStatusToString(harnessResult.status)
+                          << " executive_status="
+                          << Thoth::e2ArmScoringStatusToString(execResult->status) << '\n';
+                return false;
+            }
+        }
+    }
+
+    // Failure-path equivalence: unsealed log → FAILED_STRICT_BOUNDARY on both paths.
+    {
+        E2RetrievalTestFixture fixture(*e201);
+        Thoth::SealedEpisodeInjectionLog unsealed;
+        Thoth::EpisodeInjectionEntry entry;
+        entry.episode_id = "x";
+        entry.source = "evaluation";
+        entry.content = "y";
+        entry.content_hash = "z";
+        entry.injected_at_ms = kBuilderTs;
+        unsealed.append(std::move(entry));
+
+        Thoth::E2StrictRetrievalInput input;
+        input.query = e201->goal;
+        input.episode_log = &unsealed;
+        input.config = makeE2StrictTestConfig();
+        input.index = fixture.idx.get();
+        input.engine = fixture.engine.get();
+        input.top_k = 5;
+        const auto harnessResult = Thoth::e2StrictRetrieve(input);
+        if (harnessResult.status != Thoth::E2ArmScoringStatus::FAILED_STRICT_BOUNDARY) {
+            std::cerr << "testE2ExecutiveStrictEquivalence: unsealed harness expected boundary "
+                         "fail\n";
+            return false;
+        }
+
+        Config cfg;
+        cfg.max_reflections = 0;
+        cfg.database_path = makeTempPath("e2_a4_unsealed").string();
+        fs::remove(cfg.database_path);
+        auto memory = std::make_shared<Memory>(cfg);
+        auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+        auto idx = new IndexManager(engine.get());
+        auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+        const Thoth::E2EvalConfig strictConfig = makeE2StrictTestConfig();
+        auto planner = std::make_shared<Thoth::EpisodicLearningMockPlanner>(e201->validation_token);
+        auto registry = std::make_shared<ToolRegistry>();
+        Thoth::ExecutiveController controller(planner, registry, rag, memory);
+        controller.set_e2_strict_eval_context(&unsealed, &strictConfig);
+
+        PlanStep step;
+        step.step_id = "retrieve";
+        step.type = StepType::RETRIEVAL;
+        step.payload = {{"query", e201->goal}, {"top_k", 5}};
+
+        Thoth::StepExecutionContext ctx;
+        ctx.e2_strict_episode_log = &unsealed;
+        ctx.e2_eval_config = &strictConfig;
+
+        Thoth::WorkflowEngine workflow(registry, rag, memory, nullptr, nullptr);
+        const auto stepResult = workflow.executeStep(step, "plan", ctx);
+        delete idx;
+        fs::remove(cfg.database_path);
+
+        const auto execResult = Thoth::e2StrictRetrievalResultFromRetrievalStep(stepResult.data);
+        if (execResult.status != Thoth::E2ArmScoringStatus::FAILED_STRICT_BOUNDARY) {
+            std::cerr << "testE2ExecutiveStrictEquivalence: unsealed executive expected boundary "
+                         "fail\n";
+            return false;
+        }
+        if (!Thoth::e2StrictRetrievalResultsEquivalent(harnessResult, execResult)) {
+            std::cerr << "testE2ExecutiveStrictEquivalence: unsealed failure-path mismatch\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool testE2A4StaticDispatchAudit() {
+    FileHandler fh;
+    const fs::path workflowPath =
+        fs::path(fh.getProjectRoot()) / "external" / "basic_agent" / "src" / "workflow_engine.cpp";
+    std::ifstream in(workflowPath);
+    if (!in.is_open()) {
+        std::cerr << "testE2A4StaticDispatchAudit: cannot read workflow_engine.cpp\n";
+        return false;
+    }
+    const std::string source((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+
+    const auto fnPos = source.find("WorkflowEngine::executeRetrieval");
+    const auto fnEnd = source.find("\nStepResult WorkflowEngine::executeLLM", fnPos);
+    if (fnPos == std::string::npos || fnEnd == std::string::npos) {
+        std::cerr << "testE2A4StaticDispatchAudit: executeRetrieval body not found\n";
+        return false;
+    }
+    const std::string body = source.substr(fnPos, fnEnd - fnPos);
+
+    if (body.find("e2StrictRetrieve") == std::string::npos) {
+        std::cerr << "testE2A4StaticDispatchAudit: missing e2StrictRetrieve in executeRetrieval\n";
+        return false;
+    }
+    if (body.find("Single dispatch decision point") == std::string::npos) {
+        std::cerr << "testE2A4StaticDispatchAudit: missing dispatch invariant comment\n";
+        return false;
+    }
+
+    const auto strictBranch = body.find("E2EvalTier::STRICT");
+    const auto ragCall = body.find("ragPipeline_->retrieveRelevant", strictBranch);
+    if (strictBranch == std::string::npos || ragCall == std::string::npos ||
+        ragCall < strictBranch) {
+        std::cerr << "testE2A4StaticDispatchAudit: RAG call not after STRICT branch\n";
+        return false;
+    }
+
+    if (source.find("executeRetrievalStrict") != std::string::npos) {
+        std::cerr << "testE2A4StaticDispatchAudit: forbidden parallel strict helper\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testE2NonStrictRetrievalPreserved() {
+    Config cfg;
+    cfg.max_reflections = 0;
+    cfg.database_path = makeTempPath("e2_non_strict_rag").string();
+    fs::remove(cfg.database_path);
+
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    auto idx = new IndexManager(engine.get());
+    Thoth::addEpisodicEvalCorpusChunk(
+        engine.get(), idx, "Paris is the capital of France.", "france.md");
+
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+    auto registry = std::make_shared<ToolRegistry>();
+    Thoth::WorkflowEngine workflow(registry, rag, memory, nullptr, nullptr);
+    workflow.setConfig(&cfg);
+
+    PlanStep step;
+    step.step_id = "retrieve";
+    step.type = StepType::RETRIEVAL;
+    step.payload = {{"query", "capital of France"}, {"top_k", 3}};
+
+    Thoth::StepExecutionContext ctx;
+    const auto result = workflow.executeStep(step, "plan", ctx);
+    delete idx;
+    fs::remove(cfg.database_path);
+
+    if (result.data.value("strict_e2_retrieval", false)) {
+        std::cerr << "testE2NonStrictRetrievalPreserved: unexpected STRICT branch\n";
+        return false;
+    }
+    if (!result.success) {
+        std::cerr << "testE2NonStrictRetrievalPreserved: RAG retrieval failed: "
+                  << result.error_message << '\n';
+        return false;
+    }
+    return true;
+}
+
+/** E2-11 — A5 runtime heuristic guard (STRICT miswire hard-fail + NON-STRICT smoke). */
+static bool testE2RuntimeHeuristicGuard() {
+    // STRICT miswire: heuristic entry under STRICT eval context must hard-fail.
+    {
+        Config cfg;
+        cfg.max_reflections = 0;
+        cfg.database_path = makeTempPath("e2_a5_strict_miswire").string();
+        fs::remove(cfg.database_path);
+
+        auto memory = std::make_shared<Memory>(cfg);
+        auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+        auto idx = new IndexManager(engine.get());
+        Thoth::addEpisodicEvalCorpusChunk(
+            engine.get(), idx, "Paris is the capital of France.", "france.md");
+
+        auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+        const Thoth::E2EvalConfig strictConfig = makeE2StrictTestConfig();
+        rag->setActiveE2EvalConfig(&strictConfig);
+
+        try {
+            (void)rag->retrieveRelevant("capital of France", {}, 3);
+            std::cerr << "testE2RuntimeHeuristicGuard: expected LINK:RUNTIME_HEURISTIC throw\n";
+            delete idx;
+            fs::remove(cfg.database_path);
+            return false;
+        } catch (const Thoth::E2RuntimeHeuristicGuardViolation& e) {
+            if (std::string(e.what()).find("LINK:RUNTIME_HEURISTIC") == std::string::npos) {
+                std::cerr << "testE2RuntimeHeuristicGuard: unexpected guard message: " << e.what()
+                          << '\n';
+                delete idx;
+                fs::remove(cfg.database_path);
+                return false;
+            }
+        }
+
+        delete idx;
+        fs::remove(cfg.database_path);
+    }
+
+    // NON-STRICT: guard silent — heuristic retrieval completes (E2-11 smoke).
+    if (!testE2NonStrictRetrievalPreserved()) {
+        std::cerr << "testE2RuntimeHeuristicGuard: NON-STRICT heuristic smoke failed\n";
+        return false;
+    }
+
+    // Static: guard present at heuristic entry in rag.cpp.
+    {
+        FileHandler fh;
+        const fs::path ragPath =
+            fs::path(fh.getProjectRoot()) / "external" / "basic_agent" / "src" / "rag.cpp";
+        std::ifstream in(ragPath);
+        if (!in.is_open()) {
+            std::cerr << "testE2RuntimeHeuristicGuard: cannot read rag.cpp\n";
+            return false;
+        }
+        const std::string source((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
+        const auto fnPos = source.find("RAGPipeline::retrieveRelevant");
+        const auto fnEnd = source.find("\nstd::string RAGPipeline::query", fnPos);
+        if (fnPos == std::string::npos) {
+            std::cerr << "testE2RuntimeHeuristicGuard: retrieveRelevant not found\n";
+            return false;
+        }
+        const std::string body =
+            fnEnd == std::string::npos ? source.substr(fnPos) : source.substr(fnPos, fnEnd - fnPos);
+        if (body.find("guardAgainstStrictHeuristicRetrieval") == std::string::npos) {
+            std::cerr << "testE2RuntimeHeuristicGuard: missing guard in retrieveRelevant\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static bool testE2CaseById(const std::string& caseId) {
     const auto cases = Thoth::getEpisodicLearningCases();
     const Thoth::EpisodicLearningCase* spec = nullptr;
@@ -4336,6 +4994,13 @@ int main() {
     if (!testE2EmbeddingVersionPin()) failures++;
     if (!testE2StrictConfigEnforcement()) failures++;
     if (!testE2TableDrivenEvaluator()) failures++;
+    if (!testE2A2StrictArmNoPlantSourceContract()) failures++;
+    if (!testE2A2SealedLogOwnership()) failures++;
+    if (!testE2A2HarnessWiringSmoke()) failures++;
+    if (!testE2StrictRetrievalKernel()) failures++;
+    if (!testE2ExecutiveStrictEquivalence()) failures++;
+    if (!testE2A4StaticDispatchAudit()) failures++;
+    if (!testE2RuntimeHeuristicGuard()) failures++;
     if (!testE2CaseById("E2-01")) failures++;
     if (!testE2CaseById("E2-02")) failures++;
     if (!testE2CaseById("E2-03")) failures++;

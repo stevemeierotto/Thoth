@@ -143,9 +143,38 @@ Conceptual heart of E2-STRICT — sealed input, deterministic kernel, traced out
        (Phase B+) table-driven evaluator / lift
 ```
 
-**Executive / RAGPipeline** may still run during Phase A migration for harness shape continuity; their RETRIEVAL outputs are **non-authoritative** and **ignored** at this boundary until checkpoint **A4** wires the executive to the strict path.
+**Executive / RAGPipeline** may still run during Phase A migration for harness shape continuity; their RETRIEVAL outputs were **non-authoritative** at the A3 evaluation boundary. **Checkpoint A4 retires that pattern** by wiring Executive RETRIEVAL directly to `e2StrictRetrieve()` at the single dispatch point in `WorkflowEngine::executeRetrieval`.
 
 **Vacuous retrieval guard:** if kernel `retrieval_status == SUCCESS`, expectations require episodic retrieval, and `chunk_count == 0` → `FAILED_RETRIEVAL` (not a vacuous provenance pass on empty `chunks[]`).
+
+### STRICT kernel scoring (A3 — intentional design, not incidental plumbing)
+
+**STRICT retrieval is not production GRAG.** The evaluation kernel (`e2StrictRetrieve` in `e2_strict_retrieval.cpp`) uses a **deliberate, purity-preserving scoring split** — distinct from `RAGPipeline` / directional GRAG scoring in the product path.
+
+| Candidate source | Scoring mechanism | Rationale |
+|------------------|-------------------|-----------|
+| **Corpus chunks** (index) | `IndexManager::retrieveChunks` — existing index/TfIdf path on **pre-built, immutable index** | Harness/test builds index before the kernel call; kernel does not mutate index or engine vocab during the call |
+| **Sealed evaluation episodes** | **Deterministic token overlap** — shared-token count normalized by `sqrt(|query_tokens| × |episode_tokens|)` | **Purity-driven:** calling `EmbeddingEngine::embed()` for episode gating would mutate TfIdf vocabulary state (`updateVocabulary` / document frequency) and violate the A3 formal purity criterion. Token overlap is side-effect-free on engine state |
+
+**Not used on the STRICT kernel path:** GRAG directional blend, graph memory, warm-tier merge, heuristic suppression, or episodic embedding similarity for inclusion gating.
+
+**Implementation note (A3):** E2-10 initially failed with episode embedding similarity because cold TfIdf engines produce zero vectors (IDF requires prior `documentFreq`). The switch to token overlap for episode inclusion was **required for purity and determinism**, not a ranking polish — see A3.5 “document, do not expand scope unless demonstration is impossible.”
+
+#### Episode inclusion threshold — **provisional (not load-bearing)**
+
+Episodes enter the ranked candidate pool only when overlap score **≥ `kStrictEpisodeInclusionMinScore` (0.25)** in `e2_strict_retrieval.cpp`.
+
+**Status:** Provisional calibration on the **preregistered v1.2 trio only** (E2-01–E2-03). It is **not** derived from B1 hardened corpus, cross-validation, or a preregistered constant in protocol v1.2. Treat as **engineering gap-finding on three points**, not a locked eval parameter, until revisited at **B1** or **protocol v1.3**.
+
+Measured overlap scores on v1.2 case text (implementation tokenizer, 2026-07-02):
+
+| Case / arm | Query (abbrev.) | Plant message | Overlap score | Included at 0.25? |
+|------------|-----------------|---------------|---------------|-------------------|
+| E2-01 warm | dog's name | Apollo fact | **0.833** | yes |
+| E2-02 warm | assistant codename | Zephyrx7 fact | **0.833** | yes |
+| E2-03 warm/cold | capital of France | Apollo fact | **0.167** | no |
+
+Threshold **0.25** sits in the observed gap (~0.17 vs ~0.83) for these three cases. **A4 equivalence tests and B1 expansion may require retuning or protocol promotion** — do not extrapolate STRICT retrieval quality claims from this cutoff alone.
 
 ### Episode entry schema (frozen at seal)
 
@@ -331,18 +360,26 @@ Both arms share the same `corpus_snapshot_id` and `E2EvalConfig` version pins.
 
 | Arm | STRICT setup |
 |-----|--------------|
-| **Cold** | `SealedEpisodeInjectionLog` empty; deterministic retrieval |
+| **Cold** | `SealedEpisodeInjectionLog` empty unless `cold_arm_pre_consolidated` (E2-03); deterministic retrieval |
 | **Warm** | Same snapshot + **pre-sealed** injection log from case table (explicit episodes only); new controller session id |
 
 **Isolation invariant:** No artifacts from the cold arm DB or execution path are reused by the warm arm except episodes **declared in the case table injection spec** and frozen before warm arm start.
 
 Cross-session SQLite warm reads are **not** the warm-arm mechanism in STRICT.
 
+**Scope limit — STRICT vs organic consolidation:** E2-STRICT warm arms use **pre-sealed case-table episodes** (`buildStrictInjectionLogFromCaseTable`), not the product consolidation pipeline (`plantAndConsolidate` → episodic → warm tier). M1.5 validates organic consolidation produces retrievable memory; E2-STRICT validates deterministic retrieval from **declared frozen input**. Organic consolidation → warm → retrieval → lift is **E2-INTEGRATION** (diagnostic, non-scoring) only.
+
+**One sealed log per arm:** exactly one `buildStrictInjectionLogFromCaseTable` call per arm invocation; passed by const reference thereafter. STRICT arm execution must not mutate episodic storage during A2.
+
 **Checkpoint A1 (implementation):** No retrieval, scoring, executive, or RAG behavior changes during A1. That checkpoint exists solely to prove deterministic construction of STRICT sealed injection logs from the frozen case table (`buildStrictInjectionLogFromCaseTable`). Cold arm: empty sealed log unless `cold_arm_pre_consolidated` declares a pre-existing episode (E2-03).
 
-**Checkpoint A3 (implementation):** Wire `e2StrictRetrieve()` at the evaluation boundary; map results via `provenanceFromStrictRetrievalResult()`. **`official_scoring` remains false** — A3 proves kernel retrieval correctness, not benchmark outcome. Executive may run for harness continuity; its outputs are non-authoritative for STRICT evaluation. **This continuity pattern is temporary and retired at A4.** See **§ STRICT retrieval boundary** and **`cursor_list.md` § Checkpoint A3**.
+**Checkpoint A2 (implementation):** Remove runtime episodic creation (`plantAndConsolidate`) from STRICT arm execution. One sealed log per arm via `buildStrictInjectionLogFromCaseTable`; harness runs `runCaseArm` plumbing smoke with evaluation disabled. No kernel retrieval, scoring, or `e2_outcome`.
 
-**Checkpoint A5 (implementation):** Runtime guard at heuristic retrieval entry points — diagnostic fuse only; **`official_scoring` remains false**. Enforces post-A4 invariant: STRICT must not reach heuristics. See **`cursor_list.md` § Checkpoint A5**.
+**Checkpoint A3 (implementation):** Wire `e2StrictRetrieve()` at the evaluation boundary; map results via `provenanceFromStrictRetrievalResult()`. **`official_scoring` remains false** — A3 proves kernel retrieval correctness, not benchmark outcome. Executive may run for harness continuity; its outputs are non-authoritative for STRICT evaluation. **This continuity pattern is temporary and retired at A4.** Harness default wiring stage after A3: `A3`. **STRICT kernel scoring:** corpus via index retrieval; sealed episodes via deterministic token overlap (not GRAG/embed gating) — see **§ STRICT kernel scoring (A3)**. Episode inclusion threshold **0.25 is provisional** (v1.2 trio only). See **§ STRICT retrieval boundary** and **`cursor_list.md` § Checkpoint A3**.
+
+**Checkpoint A4 (implementation):** **Single dispatch decision point** — `WorkflowEngine::executeRetrieval` branches on `E2EvalTier::STRICT` to call `e2StrictRetrieve()` directly; NON-STRICT continues `RAGPipeline::retrieveRelevant`. Harness injects one sealed log per arm into step context before `execute_goal`; Executive does not build sealed logs. Harness retains a direct boundary call for **equivalence proof** (success and failure paths); provenance for STRICT evaluation reads Executive RETRIEVAL output. **`official_scoring` remains false.** Default wiring stage after A4: `A4`. See **`cursor_list.md` § Checkpoint A4**.
+
+**Checkpoint A5 (implementation):** Runtime guard at `RAGPipeline::retrieveRelevant` — diagnostic fuse only; inspects authoritative `E2EvalConfig::tier` propagated from execution context (not `THOTH_*` env alone). On STRICT tier, throws `E2RuntimeHeuristicGuardViolation` (`LINK:RUNTIME_HEURISTIC`) — detect only, no redirect/repair. **`official_scoring` remains false.** Default wiring stage after A5: `A5`. See **`cursor_list.md` § Checkpoint A5**.
 
 ---
 
@@ -478,11 +515,12 @@ No changes to scoring function during an in-flight STRICT run.
 5.5 **Embedding pin correctness** — fix `\u0002` int→char coercion; semantic pin validation ✅  
 6a **A1** — `buildStrictInjectionLogFromCaseTable`; E2-08 + determinism; evaluation-disabled harness only ✅  
    *No retrieval, scoring, executive, or RAG changes during A1 — deterministic STRICT sealed log construction from the frozen case table only.*  
-6b **A2** — decouple consolidation from STRICT path; E2-09; scope-limits doc ⏳  
-6c **A3** — `e2StrictRetrieve()` @ evaluation boundary; `provenanceFromStrictRetrievalResult`; E2-10; `retrieval_enabled: true`; **not** official scoring ⏳  
+6b **A2** — decouple consolidation from STRICT path; E2-09 + E2-09b; scope-limits doc ✅  
+6c **A3** — `e2StrictRetrieve()` @ evaluation boundary; `provenanceFromStrictRetrievalResult`; E2-10; `retrieval_enabled: true`; **not** official scoring ✅  
+   *Kernel scoring documented § STRICT kernel scoring (A3): token overlap for episodes (purity); 0.25 inclusion threshold **provisional** on v1.2 trio only.*
    *Kernel consumes sealed log and produces boundary provenance independent of Executive/RAG. No ranking redesign unless E2-10 blocked. No `e2_outcome`.*
-6d **A4** — executive RETRIEVAL → strict path; tier-1 + tier-2 isolation proof ⏳  
-6e **A5** — runtime guard (diagnostic fuse); A3→A4 transition enforced; E2-11; signal precedence; no silent fallback ⏳  
+6d **A4** — executive RETRIEVAL → strict path via single dispatch in `executeRetrieval`; harness–executive equivalence; tier-2 static audit ✅  
+6e **A5** — runtime guard in `RAGPipeline::retrieveRelevant`; `LINK:RUNTIME_HEURISTIC` on STRICT miswire; E2-11 ✅  
 7. **STRICT re-baseline run** — official SUCCESS/FAILURE only after 5.5 + 6a–6e  
 8. **Close-out** — `completed_improvements_log.md` (STRICT only); INTEGRATION tier harness (Phase C)
 
