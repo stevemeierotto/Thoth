@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-02 (E2 **Phase A plans complete** — A5 v2; approved, subject to revision — see **§ E2**)  
+**Last updated:** 2026-07-02 (E2 **Phase B3 plan v4.1** — plumbing-first order; see **§ B.3.0**)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
@@ -970,9 +970,1049 @@ SCORING: legacy dev knob — never authoritative
 
 `rag.cpp` (guard only), minimal context plumbing if required, `tests/unit_tests.cpp`, `docs/E2_PROTOCOL.md`, `cursor_list.md` — **no** changes to `e2StrictRetrieve`, executive dispatch, scoring loop, or non-guard heuristic behavior
 
-### Phase B — STRICT re-baseline (reference — not Phase A)
+### Phase B — Failure semantics + official re-baseline (approved — subject to revision, **v4**)
 
-**Authorizes scoring only after A4 proves retrieval equivalence between the Executive and the evaluation harness.** Phase B is the single switch where `official_scoring: true` and authoritative `e2_outcome` begin — not A3, not A4, not A5.
+**Expert verdict (v2):** Phase A built **control** (kernel, dispatch, guard). Phase B must build **meaning** — stop losing semantics when data flows runtime → arm → outcome. **Do not** treat Phase B as “flip `official_scoring: true`” until taxonomy is fixed; `e2_outcome` today is a post-hoc binary collapse, not a semantic aggregator.
+
+**Phase B milestone (v2):** Clean retrieval quality (arm layer) + clean architecture violation signal (block layer) + clean benchmark signal (scorable-only outcome layer). Stop mixing **system integrity failures** with **model performance failures**.
+
+**One-sentence definition:** Phase B **canonicalizes failure semantics** across three layers, then runs the first **authoritative** STRICT re-baseline under `official_scoring: true`.
+
+**Explicitly not Phase B:** kernel ranking redesign; A4 dispatch changes; A5 guard behavior changes; INTEGRATION tier harness (**Phase C**); new retrieval algorithms.
+
+---
+
+#### B.0 — Problem statement (why Phase B exists)
+
+| Layer | Role | Status after A5 |
+|-------|------|-----------------|
+| **Layer 1 — Runtime truth** | A5 guard + RAG execution behavior | ✅ Solid |
+| **Layer 2 — Arm scoring** | `E2ArmScoringStatus` (`OK` / `FAILED_*`) | ✅ Structured, usable for cognitive-quality failures |
+| **Layer 3 — Evaluation truth** | `e2_outcome` + summary rollup | ❌ Binary sink — **meaning leaks upward** |
+
+**Current contamination risks:**
+
+1. **`LINK:RUNTIME_HEURISTIC` is an orphan signal** — runtime architectural violation; **not** retrieval failure, **not** arm status, **not** scored failure class. Today it throws/catches as generic exception text; evaluator may flatten to `FAILED_RETRIEVAL`, missing-case noise, or generic `FAILURE`.
+2. **Evaluator runs correctness math on incomplete labels** — `warm_retrieval_hit`, lift, provenance checks assume operational arm labels. Guard trips are **out of namespace** → benchmark can treat architectural violation as “bad retrieval.”
+3. **`scoring_block_reason` is documented (`E2_PROTOCOL.md`) but not implemented** — no structured block layer in code.
+
+**Phase B core obligation:** **Canonicalize failure semantics** — not “add scoring.”
+
+---
+
+#### B.0a — Three-axis model (missing bridge)
+
+| Axis | Namespace | Examples |
+|------|-----------|----------|
+| **Arm status** | `E2ArmScoringStatus` | `OK`, `FAILED_RETRIEVAL`, `FAILED_PROVENANCE`, `FAILED_STRICT_BOUNDARY` |
+| **Run block** | **`E2RunBlockReason` (new)** | `RUNTIME_HEURISTIC_GUARD`, wiring/provenance blocks |
+| **Outcome resolution** | **`E2EvaluationResolution` (new)** | `SCORED_SUCCESS`, `SCORED_FAILURE`, **`NOT_SCORABLE`** |
+
+**`LINK:RUNTIME_HEURISTIC` belongs on axis 2 (run block), never on axis 1.**
+
+**Arm status boundary rule (v2 — enforce both directions):**
+
+| Rule | Meaning |
+|------|---------|
+| **Do not** add `RUNTIME_HEURISTIC` (or any guard/block signal) to `E2ArmScoringStatus` | Block layer owns structural aborts |
+| **Arm status reflects only within-system execution quality** | What happened **inside** the evaluation contract after a valid run started — not pre-execution aborts, wiring gates, or “why the evaluation was invalid” |
+
+**Forbidden contamination paths (explicit):**
+
+- guard trip → `FAILED_STRICT_BOUNDARY` ❌
+- guard trip → `FAILED_RETRIEVAL` ❌
+- wiring gate → any `FAILED_*` arm status ❌
+
+Arm status answers: *“Did retrieval/provenance/lift fail under a scorable run?”*  
+Run block answers: *“Was this run invalid for scoring at all?”*
+
+Two failure domains (inherit A5.0a):
+
+| Domain | Layer | Phase B handling |
+|--------|-------|------------------|
+| **Operational retrieval failure** | Arm | `FAILED_*` → eligible for `SCORED_FAILURE` after block check |
+| **Architectural invariant violation** | Run block | `E2RunBlockReason::*` → **`NOT_SCORABLE`** — never `SCORED_FAILURE` |
+
+---
+
+#### B.0b — Precedence (mandatory logic)
+
+**Single source of truth (v2):** `evaluation_resolution` is the **canonical decision field**. All other outcome fields are **derived** or **export metadata** — never independent authorities.
+
+**Block-first rule (v4 — enforced, not implied):** When `run_block_reason != NONE`, **`arm_status` MUST be ignored for scoring**. Arm inputs (`FAILED_RETRIEVAL`, `FAILED_PROVENANCE`, etc.) are **only valid scoring signals when `run_block_reason == NONE`**. Otherwise you reintroduce ambiguity between “retrieval failed” and “run was invalid.”
+
+```
+if run_block_reason != NONE
+    evaluation_resolution = NOT_SCORABLE          ← canonical; arm_status NOT consulted
+    e2_outcome = derived: absent or non-authoritative
+    scoring_block_reason = metadata export of run_block_reason
+    // arm_status may still be logged for diagnostics — MUST NOT affect resolution
+else if any arm fail-closed (FAILED_*) or case table miss   ← only reachable when block == NONE
+    evaluation_resolution = SCORED_FAILURE        ← canonical
+    e2_outcome = derived: FAILURE
+else if mean lift + table pass
+    evaluation_resolution = SCORED_SUCCESS        ← canonical
+    e2_outcome = derived: SUCCESS
+```
+
+**Arm validity constraint:** `FAILED_RETRIEVAL → SCORED_FAILURE` **only** when `run_block_reason == NONE`. Same for all `FAILED_*` arm statuses.
+
+**Guard trip → NOT_SCORABLE, not FAILURE.** Prevents guard regressions from poisoning retrieval-quality baseline.
+
+**Anti-drift rule:** No code path may set `e2_outcome` without first computing `evaluation_resolution`. JSONL fields are export layer only.
+
+**One-direction dependency (v3 — mandatory invariant):**
+
+Canonical resolution must be **pure** — computed **without reading `e2_outcome`**. Forbidden pattern: compute outcome first, then infer resolution from outcome state (silently re-collapses the separation).
+
+```
+if run_block_reason != NONE:
+    evaluation_resolution = NOT_SCORABLE                    ← block branch; arm ignored
+else:
+    evaluation_resolution = f(arm_status, lift, table_gates) ← arm branch; block == NONE only
+e2_outcome = g(evaluation_resolution)                       ← derived only
+```
+
+| Allowed | Forbidden |
+|---------|-----------|
+| resolution → outcome | outcome → resolution |
+| block checked first; arm consulted **only** when `run_block_reason == NONE` | reading `arm_status` when `run_block_reason != NONE` |
+| `FAILED_*` → `SCORED_FAILURE` only on non-blocked runs | `FAILED_RETRIEVAL` influencing resolution when run is blocked |
+| `e2_outcome` set after resolution is final | any branch that reads `e2_outcome` while computing resolution |
+
+Implement B3 as **`resolveEvaluation()`** with an explicit early return on block — arm fields must not appear in that branch (enforced in code review + unit test).
+
+---
+
+#### B.0c — Minimal schema additions (small, critical)
+
+**1. `E2RunBlockReason` enum** (names TBD at implement — align protocol strings):
+
+| Value | Maps from |
+|-------|-----------|
+| `NONE` | Normal scored path |
+| `RUNTIME_HEURISTIC_GUARD` | `E2RuntimeHeuristicGuardViolation` / `LINK:RUNTIME_HEURISTIC` |
+| `STRICT_BOUNDARY_VIOLATION` | Optional: harness/wiring gate (future) |
+| `PROVENANCE_VIOLATION` | Optional: run-level block before arm rollup (if distinct from arm `FAILED_PROVENANCE`) |
+| `WIRING_GATE` | Phase A checkpoint not satisfied (e.g. `WIRING:A2`) |
+
+**2. Attach to evaluation context:**
+
+- `EpisodicLearningRunContext` or fields on `EpisodicLearningSummary`:
+  - `run_block_reason`
+  - `evaluation_resolution` (`SCORED_SUCCESS` | `SCORED_FAILURE` | `NOT_SCORABLE`)
+  - `evaluation_resolution_detail` (human string; supersedes vague `outcome_rationale` for blocks)
+
+**3. JSONL artifacts — export layer (derived from canonical resolution):**
+
+| Field | Role | When |
+|-------|------|------|
+| **`evaluation_resolution`** | **Canonical truth** | Always on official runs |
+| `scoring_block_reason` | Metadata view of `NOT_SCORABLE` | When `evaluation_resolution == NOT_SCORABLE` — e.g. `"LINK:RUNTIME_HEURISTIC"` |
+| `e2_outcome` | Derived collapse | Only when `evaluation_resolution` is `SCORED_*` (`SUCCESS` / `FAILURE`) |
+| `e2_outcome_detail` | Optional structured companion | Resolution + arm summary + block (debug/export; not a second authority) |
+
+**Summary rollup metrics (v2 — NOT_SCORABLE must be visible, not silently dropped):**
+
+| Metric | Definition |
+|--------|------------|
+| `scorable_cases` | Cases where `evaluation_resolution` is `SCORED_*` |
+| `not_scorable_cases` | Cases where `evaluation_resolution == NOT_SCORABLE` |
+| `not_scorable_by_reason` | Breakdown by `run_block_reason` (e.g. `RUNTIME_HEURISTIC_GUARD: 3`) |
+| `success_rate` | Computed **over scorable cases only** — never diluted by block-layer violations |
+
+**Do not** add `RUNTIME_HEURISTIC` to `E2ArmScoringStatus`. See **B.0a arm boundary rule**.
+
+---
+
+#### B.0d — Wiring: orphan signal → block layer
+
+| Source | Phase B action |
+|--------|----------------|
+| `RAGPipeline::retrieveRelevant` guard throw | Catch at **harness/arm boundary** → set `run_block_reason = RUNTIME_HEURISTIC_GUARD`; **do not** map to `FAILED_RETRIEVAL` |
+| `WorkflowEngine::executeRetrieval` typed catch | Catch **`E2RuntimeHeuristicGuardViolation`** → set **`StepResult.run_block_reason`** (**B2**); **not** plan JSON, **not** `FAILED_RETRIEVAL` |
+| Missing executive STRICT step (miswire symptom) | Distinguish: operational `FAILED_RETRIEVAL` vs block if guard fired |
+
+E2-11 remains guard unit test; add **E2-12** (or B-phase tests) for block → `NOT_SCORABLE` precedence.
+
+---
+
+#### B.1 — Checkpoint sequence (implement in order)
+
+| Step | Work | Gate |
+|------|------|------|
+| **B1** | Add `E2RunBlockReason`, `E2EvaluationResolution`, serializers, JSON fields | Build green; no behavior change on A5 path |
+| **B2** | Typed catch in `executeRetrieval` → `StepResult.run_block_reason`; **no plan/JSON inference** | See **§ B.2.0 v2**; case field stays `NONE` until B3 |
+| **B3** | **`resolveEvaluation()`** + minimal transport + rollup | See **§ B.3.0 v4.1** — plumbing-first; `PlanStepOutcome` deferred post–Phase B |
+| **B4** | JSONL export: `evaluation_resolution` (canonical), `scoring_block_reason` (NOT_SCORABLE metadata), derived `e2_outcome`, optional `e2_outcome_detail` | Protocol doc alignment; single-authority rule documented |
+| **B5** | Harness `wiring_stage=B` (or `OFFICIAL`): `official_scoring: true`, full pins, `evaluateEpisodicLearningCase` + re-baseline run | First authoritative `e2_outcome` only after B1–B4 green |
+| **B6** | Golden re-baseline commit: record fingerprint + mean lift under new semantics | Pause for confirmation before Phase C |
+
+**Time estimate:** B1–B4 **2–4 hours**; B5 re-baseline run **1–2 hours** (analysis, not code).
+
+---
+
+#### B.1.0 — B1 implementation plan (schema phase — **v2**)
+
+**Scope:** Types, defaults, serializers, JSON field stubs only. **No precedence logic, no guard wiring, no harness branch changes.**
+
+##### 1. Exact mutation entry points (strict order)
+
+| Order | File | What changes | First symbol |
+|-------|------|--------------|--------------|
+| **1** | `external/basic_agent/include/episodic_learning_eval.h` | **Enums + struct fields only** — no logic | `enum class E2RunBlockReason` (insert after `E2ArmScoringStatus`, ~L64) |
+| **2** | `external/basic_agent/include/episodic_learning_eval.h` | Second enum + forward declarations | `enum class E2EvaluationResolution` |
+| **3** | `external/basic_agent/include/episodic_learning_eval.h` | Case-level carry fields | `EpisodicLearningCaseEvaluation::run_block_reason` (default `NONE`) |
+| **4** | `external/basic_agent/include/episodic_learning_eval.h` | Summary rollup placeholders (zeroed defaults) | `EpisodicLearningSummary::{scorable_cases, not_scorable_cases}` + optional `evaluation_resolution` |
+| **5** | `external/basic_agent/src/episodic_learning_eval.cpp` | **Serializers only** — first function added | `e2RunBlockReasonToString(E2RunBlockReason)` |
+| **6** | `external/basic_agent/src/episodic_learning_eval.cpp` | Protocol string export (metadata, not arm) | `e2RunBlockReasonToProtocolString()` → e.g. `"LINK:RUNTIME_HEURISTIC"` for guard |
+| **7** | `external/basic_agent/src/episodic_learning_eval.cpp` | JSON export stubs | extend `caseEvaluationToJson()` + new `summaryToJson()` **or** extend harness inline JSON — emit new keys with defaults only |
+| **8** | `external/basic_agent/src/episodic_learning_eval.cpp` | **No-op stub for B2** (declared in header) | `e2RunBlockReasonFromException(const std::exception&)` → always `NONE` in B1 |
+| **9** | `tests/unit_tests.cpp` | Serializer smoke + **NONE invariant** | `testE2B1BlockResolutionSchema` — enum round-trip, default struct values, **assert no production path emits non-`NONE` in B1** |
+
+**First function modified (existing):** `caseEvaluationToJson()` in `episodic_learning_eval.cpp` (~L766) — add `"run_block_reason": "NONE"` key only; **do not** change field values from current runs.
+
+**First data structure introduced:** `enum class E2RunBlockReason` in `episodic_learning_eval.h`.
+
+##### Files explicitly unchanged in B1
+
+| File | B1 rule |
+|------|---------|
+| `run_episodic_learning_benchmark.cpp` | **NO CHANGES** — guard catch + `run_block_reason` assignment is **B2** |
+| `workflow_engine.cpp` | **NO CHANGES** — block capture hook lands **B2** at `executeRetrieval` catch (~L621) |
+| `rag.cpp` | **NO CHANGE** (A5 guard frozen) |
+| `summarizeEpisodicLearning()` | **NO LOGIC CHANGE** — B3 owns precedence |
+| `evaluateEpisodicLearningCase()` | **NO LOGIC CHANGE** |
+| `docs/E2_PROTOCOL.md` | **NO CHANGE in B1** — protocol alignment is **B4** |
+
+##### 2. No-op safety rule (B1 gate — mandatory)
+
+> **A5 behavior must not change under any input.**
+
+Verification checklist after B1:
+
+| Check | Expected |
+|-------|----------|
+| `THOTH_E2_WIRING_STAGE=A5` harness exit code | Same as pre-B1 |
+| E2-01–E2-11 unit tests | All pass unchanged |
+| `summarizeEpisodicLearning()` return values | Identical `outcome`, `mean_episodic_lift`, `passes` for same inputs |
+| Guard throw path (`testE2RuntimeHeuristicGuard`) | Unchanged — still throws `E2RuntimeHeuristicGuardViolation` |
+| New JSON fields on existing runs | Defaults only (`run_block_reason: "NONE"`); must not alter scoring branches |
+
+B1 is a **schema phase, not a behavioral phase**. If any test outcome or harness exit code changes, B1 has leaked into B2/B3 scope — revert logic changes.
+
+##### 2a — NONE-default invariant (guards against silent wiring bugs in B2/B3)
+
+`run_block_reason` defaults to `NONE` everywhere in B1 — correct for a no-op schema phase. **Risk:** in B2/B3, forgetting to set block reason silently stays `NONE` → false scorable success (guard trip looks like clean retrieval).
+
+**B1 invariant (mandatory — code comment + test):**
+
+> **Any non-`NONE` `run_block_reason` in B1 is invalid unless explicitly assigned in B2 wiring.**
+
+| Where | What to add in B1 |
+|-------|-------------------|
+| `EpisodicLearningCaseEvaluation::run_block_reason` field comment | `// B1: default NONE. Non-NONE only legal after B2 explicit assignment.` |
+| `e2RunBlockReasonFromException()` stub | Document: returns `NONE` always in B1; B2 owns non-`NONE` |
+| `testE2B1BlockResolutionSchema` | After a representative A5-path eval build, assert `run_block_reason == NONE` on every case result |
+| B2 plan cross-ref | B2 must add a **positive test** that guard path sets non-`NONE` (E2-12) — B1 test only guards the negative (no accidental SET in schema phase) |
+
+This does **not** change B1 behavior; it documents the contract so B2 cannot regress silently.
+
+##### 2b — What B1 should feel like (sanity check)
+
+After B1 lands:
+
+| Property | Expected |
+|----------|----------|
+| System behavior | **Identical** to pre-B1 (A5 harness, unit tests, outcomes) |
+| Data model | Has **hooks** (`E2RunBlockReason`, `E2EvaluationResolution`, carry fields, JSON keys) |
+| Active semantics | **None** — block/resolution/precedence not consulted for scoring |
+
+If anything “scores differently” or guard trips change classification, B1 scope was violated.
+
+##### 3. Propagation path diagram (B2–B3 target — **not active in B1**)
+
+Documents where block semantics will flow; B1 only reserves types/fields.
+
+```
+rag.cpp
+  guardAgainstStrictHeuristicRetrieval()
+    └─ throw E2RuntimeHeuristicGuardViolation  [A5 — frozen in B1]
+
+workflow_engine.cpp  [B2 — hook site, not B1]
+  executeRetrieval() catch (std::exception&)
+    └─ StepResult.run_block_reason = RUNTIME_HEURISTIC_GUARD  [B2]
+
+executive_controller.cpp  [B3 minimal transport]
+  handle_step_completion()
+    └─ PlanStep.run_block_reason = StepResult.run_block_reason  [single struct copy — NOT JSON]
+
+run_episodic_learning_benchmark.cpp  [B3]
+  runCaseArm() warm arm
+    └─ E2CaseArmPlumbingResult.run_block_reason from PlanStep
+    └─ EpisodicLearningCaseEvaluation.run_block_reason = warmArm only  [single source]
+
+episodic_learning_eval.cpp  [B3]
+  resolveEvaluation()  [new in B3]
+    if run_block_reason != NONE → NOT_SCORABLE (arm ignored)
+    else → f(arm_status, lift, table)
+    e2_outcome = g(evaluation_resolution)
+```
+
+B1 ends at: **evaluator data model can represent NONE/SET** — nothing in this path writes SET yet.
+
+##### 4. Schema detail (B1 enums + defaults)
+
+**`E2RunBlockReason`** (align B4 protocol strings):
+
+| Value | `toString()` | `toProtocolString()` (export metadata) |
+|-------|--------------|----------------------------------------|
+| `NONE` | `"NONE"` | *(omit or empty)* |
+| `RUNTIME_HEURISTIC_GUARD` | `"RUNTIME_HEURISTIC_GUARD"` | `"LINK:RUNTIME_HEURISTIC"` |
+| `WIRING_GATE` | `"WIRING_GATE"` | `"WIRING:…"` (B2+) |
+| `STRICT_BOUNDARY_VIOLATION` | `"STRICT_BOUNDARY_VIOLATION"` | reserved |
+| `PROVENANCE_VIOLATION` | `"PROVENANCE_VIOLATION"` | reserved |
+
+**`E2EvaluationResolution`:**
+
+| Value | Notes |
+|-------|-------|
+| `SCORED_SUCCESS` | B3 only |
+| `SCORED_FAILURE` | B3 only |
+| `NOT_SCORABLE` | B3 only |
+
+B1: field may be `std::optional<E2EvaluationResolution>` unset on summary/case — **do not compute in B1**.
+
+**Struct additions (defaults preserve A5 behavior):**
+
+```cpp
+// EpisodicLearningCaseEvaluation
+E2RunBlockReason run_block_reason = E2RunBlockReason::NONE;
+std::optional<E2EvaluationResolution> evaluation_resolution;  // unset in B1
+
+// EpisodicLearningSummary
+int scorable_cases = 0;
+int not_scorable_cases = 0;
+std::optional<E2EvaluationResolution> evaluation_resolution;  // unset in B1
+// not_scorable_by_reason → B3/B4 (map) — defer unless trivial JSON stub needed
+```
+
+##### 5. Explicit do-not-touch list (B1 lock)
+
+| Component | B1 rule |
+|-----------|---------|
+| `RAGPipeline::retrieveRelevant` | **NO CHANGE** |
+| `guardAgainstStrictHeuristicRetrieval()` | **NO CHANGE** |
+| `E2ArmScoringStatus` enum + all arm fail-closed logic | **NO CHANGE** |
+| `e2StrictRetrieve()` / kernel ranking | **NO CHANGE** |
+| `summarizeEpisodicLearning()` precedence / `E2Outcome` assignment | **NO CHANGE** |
+| `evaluateEpisodicLearningCase()` pass/fail logic | **NO CHANGE** |
+| Harness `wiring_stage` branches | **NO CHANGE** |
+| `official_scoring` flag semantics | **NO CHANGE** |
+| `WorkflowEngine::executeRetrieval` catch body | **NO CHANGE** (B2) |
+
+**Prevents premature coupling:** B1 must not map guard → arm status, guard → `e2_outcome`, or block → `NOT_SCORABLE` (all B2/B3).
+
+##### 6. B1 exit gate (before starting B2)
+
+1. Build green (`cmake --build --preset build-debug`)  
+2. `./build/debug/tests/thoth-unit-tests` — E2-01–E2-11 + new B1 schema test green  
+3. A5 harness byte-identical outcomes (exit code + key metrics) vs pre-B1  
+4. No `.cpp` changes outside `episodic_learning_eval.cpp` (+ `unit_tests.cpp`)  
+5. **NONE invariant verified:** all case results on A5 path have `run_block_reason == NONE` (test assertion)  
+6. **Pause for confirmation** — then B2 guard wiring  
+
+**Status:** ✅ **B1 implemented** (2026-07-02). **Frozen — do not start B2 until instructed.**
+
+##### 6a. B1 regression snapshot (frozen baseline before B2)
+
+Recorded immediately after B1 landed; use to verify B2+ does not regress A5 behavior unintentionally.
+
+| Artifact | Value |
+|----------|-------|
+| Parent git (Thoth) | `a8ae0f4` + **uncommitted B1 working tree** |
+| Submodule (`external/basic_agent`) | `840ab0d` + **uncommitted B1 working tree** |
+| Build | `cmake --build --preset build-debug` → **exit 0** |
+| Unit tests | `./build/debug/tests/thoth-unit-tests` → **exit 0**, `All unit tests passed.` (includes **`testE2B1BlockResolutionSchema`**) |
+| A5 harness | `THOTH_E2_WIRING_STAGE=A5 ./build/debug/external/basic_agent/run_episodic_learning_benchmark` → **exit 0** |
+| Harness summary line | `wiring checkpoint complete — 3 case(s), equivalence=yes` |
+| Harness fingerprint | `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
+| Key JSONL flags (A5 row sample) | `wiring_stage=A5`, `runtime_heuristic_guard=true`, `official_scoring=false`, `scoring_enabled=false`, `harness_executive_retrieval_equivalent=true` |
+| B1 schema on eval path | `run_block_reason=NONE` (test-enforced); `evaluation_resolution` **not emitted** when unset |
+
+**B1 files touched:** `episodic_learning_eval.h`, `episodic_learning_eval.cpp`, `tests/unit_tests.cpp` only.
+
+**Captured logs (local):** `/tmp/b1_unit_tests_snapshot.txt`, `/tmp/b1_a5_harness_snapshot.txt`
+
+---
+
+#### B.2.0 — B2 implementation plan (run-block capture wiring — **v3**)
+
+**Goal:** **Strictly dumb propagation** — single switch at the workflow boundary: **typed exception → enum**. No plan inference, no JSON reconstruction, no string parsing, no secondary routing.
+
+**Principle:** `B2 = event capture only` — **not** semantic analysis of plans, steps, or error text.
+
+> **Mental model:** `exception → enum` — **not** `exception → plan → step → JSON → enum`
+
+**Layer separation (do not blur):**
+
+| Phase | Responsibility |
+|-------|----------------|
+| A5 | Runtime enforcement (throw) |
+| **B2** | Event capture (typed catch → `run_block_reason`) |
+| B3 | Semantic resolution (`NOT_SCORABLE`, precedence, case rollup) |
+
+##### B2.0a — Inspected inputs (code map)
+
+| Input | Location | B2 role |
+|-------|----------|---------|
+| **Runtime signal** | `E2RuntimeHeuristicGuardViolation` (`e2_strict_enforcement.cpp` ~L96) | **Only** mappable guard type in B2 |
+| **Throw site** | `rag.cpp` → `guardAgainstStrictHeuristicRetrieval()` | **A5 frozen — NO CHANGE** |
+| **Catch boundary (ONLY B2 edit)** | `WorkflowEngine::executeRetrieval` (~L621) | Typed catch + assignment |
+| **Transport (B2 add)** | `StepResult::run_block_reason` (`workflow_engine.h`) | Dumb field; default `NONE` |
+| **Case field (B1)** | `EpisodicLearningCaseEvaluation::run_block_reason` | **Stays `NONE` in B2** — B3 copies from transport |
+| **Enum (B1)** | `E2RunBlockReason` | B2 sets only `RUNTIME_HEURISTIC_GUARD` or leaves `NONE` |
+
+**When guard fires:** Heuristic `retrieveRelevant()` under active STRICT eval config. Happy A4/A5 kernel path uses `e2StrictRetrieve()` → guard not hit → § 6a harness unchanged.
+
+##### B2.0b — Mapping rules (B2-only — one mapping, no inference)
+
+**ONLY allowed mapping in B2:**
+
+```
+E2RuntimeHeuristicGuardViolation  →  RUNTIME_HEURISTIC_GUARD
+everything else                   →  NONE (default)
+```
+
+**Explicitly forbidden in B2:**
+
+| Forbidden | Why |
+|-----------|-----|
+| `e.what()` string contains `LINK:RUNTIME_HEURISTIC` | String parsing = interpretation |
+| `runBlockReasonFromPlan(Plan)` | Plan-level semantic reconstruction |
+| Scanning RETRIEVAL steps / `step.result` JSON | Cross-layer inference — **B3+ if ever** |
+| `result.data["run_block_reason"]` JSON mutation | Plan persistence semantics — not B2 capture |
+| Secondary routing via `e2RunBlockReasonFromException()` on generic catch | Soft reasoning in instrumentation layer |
+
+**`e2RunBlockReasonFromException()`:** **Leave B1 stub** (always `NONE`) — guard mapping lives **only** in the typed catch. Do not extend with string fallback.
+
+##### B2.0c — Exact mutation entry points (strict order)
+
+| Order | File | Change |
+|-------|------|--------|
+| **1** | `workflow_engine.h` | Add `E2RunBlockReason run_block_reason = NONE` to **`StepResult`** |
+| **2** | `workflow_engine.cpp` | **`executeRetrieval`**: typed catch + assignment (see B2.0d) |
+| **3** | `unit_tests.cpp` | **E2-12** / **E2-13** / **E2-14** + update B1 schema test expectations |
+
+**First function modified:** `WorkflowEngine::executeRetrieval` catch block (~L621).
+
+**First data written:** `result.run_block_reason = RUNTIME_HEURISTIC_GUARD` (struct field — not plan JSON).
+
+**NOT in B2:** `episodic_learning_eval.cpp` logic changes (optional `#include` only if `StepResult` needs enum in header — already via workflow_engine.h).
+
+##### B2.0d — Workflow catch behavior (single catch site, single assignment)
+
+**Default-at-construction rule (v3 — instrumentation integrity):**
+
+- `StepResult::run_block_reason` defaults to **`NONE`** at struct construction (field initializer in `workflow_engine.h`).
+- **Only override on typed guard match** — do **not** assign `NONE` in generic catch handlers.
+
+**Why:** Explicit `result.run_block_reason = NONE` in `catch (const std::exception&)` or `catch (...)` can **silently erase** future typed block signals if new guard types are added later but not yet given dedicated catches ahead of the generic handler. Prefer **“absence of signal = NONE”** over **“explicit overwrite to NONE”**.
+
+Replace guard handling with **one typed catch** before the existing generic catches:
+
+```
+StepResult result;   // result.run_block_reason == NONE by default
+
+try {
+    ... existing executeRetrieval body unchanged ...
+} catch (const E2RuntimeHeuristicGuardViolation& e) {
+    result.success = false;
+    result.run_block_reason = RUNTIME_HEURISTIC_GUARD;   ← ONLY B2 override
+    result.error_message = e.what();                     ← diagnostic text only
+    // DO NOT set strict_retrieval_status / FAILED_RETRIEVAL
+    // DO NOT write run_block_reason into result.data / plan JSON
+} catch (const std::exception& e) {
+    // run_block_reason unchanged (stays NONE unless a prior typed catch matched)
+    result.success = false;
+    result.error_message = std::string("Retrieval exception: ") + e.what();
+} catch (...) {
+    // run_block_reason unchanged
+    result.success = false;
+    result.error_message = "Retrieval unknown exception";
+}
+```
+
+**Forbidden in generic catches:** `result.run_block_reason = NONE` (redundant and masks future typed handlers).
+
+**Future guard types:** add **new typed catches above** the generic handler — each sets its own `E2RunBlockReason`; generic path must never clobber them.
+
+**Guard triggers MUST NOT:** become `FAILED_RETRIEVAL`, mutate `E2ArmScoringStatus`, touch evaluator/scoring/resolution.
+
+##### B2.0e — Propagation model (B2 scope — minimal)
+
+```
+rag.cpp: throw E2RuntimeHeuristicGuardViolation     [A5 — unchanged]
+        ↓
+WorkflowEngine::executeRetrieval typed catch       [B2 — result.run_block_reason = GUARD]
+        ↓
+StepResult returned to caller                      [B2 ends here]
+        ↓
+(plan persistence / case eval / resolution)        [NOT B2 — B3+]
+```
+
+**`EpisodicLearningCaseEvaluation::run_block_reason`:** remains **`NONE`** on all B2 production paths. B3 owns copying `StepResult` → case when building evaluation.
+
+**Benchmark runner:** **NO CHANGES.** A5 snapshot § 6a must hold.
+
+##### B2.0f — Removed from B2 (v1 mistakes — do not implement)
+
+- ~~`runBlockReasonFromPlan(Plan)`~~
+- ~~RETRIEVAL step scanning~~
+- ~~`step.result` JSON block fields~~
+- ~~`e.what()` heuristic fallback~~
+- ~~`mergeRunBlockReasonForCase`~~
+- ~~`scoring_block_reason` in StepResult.data~~
+- ~~Extending `e2RunBlockReasonFromException()` beyond B1 stub~~
+
+##### B2.0g — Strict do-not-touch list (B2 lock)
+
+| Component | B2 rule |
+|-----------|---------|
+| `RAGPipeline::retrieveRelevant` / guard | **NO CHANGE** |
+| `e2StrictRetrieve()` / kernel | **NO CHANGE** |
+| `E2ArmScoringStatus` / arm fail-closed logic | **NO CHANGE** |
+| `evaluateEpisodicLearningCase()` / `summarizeEpisodicLearning()` | **NO CHANGE** |
+| `ExecutiveController` plan/step persistence | **NO CHANGE** (no new JSON keys for block) |
+| `run_episodic_learning_benchmark.cpp` | **NO CHANGE** |
+| `resolveEvaluation()` / `evaluation_resolution` | **B3** |
+| Case-level `run_block_reason` population | **B3** (minimal `PlanStep` struct copy → warm arm → case — not JSON, not merge) |
+
+##### B2.0h — Required tests
+
+| ID | Asserts | How (B2-safe) |
+|----|---------|---------------|
+| **E2-12** | Guard miswire → `StepResult.run_block_reason == RUNTIME_HEURISTIC_GUARD` | Direct **`WorkflowEngine::executeRetrieval`** miswire (RAG active STRICT config, non-STRICT dispatch context) — read **`StepResult` return value** immediately; **no plan scan** |
+| **E2-13** | Normal retrieval → `StepResult.run_block_reason == NONE` | Same API on happy STRICT kernel path **or** assert case eval still `NONE` on E2-01 (field untouched in B2) |
+| **E2-14** | Happy path arm status unchanged | E2-01–03 regression — `arm_scoring_status` / provenance identical to pre-B2 |
+| **Regression** | E2-01–E2-11 + `testE2B1BlockResolutionSchema` | `e2RunBlockReasonFromException(guard)` **still returns `NONE`** (stub unchanged); guard mapping tested via **typed catch / StepResult** only |
+| **A5 harness** | § 6a snapshot | exit **0**, `equivalence=yes`, fingerprint unchanged |
+
+##### B2.0i — No-op safety rule (relative to B1 snapshot § 6a)
+
+> **A5 happy-path behavior must not change.** B2 adds instrumentation on guard catch only; no new semantics on case eval or harness.
+
+| Check | Expected |
+|-------|----------|
+| A5 harness | Same exit code, fingerprint, `equivalence=yes` |
+| E2-01–E2-11 | Pass unchanged |
+| E2-11 direct `retrieveRelevant` throw | Still throws (uncaught at RAG — unchanged) |
+| Case eval `run_block_reason` on happy paths | **`NONE`** (B2 does not populate case field) |
+
+##### B2.0j — Exit criteria (B2 complete)
+
+1. Build green  
+2. `StepResult::run_block_reason` field added; defaults `NONE`  
+3. Single typed catch in `executeRetrieval` maps **`E2RuntimeHeuristicGuardViolation` → `RUNTIME_HEURISTIC_GUARD`**  
+4. Generic catch paths **do not mutate** `run_block_reason` (field stays default `NONE` unless typed guard catch matched)  
+5. **No** plan/step JSON inference; **no** string parsing; **no** evaluator/harness/RAG changes  
+6. **`e2RunBlockReasonFromException()` stub unchanged** (always `NONE`)  
+7. E2-12, E2-13, E2-14 green; E2-01–E2-11 regression green  
+8. A5 harness matches § 6a snapshot  
+9. **Pause for confirmation** — then **B3** (case propagation + `resolveEvaluation()`)
+
+**Time estimate:** **~1 hour** (smaller than v1 — fewer files)
+
+**Files touched:** `workflow_engine.h`, `workflow_engine.cpp`, `tests/unit_tests.cpp` only.
+
+**Status:** ✅ **B2 implemented** (2026-07-02). **B2.1 complete — paused before B3** (see **§ B.2.1k**).
+
+##### B2.0k — B2 completion snapshot
+
+| Check | Result |
+|-------|--------|
+| Unit tests | exit **0** — includes `testE2RunBlockReasonGuardCapture` (E2-12), `testE2RunBlockReasonHappyPathNone` (E2-13), `testE2RunBlockReasonArmStatusUnchanged` (E2-14) |
+| A5 harness | exit **0**, `equivalence=yes` (matches § 6a behavior) |
+| `e2RunBlockReasonFromException()` | B1 stub unchanged (always `NONE`) |
+| Case eval `run_block_reason` on happy paths | **`NONE`** (B3 owns case propagation) |
+
+**B2 files touched:** `workflow_engine.h`, `workflow_engine.cpp`, `tests/unit_tests.cpp` only.
+
+---
+
+#### B.2.1 — Pre-B3 stabilization plan (transport integrity — **v3**)
+
+**Context:** B2 is implemented. Before B3 adds **interpretation**, lock transport integrity and freeze the meaning of `StepResult.run_block_reason`.
+
+**Scope:** Stabilization only — **not** new features, normalization, or scoring.
+
+##### Causal separation model (what this enforces)
+
+This is not just a pipeline — it enforces **event ≠ observation ≠ evaluation** (same structure as evaluation frameworks, distributed tracing, formal benchmarking):
+
+| Layer | Phase | Responsibility |
+|-------|-------|------------------|
+| **1 — Event source** | A5 | Throws exception (`E2RuntimeHeuristicGuardViolation`) |
+| **2 — Observation** | B2 | Records event as **raw fact** on `StepResult` |
+| **3 — Evaluation** | B3 | Interprets observation + arm status → `evaluation_resolution` |
+
+**B2 must NEVER interpret whether the event matters.** Forbidden in B2/B2.1:
+
+- fallback reasoning  
+- semantic normalization  
+- plan awareness  
+- arm awareness  
+
+B3 is the **first phase where interpretation begins.**
+
+##### Semantic freeze (mandatory doc statement)
+
+> **`StepResult.run_block_reason` is semantically frozen after B2 completion.**
+
+Not necessarily `const` in code — but **meaning is locked**: later phases must not “quietly improve” transport for convenience (normalize `NONE`, infer missing blocks, clean inconsistent step results).
+
+| Rule | Meaning |
+|------|---------|
+| **B3 reads facts** | Consume `StepResult` as recorded |
+| **B3 does not repair observations** | No normalization of bad B2 output |
+| **B3 MUST NOT modify `StepResult`** | **Only consume it** — no in-place cleanup, backfill, or “fixup” on transport objects |
+
+This prevents the common evaluation failure mode where resolution layers **rewrite instrumentation** for convenience.
+
+##### Issue 1 — `executeStep` field forwarding (hidden coupling risk)
+
+**Current state:** Two code paths touch the field:
+
+| Path | Role |
+|------|------|
+| **Semantic write** | `executeRetrieval` typed catch → **only** site that may assign non-`NONE` |
+| **Structural forward** | `executeStep`: copies `currentAttempt.run_block_reason → result` |
+
+**Risk:** If `currentAttempt.run_block_reason` is ever derived, normalized, or default-filled upstream, `executeStep` becomes an **implicit transformation layer**.
+
+**Safer invariant (v3):**
+
+> **`executeStep` MUST NOT mutate `run_block_reason` in any semantic form.**
+
+The copy is **pure field forwarding with no meaning** — not “pass-through logic,” not normalization.
+
+**Single-assignment per invocation (v3 — tightens whitelist):**
+
+> **`executeStep` must perform exactly one `run_block_reason` assignment per invocation** — forward the value after the attempt loop resolves, **not** separate success/failure branch writes.
+
+**Why:** Allowing “success branch + failure branch” invites dual-write semantics later (e.g. success → `NONE`, failure → override).
+
+```
+ALLOWED (structural only — once per executeStep return path):
+  result.run_block_reason = currentAttempt.run_block_reason;   // single site, after attempt outcome known
+
+FORBIDDEN in executeStep:
+  two branch-based assignments (success vs failure)
+  assign any literal (including NONE)
+  conditional assignment on run_block_reason
+  branch / if on run_block_reason value
+  merge, max, coalesce, or infer from error_message / arm / plan
+  “helpful” reset after failed attempt
+```
+
+**B2.1 implementation note:** Refactor current dual-branch copies (~L310, ~L317) to **one forward** immediately before `return result` (or once after loop break), preserving behavior.
+
+**Fix plan:**
+
+| Step | Work |
+|------|------|
+| **B2.1a** | Single forward assignment + comment: `// B2 — one structural forward per invocation; no semantic mutation` |
+| **B2.1b** | **`testE2RunBlockReasonWriteSiteAudit`** — see below |
+| **B2.1c** | Confirm dispatcher catches in `executeStep` never mention `run_block_reason` |
+
+##### Issue 2 — `NONE` semantics (B3 boundary)
+
+**Construction default (B2):** `StepResult::run_block_reason = NONE` at struct init; no explicit overwrite in generic catches.
+
+> **`NONE` = absence of signal** — not a classification, not “no processing happened,” not “scorable by default.”
+
+**Additional B3 safety invariant (v3):**
+
+> **`NONE` MUST NOT be interpreted as `SCORED_SUCCESS` without explicit arm confirmation.**
+
+`NONE` only means “no block event was captured” — it does **not** imply pass, lift success, or scorable outcome. Resolution must still run the arm/lift/table path and only then derive success.
+
+| Value | Meaning |
+|-------|---------|
+| `NONE` | No block event at observation boundary — **not** implicit success |
+| non-`NONE` | Raw fact: guard event was captured |
+
+**B3 hidden risk (watch for):** Normalize `StepResult`, infer missing blocks, treat `NONE` as implicit pass → **silent scoring inflation / pass-through bias**.
+
+**B3 must:**
+
+- **`NONE` → arm/resolution branch** (after mechanical copy only) — not `SCORED_SUCCESS` by default  
+- **non-`NONE` → `NOT_SCORABLE`** (block-first; arm ignored)  
+- **Never modify `StepResult`** — consume only  
+
+##### B2.1d — Static audit test (`testE2RunBlockReasonWriteSiteAudit`)
+
+Scan `workflow_engine.cpp` for **`run_block_reason`** assignments.
+
+**Must enforce ALL of:**
+
+| Rule | Reject if |
+|------|-----------|
+| Single semantic write | Any non-`NONE` literal outside typed `E2RuntimeHeuristicGuardViolation` catch |
+| No conditional semantic writes | `if` / `?:` / `switch` on same line or block as `run_block_reason =` |
+| No post-assignment reset | `NONE` assigned after non-`NONE` in same function (except struct default init) |
+| No branch overwrites in `executeRetrieval` | Multiple semantic assignments outside catch + init |
+| **Exactly one forward in `executeStep`** | More than one `run_block_reason =` assignment in `executeStep` body |
+| No branch-differentiated forwards | Success vs failure branches both assigning (dual-write pattern) |
+| No normalization helpers | Functions that “clean up” `run_block_reason` |
+
+**Allowed assignment sites (whitelist — v3):**
+
+1. `StepResult` default member init (implicit)  
+2. `executeRetrieval` — typed guard catch → `RUNTIME_HEURISTIC_GUARD`  
+3. `executeStep` — **exactly one** structural forward per invocation (not per branch)  
+
+##### B2.1e — B3 preamble items (fold into B3 plan when written)
+
+| Item | Constraint |
+|------|------------|
+| **B2.1f** | Causal separation + semantic freeze + **B3 must not modify `StepResult`** |
+| **B2.1g** | `NONE` table + **no SUCCESS without arm confirmation** |
+| **B2.1h** | Case field = mechanical copy from `StepResult` — no plan scan |
+| **B2.1i** | E2-12 precedence tests (block-first, arm ignored when blocked) |
+| **B2.1j** | Freeze statement in `docs/E2_PROTOCOL.md` § observation layer (optional one paragraph) |
+
+##### Pre-B3 checkpoint (must pass before B3 implementation)
+
+| # | Condition |
+|---|-----------|
+| 1 | Audit test green — whitelist + single forward in `executeStep` |
+| 2 | `executeStep` — one structural forward per invocation; no semantic mutation |
+| 3 | **`StepResult` semantically frozen** — B3 consume-only, no repair |
+| 4 | **`NONE` = absence of signal** — not implicit success |
+| 5 | Causal separation documented (event / observation / evaluation) |
+| 6 | A5 harness + E2-01–E2-14 regression green after B2.1 |
+| 7 | **Pause for confirmation** — then B3 |
+
+**Estimated effort:** B2.1 implementation **~30–45 minutes** (single forward refactor + comments + audit test + freeze statement).
+
+**Files (B2.1 only):** `workflow_engine.cpp`, `tests/unit_tests.cpp`, `cursor_list.md` (+ optional `docs/E2_PROTOCOL.md` paragraph).
+
+**Expert assessment (v3):** Structurally correct; stabilization scoped; strict instrumentation model; B3 interpretation boundary isolated.
+
+**Status:** ✅ **B2.1 implemented** (2026-07-02). **Paused before B3.**
+
+##### B2.1k — B2.1 completion snapshot
+
+| Check | Result |
+|-------|--------|
+| `executeStep` | Single structural forward per invocation (not dual-branch) |
+| `executeRetrieval` | Typed guard catch — sole semantic write |
+| `testE2RunBlockReasonWriteSiteAudit` | Green — 2 total assignments in `workflow_engine.cpp` |
+| Unit tests + A5 harness | Regression green (post-implement) |
+| `docs/E2_PROTOCOL.md` | Observation layer + semantic freeze paragraph added |
+
+**Files touched:** `workflow_engine.h`, `workflow_engine.cpp`, `tests/unit_tests.cpp`, `docs/E2_PROTOCOL.md`, `cursor_list.md`
+
+---
+
+#### B.3.0 — B3 implementation plan (evaluation interpretation — **v4.1**)
+
+**Goal:** Land **evaluation semantics** — **`evaluation_resolution = f(run_block_reason, arm_status)`** via `resolveEvaluation()`, precedence, rollup, and derived `e2_outcome`.
+
+**Scope split (v4 discipline):**
+
+| In B3 | Deferred |
+|-------|----------|
+| `resolveEvaluation()` + `evaluation_resolution` | `PlanStepOutcome` envelope refactor → **§ B.3.1 post–Phase B** |
+| Block-first precedence (Rules A–D) | Full `StepResult` envelope merge (`error_message`, `latency_ms`, …) |
+| `applyCaseEvaluationResolution()`, summary rollup | `PlanStep.to_json()` envelope serialization |
+| **Minimal transport** only — **single struct copy** at existing merge site | JSON observation keys / rehydration / merge helpers |
+
+**Why v4:** Keeps B3 about **interpretation**, not architecture cleanup. Lower risk, easier debug, same mathematical contract as v2/v3. Transport choice does **not** change evaluation semantics if values are identical.
+
+**Mental model:**
+
+```
+B2 produces:   StepResult.run_block_reason
+B3 transport:  PlanStep.run_block_reason  (= single struct copy at handle_step_completion — temporary)
+B3 consumes:   CaseEvaluation.run_block_reason  (= warm arm single source)
+B3 interprets: resolveEvaluation(block, arm) → evaluation_resolution → derived e2_outcome
+```
+
+##### Causal separation (frozen)
+
+| Layer | Phase | Role |
+|-------|-------|------|
+| Event | A5 | Guard throws |
+| Observation | B2 | `StepResult.run_block_reason` — **sole observation object** |
+| **Transport** | **B3 (non-semantic, minimal)** | Survive `StepResult` across async executive completion |
+| **Evaluation** | **B3** | `resolveEvaluation()` → **`evaluation_resolution`** |
+
+##### B3.0a — Removed from v1 (DO NOT implement)
+
+| Removed | Why |
+|---------|-----|
+| ~~`step.result["e2_observation_run_block_reason"]` JSON export~~ | Second transport layer |
+| ~~`observationRunBlockReasonFromRetrievalStep()`~~ | Re-parsing serialized observation |
+| ~~JSON rehydration into evaluation~~ | Breaks single observation guarantee |
+| ~~`mergeCaseRunBlockReason(cold, warm)`~~ | Multi-source reconciliation |
+| ~~`EpisodicLearningArmObservation::run_block_reason`~~ | Duplicate observation carrier |
+
+##### B3.0b — Minimal transport (existing architecture)
+
+**Problem:** Harness reads `Plan` after `execute_goal`; `StepResult` is ephemeral. Today `handle_step_completion` copies only `result.data` → `step.result` and drops `run_block_reason`.
+
+**B3 fix (minimal):** One temporary native field on `PlanStep`:
+
+```cpp
+// plan.h — transport only; NOT evaluation state; refactor target → PlanStepOutcome (§ B.3.1)
+E2RunBlockReason run_block_reason = E2RunBlockReason::NONE;
+```
+
+**Merge** (`handle_step_completion` — **sole write site**):
+
+```cpp
+step.result = result.data;
+step.status = result.success ? StepStatus::SUCCESS : StepStatus::FAILED;
+step.run_block_reason = result.run_block_reason;   // single struct copy — no parsing, NOT step.result JSON
+```
+
+**Copy chain:**
+
+```
+StepResult.run_block_reason
+  → PlanStep.run_block_reason              [handle_step_completion — single struct copy]
+  → E2CaseArmPlumbingResult.run_block_reason [warm RETRIEVAL step read]
+  → CaseEvaluation.run_block_reason          [warm arm only — single source]
+  → resolveEvaluation()                    [after semantics wired — see § B.3.0f]
+```
+
+| Rule | Meaning |
+|------|---------|
+| **Single observation value** | Same enum value end-to-end; transport is survival copy only |
+| **Single source per case** | `eval.run_block_reason = warmArm.run_block_reason` — **no merge** |
+| **No JSON observation keys** | Never write block reason into `step.result` |
+| **Unit tests** | E2-15–17 may set `eval.run_block_reason` or read `StepResult` directly — no harness |
+
+**Helper (harness):** `runBlockReasonFromPlan(const Plan& plan)` — locate warm RETRIEVAL step, return `step.run_block_reason` (struct field — not JSON parse).
+
+##### B3.0c — B3 core (evaluation semantics)
+
+**Functions** (`episodic_learning_eval.h/.cpp`):
+
+```cpp
+E2EvaluationResolution resolveEvaluation(E2RunBlockReason run_block_reason,
+                                       E2ArmScoringStatus arm_status);
+
+E2ArmScoringStatus caseArmStatusForResolution(
+    const EpisodicLearningArmObservation& cold,
+    const EpisodicLearningArmObservation& warm);
+
+void applyCaseEvaluationResolution(EpisodicLearningCaseEvaluation& eval);
+
+E2Outcome deriveE2OutcomeFromResolution(E2EvaluationResolution resolution, ...);
+```
+
+**Precedence (block-first — canonical):**
+
+```
+if run_block_reason != NONE  → NOT_SCORABLE   // arm NOT read
+if arm is any FAILED_*       → SCORED_FAILURE
+else                         → SCORED_SUCCESS
+```
+
+**Rules A–D:** Block dominates · `NONE` ≠ success · B3 read-only on B2 · two inputs only · **`resolveEvaluation()` never reads `e2_outcome`**.
+
+**One-direction dependency:**
+
+```cpp
+eval.evaluation_resolution = resolveEvaluation(eval.run_block_reason, arm_status);
+eval.e2_outcome = deriveE2OutcomeFromResolution(eval.evaluation_resolution, ...);  // derived only
+```
+
+##### B3.0d — Integration point (per case)
+
+```
+1. evaluateEpisodicLearningCase() — table/lift UNCHANGED
+2. eval.run_block_reason = warmArm.run_block_reason   // single source (from minimal transport)
+3. applyCaseEvaluationResolution(eval)
+4. summarizeEpisodicLearning() — scorable/not_scorable rollup + derived e2_outcome
+```
+
+##### B3.0e — Hard constraints (DO NOT)
+
+- Modify RAG / A5 / B2 capture / `executeStep`  
+- JSON export or rehydration of `run_block_reason`  
+- `mergeCaseRunBlockReason` or cold/warm block reconciliation  
+- String parsing / heuristic inference of block reason  
+- Modify or "repair" `StepResult`  
+- Treat `NONE` as implicit success  
+- **`PlanStepOutcome` in B3** — defer to § B.3.1  
+
+##### B3.0f — Implementation order (plumbing before integration tests)
+
+**Principle:** End-to-end resolver tests need observation at `CaseEvaluation` — land transport first (no scoring behavior change), then semantics, then integration.
+
+| Phase | Order | Work | Behavior change? |
+|-------|-------|------|------------------|
+| **A — Transport** | **1** | `plan.h` — `PlanStep.run_block_reason` (default `NONE`) | No |
+| | **2** | `executive_controller.cpp` — **single struct copy** in `handle_step_completion` | No |
+| | **3** | `run_episodic_learning_benchmark.cpp` — `E2CaseArmPlumbingResult.run_block_reason`; warm-arm → `eval.run_block_reason` | No — field populated; **`evaluation_resolution` not consulted yet** |
+| | **4** | `episodic_learning_eval.cpp` — `runBlockReasonFromPlan()` helper | No |
+| | **5** | `tests/unit_tests.cpp` — **E2-18** transport merge smoke test | No |
+| **B — Semantics** | **6** | `episodic_learning_eval.h/.cpp` — `resolveEvaluation()`, `caseArmStatusForResolution()` (pure; no side effects) | No until wired |
+| | **7** | `tests/unit_tests.cpp` — **E2-15, E2-16, E2-17** — resolver in isolation | Tests resolver only |
+| **C — Wire + derive** | **8** | `applyCaseEvaluationResolution()`, `deriveE2OutcomeFromResolution()` | Yes — first scoring semantics |
+| | **9** | `summarizeEpisodicLearning()` — rollup (`scorable_cases`, `not_scorable_cases`, derived `e2_outcome`) | Yes |
+| | **10** | Call `applyCaseEvaluationResolution()` in case assembly path | Yes |
+| **D — Integration** | **11** | `tests/unit_tests.cpp` — **E2-12** integrated path (transport + resolver + precedence) | Yes |
+| | **12** | Full regression — E2-01–E2-14, B2.1 audit, A5 harness | Verify no unintended drift |
+
+**Do not touch:** `workflow_engine.cpp` B2 capture, `rag.cpp`, `step.result` JSON schema.
+
+##### B3.0g — Tests (run in phase order)
+
+| Phase | ID | Asserts |
+|-------|-----|---------|
+| Transport | **E2-18** | `handle_step_completion`: `StepResult` → `PlanStep.run_block_reason` (**single struct copy**) |
+| Resolver (isolated) | **E2-15** | GUARD + arm OK → `NOT_SCORABLE` |
+| | **E2-16** | NONE + `FAILED_RETRIEVAL` → `SCORED_FAILURE` |
+| | **E2-17** | NONE + arm OK → `SCORED_SUCCESS` |
+| Integrated | **E2-12** | Case `run_block_reason=GUARD` + arm fail → `NOT_SCORABLE` |
+| Regression | — | E2-01–E2-14, B2.1 audit, A5 harness |
+
+##### B3.0h — Exit criteria
+
+1. **`resolveEvaluation()`** — deterministic, block-first, 2 inputs only  
+2. **`evaluation_resolution`** canonical; `e2_outcome` derived only  
+3. **Minimal transport** — **single struct copy**; no JSON; no merge; warm arm single source  
+4. E2-18 → E2-15/16/17 → E2-12 green; full regression green  
+5. Rollup metrics populated (`scorable_cases`, `not_scorable_cases`)  
+6. **Pause for review before B4** — confirm checkpoint; then JSONL export + re-baseline
+
+**Estimate:** **2–3 hours** · **Files:** `episodic_learning_eval.*`, `plan.h`, `executive_controller.cpp`, `run_episodic_learning_benchmark.cpp`, `tests/unit_tests.cpp`
+
+---
+
+#### B.3.1 — Planned architectural refactor (post–Phase B — **not B3**)
+
+**Trigger:** After B6 golden re-baseline green and Phase B exit gate (§ B.5) confirmed.
+
+**Goal:** Replace temporary `PlanStep.run_block_reason` with structured **`PlanStepOutcome`** envelope — complete the incomplete `StepResult` → `PlanStep` merge without changing evaluation semantics.
+
+```cpp
+struct PlanStepOutcome {
+    E2RunBlockReason run_block_reason = E2RunBlockReason::NONE;
+    // optional: error_message, latency_ms, final_retry_count
+};
+struct PlanStep {
+    nlohmann::json result;       // domain payload only
+    PlanStepOutcome outcome;     // execution envelope
+};
+```
+
+| Property | Requirement |
+|----------|-------------|
+| **Semantic equivalence** | Bit-identical `run_block_reason` at case eval boundary vs B3 minimal transport |
+| **Regression** | E2-18 adapted; full E2 suite + A5 harness green |
+| **Scope** | Refactor/relocate field only — **no** `resolveEvaluation()` changes |
+| **Serialization** | Optional `PlanStep.to_json()` envelope fields in same pass or later |
+
+**Rationale recorded:** Correct long-term abstraction (payload vs envelope separation). Deferred from B3 to preserve A1–B2.1 discipline — semantics first, architecture cleanup after authoritative baseline.
+
+
+---
+
+#### B.4.0 — B4 implementation plan (JSONL export — **v1**)
+
+**Goal:** Turn internal B3 truth into a stable external JSONL contract — **export-only**; no evaluation semantics changes.
+
+| In B4 | Forbidden |
+|-------|-----------|
+| `caseEvaluationToJson()` / `episodicLearningSummaryToJson()` completeness | Modify `resolveEvaluation()` |
+| Conditional `e2_outcome` (omit when `NOT_SCORABLE`) | New runtime persisted fields |
+| `scoring_block_reason`, `not_scorable_by_reason`, `success_rate` | Harness inline case/summary JSON |
+| `episodicLearningCaseLogRow()` / `episodicLearningSummaryLogRow()` | B3/B3.1 behavior changes |
+
+**Invariant:** `e2_outcome` is never stored as source-of-truth — only derived at export time via `e2OutcomeForExport()`.
+
+**Status:** ✅ **B4 implemented** (2026-07-02). **Paused before B5.**
+
+##### B4 completion snapshot
+
+| Check | Result |
+|-------|--------|
+| Export helpers | `e2OutcomeForExport()`, `notScorableByReasonMap()`, `successRateForExport()` |
+| Unified serializers | Harness uses `episodicLearning*LogRow()` only — no inline case/summary JSON |
+| Tests E2-20–E2-24 | Export contract green |
+| `docs/E2_PROTOCOL.md` | Export layer + single-authority rule documented |
+
+---
+
+#### B.2 — Harness branch (after B1–B4)
+
+```
+THOTH_E2_WIRING_STAGE unset → default "B" (after Phase B lands)
+
+A5:  kernel + guard; no official scoring
+B:   official_scoring: true; evaluation_resolution emitted; e2_outcome only when SCORED_*
+     run_block_reason / scoring_block_reason when NOT_SCORABLE
+SCORING: legacy dev knob — never authoritative
+```
+
+#### B.3 — Gate contract (official run)
+
+| Field | Phase B value |
+|-------|----------------|
+| `official_scoring` | `true` |
+| `scoring_enabled` | `true` |
+| **`evaluation_resolution`** | **Canonical** per case + run rollup: `SCORED_SUCCESS` \| `SCORED_FAILURE` \| `NOT_SCORABLE` |
+| `scoring_block_reason` | Metadata export when `NOT_SCORABLE` (not a second authority) |
+| `e2_outcome` | **Derived** — emitted **only** for `SCORED_*` |
+| `scorable_cases` / `not_scorable_cases` | Rollup visibility — `NOT_SCORABLE` counted explicitly |
+| `success_rate` | Scorable-only denominator |
+| `wiring_stage` | `"B"` |
+
+---
+
+#### B.4 — Tests
+
+| ID | Asserts |
+|----|---------|
+| **E2-01–E2-11** | Regression (unchanged) |
+| **E2-12** | Guard transport → case `NOT_SCORABLE` even if arm `FAILED_RETRIEVAL` |
+| **E2-13** | `NONE` + `FAILED_RETRIEVAL` → `SCORED_FAILURE` |
+| **E2-14** | Happy path arm status unchanged (B2 wiring) |
+| **E2-15** | `GUARD` + arm OK → `NOT_SCORABLE` (B3 resolver) |
+| **E2-16** | `NONE` + `FAILED_RETRIEVAL` → `SCORED_FAILURE` |
+| **E2-17** | `NONE` + arm OK → `SCORED_SUCCESS` |
+| **E2-18** | `handle_step_completion` transport merge: `StepResult` → `PlanStep.run_block_reason` |
+| **E2-14** | Full golden trio under official config → `SCORED_SUCCESS` + authoritative derived `e2_outcome`; **additionally assert:** `not_scorable_cases == 0` **OR** explicitly documented non-zero count with `not_scorable_by_reason` breakdown (baseline must not hide guard activity by excluding it from metrics) |
+| **Precedence** | Block + arm failure (e.g. guard + `FAILED_RETRIEVAL`) → `NOT_SCORABLE` wins; **arm ignored** |
+| **Rollup hygiene** | `success_rate` uses scorable denominator only; `not_scorable_cases` always emitted on official runs |
+
+---
+
+#### B.5 — Exit criteria (stop before Phase C)
+
+1. Build green  
+2. Failure semantics: guard ≠ arm status ≠ outcome (three-axis verified)  
+3. **`evaluation_resolution` is sole canonical decision field** — pure; **never reads `e2_outcome`**; one-direction dependency enforced  
+4. **Block-first:** when `run_block_reason != NONE`, `arm_status` ignored for scoring — enforced in `resolveEvaluation()`, not implied  
+5. `e2_outcome` derived from resolution only — no drift paths  
+6. Arm status never encodes structural aborts (boundary rule verified)  
+7. `scoring_block_reason` + rollup metrics implemented — `NOT_SCORABLE` visible, not silently dropped  
+8. Precedence tests green (E2-12 block+arm, E2-13 non-block only, E2-14 rollup assertions)  
+9. First authoritative re-baseline logged with fingerprint + `scorable_cases` / `not_scorable_cases`  
+10. A1–A5 invariants preserved  
+11. **Pause for confirmation** — Phase C (INTEGRATION tier) next  
+
+#### B files (expected)
+
+`episodic_learning_eval.h/.cpp`, `run_episodic_learning_benchmark.cpp`, `workflow_engine.cpp` (guard exception path only), `tests/unit_tests.cpp`, `docs/E2_PROTOCOL.md`, `cursor_list.md` — **no** `e2StrictRetrieve` ranking changes; **no** A5 guard policy change
+
+---
 
 ### Separation debt (acknowledged)
 

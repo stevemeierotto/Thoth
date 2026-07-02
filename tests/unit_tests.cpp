@@ -3816,7 +3816,8 @@ static Thoth::EpisodicLearningArmObservation runE2TestArm(
     const Thoth::EpisodicLearningCase& spec,
     const std::string& armLabel,
     const Thoth::BenchmarkAttribution& attribution,
-    Thoth::SealedEpisodeInjectionLog* sealedLogOut = nullptr) {
+    Thoth::SealedEpisodeInjectionLog* sealedLogOut = nullptr,
+    Thoth::E2RunBlockReason* runBlockReasonOut = nullptr) {
     setenv("THOTH_MOCK_EPISODIC", "1", 1);
     setenv("THOTH_MOCK_LLM", "true", 1);
 
@@ -3889,6 +3890,10 @@ static Thoth::EpisodicLearningArmObservation runE2TestArm(
     }
 
     controller.clear_e2_strict_eval_context();
+
+    if (runBlockReasonOut) {
+        *runBlockReasonOut = Thoth::runBlockReasonFromPlan(controller.get_current_plan());
+    }
 
     switch (controller.get_state()) {
         case Thoth::ControllerState::COMPLETED:
@@ -4791,6 +4796,676 @@ static bool testE2RuntimeHeuristicGuard() {
     return true;
 }
 
+/** B1 — schema only: enums, defaults, JSON stubs; no active block/resolution semantics. */
+static bool testE2B1BlockResolutionSchema() {
+    Thoth::EpisodicLearningCaseEvaluation defaultEval;
+    if (defaultEval.run_block_reason != Thoth::E2RunBlockReason::NONE ||
+        defaultEval.evaluation_resolution.has_value()) {
+        std::cerr << "testE2B1BlockResolutionSchema: default case eval must be NONE / unset resolution\n";
+        return false;
+    }
+
+    Thoth::EpisodicLearningSummary defaultSummary;
+    if (defaultSummary.scorable_cases != 0 || defaultSummary.not_scorable_cases != 0 ||
+        defaultSummary.evaluation_resolution.has_value()) {
+        std::cerr << "testE2B1BlockResolutionSchema: default summary rollup must be zero / unset\n";
+        return false;
+    }
+
+    const std::vector<Thoth::E2RunBlockReason> reasons = {
+        Thoth::E2RunBlockReason::NONE,
+        Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD,
+        Thoth::E2RunBlockReason::WIRING_GATE,
+        Thoth::E2RunBlockReason::STRICT_BOUNDARY_VIOLATION,
+        Thoth::E2RunBlockReason::PROVENANCE_VIOLATION,
+    };
+    for (const auto reason : reasons) {
+        if (Thoth::e2RunBlockReasonToString(reason).empty()) {
+            std::cerr << "testE2B1BlockResolutionSchema: empty block reason string\n";
+            return false;
+        }
+    }
+    if (Thoth::e2RunBlockReasonToProtocolString(Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD) !=
+        "LINK:RUNTIME_HEURISTIC") {
+        std::cerr << "testE2B1BlockResolutionSchema: guard protocol string mismatch\n";
+        return false;
+    }
+
+    try {
+        throw Thoth::E2RuntimeHeuristicGuardViolation();
+    } catch (const std::exception& e) {
+        if (Thoth::e2RunBlockReasonFromException(e) != Thoth::E2RunBlockReason::NONE) {
+            std::cerr << "testE2B1BlockResolutionSchema: B1 stub must return NONE for guard\n";
+            return false;
+        }
+    }
+
+    Thoth::EpisodicLearningExpectations positive;
+    positive.expect_warm_retrieval_hit = true;
+    positive.lift_constraint = Thoth::EpisodicLiftConstraint::GTE;
+    positive.lift_threshold = Thoth::kEpisodicLearningLiftMargin;
+    positive.include_in_mean_episodic_lift = true;
+
+    Thoth::EpisodicLearningArmObservation cold;
+    cold.terminal_state = "FAILED";
+    cold.final_success_score = 0.0f;
+    Thoth::EpisodicLearningArmObservation warm;
+    warm.terminal_state = "COMPLETED";
+    warm.final_success_score = 1.0f;
+    warm.retrieval.warm_retrieval_hit = true;
+
+    const auto passEval = Thoth::evaluateEpisodicLearningCase(
+        "b1-schema", positive, cold, warm, makeE2StrictTestConfig());
+    if (passEval.run_block_reason != Thoth::E2RunBlockReason::NONE ||
+        passEval.evaluation_resolution.has_value()) {
+        std::cerr << "testE2B1BlockResolutionSchema: evaluator path must leave block NONE in B1\n";
+        return false;
+    }
+
+    const auto summary = Thoth::summarizeEpisodicLearning(
+        {passEval}, {positive}, makeE2StrictTestConfig());
+    for (const auto& row : summary.case_results) {
+        if (row.run_block_reason != Thoth::E2RunBlockReason::NONE) {
+            std::cerr << "testE2B1BlockResolutionSchema: summary case has non-NONE block in B1\n";
+            return false;
+        }
+    }
+    if (summary.scorable_cases != 0 || summary.not_scorable_cases != 0 ||
+        summary.evaluation_resolution.has_value()) {
+        std::cerr << "testE2B1BlockResolutionSchema: summary rollup must remain inactive in B1\n";
+        return false;
+    }
+
+    const nlohmann::json caseJson = Thoth::caseEvaluationToJson(passEval);
+    if (caseJson.value("run_block_reason", "") != "NONE") {
+        std::cerr << "testE2B1BlockResolutionSchema: JSON stub must emit NONE\n";
+        return false;
+    }
+    if (caseJson.contains("evaluation_resolution")) {
+        std::cerr << "testE2B1BlockResolutionSchema: evaluation_resolution must not be emitted when unset\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool extractWorkflowEngineFunctionBody(const std::string& source,
+                                              const std::string& signature,
+                                              const std::string& nextSignature,
+                                              std::string* outBody) {
+    const auto fnPos = source.find(signature);
+    const auto fnEnd = source.find(nextSignature, fnPos);
+    if (fnPos == std::string::npos || fnEnd == std::string::npos || fnEnd <= fnPos) {
+        return false;
+    }
+    *outBody = source.substr(fnPos, fnEnd - fnPos);
+    return true;
+}
+
+static size_t countRunBlockReasonAssignments(const std::string& body) {
+    size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = body.find("run_block_reason", pos)) != std::string::npos) {
+        const std::size_t eq = body.find('=', pos);
+        if (eq != std::string::npos && eq - pos < 32) {
+            ++count;
+        }
+        pos = eq == std::string::npos ? pos + 1 : eq + 1;
+    }
+    return count;
+}
+
+/** B2.1 — whitelist audit for run_block_reason write sites in workflow_engine.cpp. */
+static bool testE2RunBlockReasonWriteSiteAudit() {
+    FileHandler fh;
+    const fs::path workflowPath =
+        fs::path(fh.getProjectRoot()) / "external" / "basic_agent" / "src" / "workflow_engine.cpp";
+    std::ifstream in(workflowPath);
+    if (!in.is_open()) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: cannot read workflow_engine.cpp\n";
+        return false;
+    }
+    const std::string source((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+
+    if (source.find("run_block_reason = E2RunBlockReason::NONE") != std::string::npos) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: explicit NONE reset forbidden\n";
+        return false;
+    }
+
+    std::string executeStepBody;
+    if (!extractWorkflowEngineFunctionBody(
+            source,
+            "StepResult WorkflowEngine::executeStep",
+            "std::future<StepResult> WorkflowEngine::executeStepAsync",
+            &executeStepBody)) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: executeStep body not found\n";
+        return false;
+    }
+
+    const size_t stepAssignments = countRunBlockReasonAssignments(executeStepBody);
+    if (stepAssignments != 1) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: executeStep must have exactly one forward, got "
+                  << stepAssignments << '\n';
+        return false;
+    }
+    if (executeStepBody.find("result.run_block_reason = currentAttempt.run_block_reason") ==
+        std::string::npos) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: executeStep forward pattern missing\n";
+        return false;
+    }
+    if (executeStepBody.find("RUNTIME_HEURISTIC_GUARD") != std::string::npos) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: executeStep must not assign guard enum\n";
+        return false;
+    }
+
+    std::string executeRetrievalBody;
+    if (!extractWorkflowEngineFunctionBody(
+            source,
+            "StepResult WorkflowEngine::executeRetrieval",
+            "\nStepResult WorkflowEngine::executeLLM",
+            &executeRetrievalBody)) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: executeRetrieval body not found\n";
+        return false;
+    }
+
+    const size_t retrievalAssignments = countRunBlockReasonAssignments(executeRetrievalBody);
+    if (retrievalAssignments != 1) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: executeRetrieval must have one semantic write, got "
+                  << retrievalAssignments << '\n';
+        return false;
+    }
+    const auto guardCatch = executeRetrievalBody.find("catch (const E2RuntimeHeuristicGuardViolation&");
+    const auto assignPos = executeRetrievalBody.find("run_block_reason = E2RunBlockReason::RUNTIME_HEURISTIC_GUARD");
+    if (guardCatch == std::string::npos || assignPos == std::string::npos ||
+        assignPos < guardCatch) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: guard catch semantic write missing\n";
+        return false;
+    }
+
+    const size_t totalAssignments = countRunBlockReasonAssignments(source);
+    if (totalAssignments != 2) {
+        std::cerr << "testE2RunBlockReasonWriteSiteAudit: expected 2 total assignments in file, got "
+                  << totalAssignments << '\n';
+        return false;
+    }
+
+    return true;
+}
+
+static Thoth::StepResult executeWorkflowRetrievalStep(
+    const std::shared_ptr<RAGPipeline>& rag,
+    const Thoth::StepExecutionContext& ctx,
+    const std::string& query) {
+    auto registry = std::make_shared<ToolRegistry>();
+    Thoth::WorkflowEngine workflow(registry, rag, nullptr, nullptr, nullptr);
+    PlanStep step;
+    step.step_id = "retrieve";
+    step.type = StepType::RETRIEVAL;
+    step.payload = {{"query", query}, {"top_k", 3}};
+    return workflow.executeStep(step, "e2-b2-plan", ctx);
+}
+
+/** E2-12 — B2 typed guard capture at workflow boundary (no plan inference). */
+static bool testE2RunBlockReasonGuardCapture() {
+    Config cfg;
+    cfg.max_reflections = 0;
+    cfg.database_path = makeTempPath("e2_b2_guard_capture").string();
+    fs::remove(cfg.database_path);
+
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    auto idx = new IndexManager(engine.get());
+    Thoth::addEpisodicEvalCorpusChunk(
+        engine.get(), idx, "Paris is the capital of France.", "france.md");
+
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+    const Thoth::E2EvalConfig strictConfig = makeE2StrictTestConfig();
+    rag->setActiveE2EvalConfig(&strictConfig);
+
+    Thoth::StepExecutionContext ctx;
+    const Thoth::StepResult result =
+        executeWorkflowRetrievalStep(rag, ctx, "capital of France");
+
+    delete idx;
+    fs::remove(cfg.database_path);
+
+    if (result.run_block_reason != Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD) {
+        std::cerr << "testE2RunBlockReasonGuardCapture: expected RUNTIME_HEURISTIC_GUARD, got "
+                  << Thoth::e2RunBlockReasonToString(result.run_block_reason) << '\n';
+        return false;
+    }
+    if (result.success) {
+        std::cerr << "testE2RunBlockReasonGuardCapture: expected failed step\n";
+        return false;
+    }
+    if (result.error_message.find("LINK:RUNTIME_HEURISTIC") == std::string::npos) {
+        std::cerr << "testE2RunBlockReasonGuardCapture: missing LINK diagnostic\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-13 — STRICT kernel dispatch leaves run_block_reason at default NONE. */
+static bool testE2RunBlockReasonHappyPathNone() {
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::EpisodicLearningCase* e201 = nullptr;
+    for (const auto& c : cases) {
+        if (c.id == "E2-01") {
+            e201 = &c;
+            break;
+        }
+    }
+    if (!e201) {
+        std::cerr << "testE2RunBlockReasonHappyPathNone: missing E2-01\n";
+        return false;
+    }
+
+    Config cfg;
+    cfg.max_reflections = 0;
+    cfg.database_path = makeTempPath("e2_b2_happy_none").string();
+    fs::remove(cfg.database_path);
+
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    auto idx = new IndexManager(engine.get());
+    if (!e201->index_distractor_text.empty()) {
+        Thoth::addEpisodicEvalCorpusChunk(engine.get(), idx, e201->index_distractor_text);
+    }
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+    const Thoth::E2EvalConfig strictConfig = makeE2StrictTestConfig();
+    rag->setActiveE2EvalConfig(&strictConfig);
+
+    const Thoth::SealedEpisodeInjectionLog sealedLog =
+        Thoth::buildStrictInjectionLogFromCaseTable(*e201, "warm", 1'700'000'000'000LL);
+
+    Thoth::StepExecutionContext ctx;
+    ctx.e2_strict_episode_log = &sealedLog;
+    ctx.e2_eval_config = &strictConfig;
+
+    const Thoth::StepResult result = executeWorkflowRetrievalStep(rag, ctx, e201->goal);
+
+    delete idx;
+    fs::remove(cfg.database_path);
+
+    if (result.run_block_reason != Thoth::E2RunBlockReason::NONE) {
+        std::cerr << "testE2RunBlockReasonHappyPathNone: expected NONE, got "
+                  << Thoth::e2RunBlockReasonToString(result.run_block_reason) << '\n';
+        return false;
+    }
+    if (!result.success) {
+        std::cerr << "testE2RunBlockReasonHappyPathNone: expected successful STRICT retrieval\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-14 — B2 wiring does not change arm scoring on golden happy paths. */
+static bool testE2RunBlockReasonArmStatusUnchanged() {
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::EpisodicLearningCase* spec = nullptr;
+    for (const auto& c : cases) {
+        if (c.id == "E2-01") {
+            spec = &c;
+            break;
+        }
+    }
+    if (!spec) {
+        std::cerr << "testE2RunBlockReasonArmStatusUnchanged: missing E2-01\n";
+        return false;
+    }
+
+    Thoth::BenchmarkAttribution attr{"e2-b2-run", "e2-b2-env"};
+    const auto cold = runE2TestArm(*spec, "cold", attr);
+    const auto warm = runE2TestArm(*spec, "warm", attr);
+    if (cold.arm_scoring_status != Thoth::E2ArmScoringStatus::OK ||
+        warm.arm_scoring_status != Thoth::E2ArmScoringStatus::OK) {
+        std::cerr << "testE2RunBlockReasonArmStatusUnchanged: arm status regression\n";
+        return false;
+    }
+
+    const auto eval = Thoth::evaluateEpisodicLearningCase(
+        spec->id, spec->expectations, cold, warm, makeE2StrictTestConfig());
+    if (eval.run_block_reason != Thoth::E2RunBlockReason::NONE) {
+        std::cerr << "testE2RunBlockReasonArmStatusUnchanged: case block should stay NONE in B2\n";
+        return false;
+    }
+    if (!eval.passes) {
+        std::cerr << "testE2RunBlockReasonArmStatusUnchanged: E2-01 failed\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-15 — block dominates arm: GUARD + arm OK → NOT_SCORABLE. */
+static bool testE2B3ResolveEvaluationGuardNotScorable() {
+    const Thoth::E2EvaluationResolution resolution = Thoth::resolveEvaluation(
+        Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD, Thoth::E2ArmScoringStatus::OK);
+    if (resolution != Thoth::E2EvaluationResolution::NOT_SCORABLE) {
+        std::cerr << "testE2B3ResolveEvaluationGuardNotScorable: expected NOT_SCORABLE, got "
+                  << Thoth::e2EvaluationResolutionToString(resolution) << '\n';
+        return false;
+    }
+    return true;
+}
+
+/** E2-16 — NONE + FAILED_RETRIEVAL → SCORED_FAILURE. */
+static bool testE2B3ResolveEvaluationArmFailure() {
+    const Thoth::E2EvaluationResolution resolution = Thoth::resolveEvaluation(
+        Thoth::E2RunBlockReason::NONE, Thoth::E2ArmScoringStatus::FAILED_RETRIEVAL);
+    if (resolution != Thoth::E2EvaluationResolution::SCORED_FAILURE) {
+        std::cerr << "testE2B3ResolveEvaluationArmFailure: expected SCORED_FAILURE, got "
+                  << Thoth::e2EvaluationResolutionToString(resolution) << '\n';
+        return false;
+    }
+    return true;
+}
+
+/** E2-17 — NONE + arm OK → SCORED_SUCCESS. */
+static bool testE2B3ResolveEvaluationArmSuccess() {
+    const Thoth::E2EvaluationResolution resolution = Thoth::resolveEvaluation(
+        Thoth::E2RunBlockReason::NONE, Thoth::E2ArmScoringStatus::OK);
+    if (resolution != Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+        std::cerr << "testE2B3ResolveEvaluationArmSuccess: expected SCORED_SUCCESS, got "
+                  << Thoth::e2EvaluationResolutionToString(resolution) << '\n';
+        return false;
+    }
+    return true;
+}
+
+/** E2-12 — integrated precedence: GUARD block + arm fail → NOT_SCORABLE. */
+static bool testE2B3BlockPrecedenceOverArmFailure() {
+    Thoth::EpisodicLearningCaseEvaluation eval;
+    eval.run_block_reason = Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD;
+    eval.cold.arm_scoring_status = Thoth::E2ArmScoringStatus::FAILED_RETRIEVAL;
+    eval.warm.arm_scoring_status = Thoth::E2ArmScoringStatus::FAILED_RETRIEVAL;
+    Thoth::applyCaseEvaluationResolution(eval);
+    if (!eval.evaluation_resolution.has_value() ||
+        *eval.evaluation_resolution != Thoth::E2EvaluationResolution::NOT_SCORABLE) {
+        std::cerr << "testE2B3BlockPrecedenceOverArmFailure: expected NOT_SCORABLE\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-18 — single struct copy: StepResult → PlanStep.outcome.run_block_reason at completion. */
+static bool testE2B3PlanStepTransportMerge() {
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::EpisodicLearningCase* spec = nullptr;
+    for (const auto& c : cases) {
+        if (c.id == "E2-01") {
+            spec = &c;
+            break;
+        }
+    }
+    if (!spec) {
+        std::cerr << "testE2B3PlanStepTransportMerge: missing E2-01\n";
+        return false;
+    }
+
+    Config cfg;
+    cfg.max_reflections = 0;
+    cfg.database_path = makeTempPath("e2_b3_transport_merge").string();
+    fs::remove(cfg.database_path);
+
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    auto idx = new IndexManager(engine.get());
+    Thoth::addEpisodicEvalCorpusChunk(
+        engine.get(), idx, spec->index_distractor_text.empty()
+                                ? "Paris is the capital of France."
+                                : spec->index_distractor_text);
+
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+    const Thoth::E2EvalConfig strictConfig = makeE2StrictTestConfig();
+    rag->setActiveE2EvalConfig(&strictConfig);
+
+    auto planner = std::make_shared<Thoth::EpisodicLearningMockPlanner>(spec->validation_token);
+    auto registry = std::make_shared<ToolRegistry>();
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    controller.set_max_reflections(0);
+    // Miswire: STRICT active on RAG but no strict dispatch context → heuristic guard trip.
+
+    Thoth::BenchmarkAttribution attr{"e2-b3-transport", "e2-b3-env"};
+    memory->setActiveSessionId("e2-b3-transport-goal");
+
+    std::atomic<bool> terminal{false};
+    controller.set_event_callback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_FAILED ||
+            ev.type == EventType::PLAN_ABORTED) {
+            terminal.store(true);
+        }
+    });
+
+    controller.execute_goal(spec->goal, attr);
+
+    int timeout = 150;
+    while (!terminal.load() && timeout > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        --timeout;
+    }
+
+    const Plan plan = controller.get_current_plan();
+    const Thoth::E2RunBlockReason fromHelper = Thoth::runBlockReasonFromPlan(plan);
+    bool sawRetrievalStep = false;
+    for (const auto& step : plan.steps) {
+        if (step.type == StepType::RETRIEVAL && step.status != StepStatus::PENDING &&
+            step.status != StepStatus::RUNNING) {
+            sawRetrievalStep = true;
+            if (step.outcome.run_block_reason != Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD) {
+                std::cerr << "testE2B3PlanStepTransportMerge: PlanStep.outcome.run_block_reason mismatch\n";
+                delete idx;
+                fs::remove(cfg.database_path);
+                return false;
+            }
+        }
+    }
+
+    delete idx;
+    fs::remove(cfg.database_path);
+
+    if (!sawRetrievalStep) {
+        std::cerr << "testE2B3PlanStepTransportMerge: no completed RETRIEVAL step\n";
+        return false;
+    }
+    if (fromHelper != Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD) {
+        std::cerr << "testE2B3PlanStepTransportMerge: runBlockReasonFromPlan mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-19 — B3.1 envelope equivalence: runBlockReasonFromPlan unchanged vs B3 contract. */
+static bool testE2B31PlanStepOutcomeEquivalence() {
+    const Thoth::E2RunBlockReason block = Thoth::runBlockReasonFromPlan(
+        []() {
+            Plan plan;
+            PlanStep step;
+            step.type = StepType::RETRIEVAL;
+            step.status = StepStatus::FAILED;
+            step.outcome.run_block_reason = Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD;
+            plan.steps.push_back(step);
+            return plan;
+        }());
+    if (block != Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD) {
+        std::cerr << "testE2B31PlanStepOutcomeEquivalence: helper read mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** B3.1 — PlanStep outcome serde round-trip + legacy top-level fallback. */
+static bool testE2B31PlanStepOutcomeSerde() {
+    PlanStep step;
+    step.step_id = "serde-step";
+    step.type = StepType::RETRIEVAL;
+    step.status = StepStatus::FAILED;
+    step.outcome.run_block_reason = Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD;
+
+    const nlohmann::json serialized = step.to_json();
+    if (!serialized.contains("outcome") ||
+        serialized["outcome"].value("run_block_reason", "") != "RUNTIME_HEURISTIC_GUARD") {
+        std::cerr << "testE2B31PlanStepOutcomeSerde: to_json missing outcome envelope\n";
+        return false;
+    }
+
+    const PlanStep roundTrip = PlanStep::from_json(serialized);
+    if (roundTrip.outcome.run_block_reason != Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD) {
+        std::cerr << "testE2B31PlanStepOutcomeSerde: round-trip mismatch\n";
+        return false;
+    }
+
+    const nlohmann::json legacy = {{"step_id", "legacy"},
+                                   {"type", static_cast<int>(StepType::RETRIEVAL)},
+                                   {"status", static_cast<int>(StepStatus::FAILED)},
+                                   {"run_block_reason", "RUNTIME_HEURISTIC_GUARD"}};
+    const PlanStep legacyStep = PlanStep::from_json(legacy);
+    if (legacyStep.outcome.run_block_reason != Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD) {
+        std::cerr << "testE2B31PlanStepOutcomeSerde: legacy top-level fallback failed\n";
+        return false;
+    }
+    return true;
+}
+
+/** B3.1 — sole write site audit for PlanStep.outcome.run_block_reason in executive_controller.cpp. */
+static bool testE2B31OutcomeWriteSiteAudit() {
+    std::ifstream in("external/basic_agent/src/executive_controller.cpp");
+    if (!in.is_open()) {
+        in.open("/home/steve/Thoth/external/basic_agent/src/executive_controller.cpp");
+    }
+    if (!in.is_open()) {
+        std::cerr << "testE2B31OutcomeWriteSiteAudit: cannot read executive_controller.cpp\n";
+        return false;
+    }
+    const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+    if (source.find("step.run_block_reason") != std::string::npos) {
+        std::cerr << "testE2B31OutcomeWriteSiteAudit: legacy step.run_block_reason must be removed\n";
+        return false;
+    }
+
+    std::size_t pos = 0;
+    int assignCount = 0;
+    while ((pos = source.find("outcome.run_block_reason", pos)) != std::string::npos) {
+        const std::size_t lineStart = source.rfind('\n', pos == 0 ? 0 : pos - 1);
+        const std::size_t lineEnd = source.find('\n', pos);
+        const std::string line =
+            source.substr(lineStart == std::string::npos ? 0 : lineStart + 1,
+                          lineEnd == std::string::npos ? std::string::npos : lineEnd - lineStart - 1);
+        if (line.find('=') != std::string::npos) {
+            ++assignCount;
+        }
+        pos += 1;
+    }
+
+    if (assignCount != 1) {
+        std::cerr << "testE2B31OutcomeWriteSiteAudit: expected 1 outcome assignment, got "
+                  << assignCount << '\n';
+        return false;
+    }
+    return true;
+}
+
+/** E2-20 — B4 export: NOT_SCORABLE case omits e2_outcome, emits scoring_block_reason. */
+static bool testE2B4ExportNotScorableCase() {
+    Thoth::EpisodicLearningCaseEvaluation eval;
+    eval.case_id = "E2-20";
+    eval.run_block_reason = Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD;
+    eval.evaluation_resolution = Thoth::E2EvaluationResolution::NOT_SCORABLE;
+    const nlohmann::json j = Thoth::caseEvaluationToJson(eval);
+    if (j.value("evaluation_resolution", "") != "NOT_SCORABLE") {
+        std::cerr << "testE2B4ExportNotScorableCase: missing NOT_SCORABLE resolution\n";
+        return false;
+    }
+    if (j.value("scoring_block_reason", "") != "LINK:RUNTIME_HEURISTIC") {
+        std::cerr << "testE2B4ExportNotScorableCase: scoring_block_reason mismatch\n";
+        return false;
+    }
+    if (j.contains("e2_outcome")) {
+        std::cerr << "testE2B4ExportNotScorableCase: e2_outcome must be omitted\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-21 — B4 export: SCORED_FAILURE derives e2_outcome FAILURE. */
+static bool testE2B4ExportScoredFailureCase() {
+    Thoth::EpisodicLearningCaseEvaluation eval;
+    eval.case_id = "E2-21";
+    eval.passes = false;
+    eval.evaluation_resolution = Thoth::E2EvaluationResolution::SCORED_FAILURE;
+    const nlohmann::json j = Thoth::caseEvaluationToJson(eval);
+    if (j.value("e2_outcome", "") != "FAILURE") {
+        std::cerr << "testE2B4ExportScoredFailureCase: expected FAILURE export\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-22 — B4 export: SCORED_SUCCESS derives e2_outcome SUCCESS. */
+static bool testE2B4ExportScoredSuccessCase() {
+    Thoth::EpisodicLearningCaseEvaluation eval;
+    eval.case_id = "E2-22";
+    eval.passes = true;
+    eval.evaluation_resolution = Thoth::E2EvaluationResolution::SCORED_SUCCESS;
+    const nlohmann::json j = Thoth::caseEvaluationToJson(eval);
+    if (j.value("e2_outcome", "") != "SUCCESS") {
+        std::cerr << "testE2B4ExportScoredSuccessCase: expected SUCCESS export\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-23 — B4 export: summary not_scorable_by_reason rollup. */
+static bool testE2B4ExportNotScorableSummaryRollup() {
+    Thoth::EpisodicLearningCaseEvaluation blocked;
+    blocked.case_id = "E2-23";
+    blocked.run_block_reason = Thoth::E2RunBlockReason::RUNTIME_HEURISTIC_GUARD;
+    blocked.evaluation_resolution = Thoth::E2EvaluationResolution::NOT_SCORABLE;
+
+    Thoth::EpisodicLearningSummary summary;
+    summary.case_results.push_back(blocked);
+    summary.not_scorable_cases = 1;
+    summary.evaluation_resolution = Thoth::E2EvaluationResolution::NOT_SCORABLE;
+
+    const nlohmann::json j = Thoth::episodicLearningSummaryToJson(summary);
+    if (j.value("not_scorable_cases", 0) != 1) {
+        std::cerr << "testE2B4ExportNotScorableSummaryRollup: not_scorable_cases mismatch\n";
+        return false;
+    }
+    if (j["not_scorable_by_reason"].value("RUNTIME_HEURISTIC_GUARD", 0) != 1) {
+        std::cerr << "testE2B4ExportNotScorableSummaryRollup: breakdown mismatch\n";
+        return false;
+    }
+    if (j.contains("e2_outcome")) {
+        std::cerr << "testE2B4ExportNotScorableSummaryRollup: summary e2_outcome must be omitted\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-24 — B4 export: success_rate uses scorable-only denominator. */
+static bool testE2B4ExportSuccessRateScorableOnly() {
+    Thoth::EpisodicLearningCaseEvaluation blocked;
+    blocked.evaluation_resolution = Thoth::E2EvaluationResolution::NOT_SCORABLE;
+
+    Thoth::EpisodicLearningCaseEvaluation scoredFail;
+    scoredFail.evaluation_resolution = Thoth::E2EvaluationResolution::SCORED_FAILURE;
+
+    Thoth::EpisodicLearningCaseEvaluation scoredPass;
+    scoredPass.passes = true;
+    scoredPass.evaluation_resolution = Thoth::E2EvaluationResolution::SCORED_SUCCESS;
+
+    const std::vector<Thoth::EpisodicLearningCaseEvaluation> cases = {
+        blocked, scoredFail, scoredPass};
+    const float rate = Thoth::successRateForExport(cases);
+    if (std::abs(rate - 0.5f) > 0.0001f) {
+        std::cerr << "testE2B4ExportSuccessRateScorableOnly: expected 0.5, got " << rate << '\n';
+        return false;
+    }
+    return true;
+}
+
 static bool testE2CaseById(const std::string& caseId) {
     const auto cases = Thoth::getEpisodicLearningCases();
     const Thoth::EpisodicLearningCase* spec = nullptr;
@@ -4807,11 +5482,19 @@ static bool testE2CaseById(const std::string& caseId) {
 
     Thoth::BenchmarkAttribution attr{"e2-test-run", "e2-test-env"};
     const auto cold = runE2TestArm(*spec, "cold", attr);
-    const auto warm = runE2TestArm(*spec, "warm", attr);
-    const auto eval = Thoth::evaluateEpisodicLearningCase(
+    Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+    const auto warm = runE2TestArm(*spec, "warm", attr, nullptr, &warmBlock);
+    auto eval = Thoth::evaluateEpisodicLearningCase(
         spec->id, spec->expectations, cold, warm, makeE2StrictTestConfig());
+    eval.run_block_reason = warmBlock;
+    Thoth::applyCaseEvaluationResolution(eval);
     if (!eval.passes) {
         std::cerr << "testE2CaseById: " << caseId << " failed — " << eval.failure_reason << '\n';
+        return false;
+    }
+    if (!eval.evaluation_resolution.has_value() ||
+        *eval.evaluation_resolution != Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+        std::cerr << "testE2CaseById: " << caseId << " expected SCORED_SUCCESS resolution\n";
         return false;
     }
     return true;
@@ -5001,6 +5684,24 @@ int main() {
     if (!testE2ExecutiveStrictEquivalence()) failures++;
     if (!testE2A4StaticDispatchAudit()) failures++;
     if (!testE2RuntimeHeuristicGuard()) failures++;
+    if (!testE2B1BlockResolutionSchema()) failures++;
+    if (!testE2RunBlockReasonGuardCapture()) failures++;
+    if (!testE2RunBlockReasonHappyPathNone()) failures++;
+    if (!testE2RunBlockReasonArmStatusUnchanged()) failures++;
+    if (!testE2RunBlockReasonWriteSiteAudit()) failures++;
+    if (!testE2B3ResolveEvaluationGuardNotScorable()) failures++;
+    if (!testE2B3ResolveEvaluationArmFailure()) failures++;
+    if (!testE2B3ResolveEvaluationArmSuccess()) failures++;
+    if (!testE2B3BlockPrecedenceOverArmFailure()) failures++;
+    if (!testE2B3PlanStepTransportMerge()) failures++;
+    if (!testE2B31PlanStepOutcomeEquivalence()) failures++;
+    if (!testE2B31PlanStepOutcomeSerde()) failures++;
+    if (!testE2B31OutcomeWriteSiteAudit()) failures++;
+    if (!testE2B4ExportNotScorableCase()) failures++;
+    if (!testE2B4ExportScoredFailureCase()) failures++;
+    if (!testE2B4ExportScoredSuccessCase()) failures++;
+    if (!testE2B4ExportNotScorableSummaryRollup()) failures++;
+    if (!testE2B4ExportSuccessRateScorableOnly()) failures++;
     if (!testE2CaseById("E2-01")) failures++;
     if (!testE2CaseById("E2-02")) failures++;
     if (!testE2CaseById("E2-03")) failures++;

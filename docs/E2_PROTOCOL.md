@@ -340,6 +340,32 @@ Until Phase B, treat all harness output as **non-authoritative** regardless of e
 
 During checkpoints **A1–A2**, harness runs use **evaluation-disabled mode** (`scoring_enabled: false`, no `e2_outcome`, `official_scoring: false`). During **A3–A5**, harness runs use **kernel-verified mode** (`retrieval_enabled: true`, `evaluation_boundary_verified: true`, still `official_scoring: false`, no `e2_outcome`). See **`cursor_list.md` § E2** for full checkpoint plan.
 
+### Observation layer — `StepResult.run_block_reason` (Phase B2)
+
+Causal separation: **event (A5 throw) → observation (B2 record) → evaluation (Phase B3 interpret)**.
+
+| Rule | Meaning |
+|------|---------|
+| **Semantic freeze** | `StepResult.run_block_reason` meaning is locked after B2 — later phases must not normalize or repair transport |
+| **B3 consume-only** | Evaluation **must not modify** `StepResult`; read and copy mechanically only |
+| **`NONE`** | Absence of block signal — **not** implicit success; B3 must not treat as `SCORED_SUCCESS` without arm confirmation |
+| **Non-`NONE`** | Raw fact that guard event was captured at workflow boundary |
+
+### Export layer — JSONL projection (Phase B4)
+
+Causal separation continues: **evaluation (B3 compute) → export (B4 serialize)**.
+
+| Field | Role | When emitted |
+|-------|------|--------------|
+| **`evaluation_resolution`** | **Canonical truth** | Always when B3 resolution is set |
+| `scoring_block_reason` | Metadata view of `NOT_SCORABLE` (protocol string) | Case/summary when `evaluation_resolution == NOT_SCORABLE` |
+| `e2_outcome` | **Derived at export time only** — never a persisted source-of-truth field | Only when `evaluation_resolution` is `SCORED_*` |
+| `e2_outcome_detail` | Optional debug companion (non-authoritative) | When resolution is set |
+| `not_scorable_by_reason` | Rollup breakdown by `run_block_reason` | Summary when resolution rollup is active |
+| `success_rate` | Pass rate over **scorable cases only** | Summary when resolution rollup is active |
+
+**Single-authority rule:** Export reads `evaluation_resolution` first; **never infer resolution from `e2_outcome`**. All JSONL construction for case and summary payloads goes through `caseEvaluationToJson()` / `episodicLearningSummaryToJson()` — no inline duplicate serializers in the harness.
+
 ---
 
 ## Retrieval failure behavior (STRICT)
