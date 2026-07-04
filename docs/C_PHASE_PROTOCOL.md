@@ -198,36 +198,65 @@ There is **no** “invent a better evaluator” checkpoint.
 Separate evaluation from the benchmark executable.
 
 ```
-Before:  Benchmark → Evaluation → Export
+Before                          After
 
-After:   Benchmark → Evaluation Service → Export
-         (future) Episode event → Evaluation Service → Export
+Benchmark                       Benchmark
+    │                               │
+    ├── Execution                   ├── Execution (orchestrates)
+    ├── Evaluation                  ├── Evaluation Service (calls)
+    └── Export                      └── Export
+
+                                Evaluation Service
+                                    │
+                                    ├── Resolution
+                                    ├── Summary
+                                    ├── Fingerprint
+                                    └── Equivalence
 ```
+
+**C1 does not prove production integration or path equivalence** — that is C5. C1 only proves the evaluation kernel can live behind a service boundary while the benchmark remains authoritative and semantically identical.
+
+#### C1 service lifetime invariant
+
+> **The evaluation service is stateless.** All evaluation state is supplied explicitly through method parameters and returned values. The service shall retain **no cross-run state**.
+
+This prevents cached evaluation state (e.g. in Phase D) from introducing nondeterminism.
+
+#### Façade rule (not a redesign)
+
+The service is a **façade**, not a redesign. Method boundaries intentionally mirror the existing Phase B free functions (`evaluateEpisodicLearningCase`, `resolveEvaluation`, `summarizeEpisodicLearning`, fingerprint helpers) to minimize behavioral risk. **Consolidation may occur only after Phase C.**
 
 #### Deliverables
 
 | Item | Requirement |
 |------|-------------|
-| **Evaluation interface** | Extract a stable service boundary (e.g. `IEpisodicEvaluationService` or equivalent) wrapping `evaluateEpisodicLearningCase`, `resolveEvaluation`, `summarizeEpisodicLearning`, fingerprint helpers |
-| **Dependency cleanup** | Benchmark depends on service; service does **not** depend on harness-only utilities |
+| **Evaluation interface** | Extract a stable service boundary (e.g. `IEpisodicEvaluationService` or equivalent) — 1:1 façade over Phase B functions |
+| **Dependency direction** | **Allowed:** Benchmark → Evaluation Service. **Forbidden:** Evaluation Service → Benchmark. The service shall be **buildable and unit-testable without linking the benchmark executable** |
 | **Service contract** | Documented inputs (observations, `E2EvalConfig`, block reasons) and outputs (`EpisodicLearningCaseEvaluation`, `EpisodicLearningSummary`) — **no new fields** |
-| **Export path** | JSONL builders remain single-authority (`caseEvaluationToJson`, `episodicLearningSummaryLogRow`) — callable from service or thin harness wrapper |
+| **Export path** | JSONL builders remain single-authority (`caseEvaluationToJson`, `episodicLearningSummaryLogRow`) — callable from service or thin harness wrapper; benchmark owns log append |
 | **Passive contract** | Service API has no callbacks into Executive, planner, RAG, or memory |
+| **Ownership** | **Benchmark orchestrates. Service evaluates.** Benchmark executable contains no evaluation algorithm |
 
 #### Forbidden
 
 - Change `resolveEvaluation()` semantics
-- Add harness-only logic into the service
+- Add harness-only logic into the service (see E2-C1-03)
 - Split STRICT / INTEGRATION scoring rules
 - Service methods that mutate execution state
+- Cross-run state inside the service (cached fingerprints, summaries, config)
+- Service dependency on `run_episodic_learning_benchmark` or harness-only targets
+- Premature API consolidation during C1 extraction
 
 #### Exit criteria
 
 1. Service interface exists and is linked by benchmark (thin caller)
-2. `run_episodic_learning_benchmark` with `wiring_stage=B` passes unchanged
-3. Phase B v1 fingerprint unchanged (E2-28 gate on two consecutive `B` runs)
-4. E2-25–E2-28 unit tests green
-5. **Pause before C2**
+2. **Benchmark executable contains no evaluation algorithm** — orchestration only
+3. Service is stateless — no cross-run retained state
+4. Service builds/tests without benchmark executable linkage
+5. `run_episodic_learning_benchmark` with `wiring_stage=B` passes unchanged
+6. Phase B v1 fingerprint unchanged (E2-28 gate on two consecutive `B` runs)
+7. E2-25–E2-28 + E2-C1-01–E2-C1-03 green
+8. **Pause before C2**
 
 ---
 
@@ -566,6 +595,7 @@ Implementation tasks for E2 Phase C should be tracked under **§ E2 Phase C** in
 |----|------------|---------|
 | E2-C1-01 | C1 | Service interface callable; benchmark output unchanged vs pre-extraction |
 | E2-C1-02 | C1 | Harness has no duplicate evaluation logic outside service |
+| E2-C1-03 | C1 | Service contains no benchmark-specific logic (`wiring_stage`, CLI parsing, JSONL paths, benchmark logging) |
 | E2-C2-01 | C2 | Publication disabled → Executive behavior identical (flag OFF) |
 | E2-C2-02 | C2 | Publication enabled → service receives episode event; Executive has no direct eval import |
 | E2-C2-03 | C2 | Production output → INTEGRATION envelope only; `official_scoring: false` |

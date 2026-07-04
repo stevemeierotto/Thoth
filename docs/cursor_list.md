@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-04 (E2 **Phase C protocol v1.1** — integration tier roadmap; see **§ C.0.0**)  
+**Last updated:** 2026-07-04 (E2 **Phase C1 plan locked** — evaluation service extraction; see **§ C.1.0**)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
@@ -2446,7 +2446,7 @@ Same episode. Same result. Different integration path.
 | 4 | C4 — Architectural telemetry | Additive |
 | 5 | C5 — Path equivalence + close-out | Validation only |
 
-**Status:** 📋 **Planned** — protocol locked; **paused before C1**. No code until C1 explicitly opened.
+**Status:** 📋 **C1 locked** — ready for implementation; paused until C1 explicitly opened.
 
 ##### Phase narrative (context)
 
@@ -2457,6 +2457,98 @@ Same episode. Same result. Different integration path.
 | **C** | Can trusted measurement become architecture? |
 | D | Can architecture evolve without losing trust? |
 | E | Can we defend the results scientifically? |
+
+---
+
+#### C.1.0 — C1 implementation plan (evaluation service boundary — **v1**)
+
+**Authority:** [`docs/C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) § C1  
+**One problem:** Extract evaluation service without changing behavior.
+
+##### C1 architectural target
+
+```
+Before                          After
+
+Benchmark                       Benchmark (orchestrates)
+    ├── Execution                   ├── Execution
+    ├── Evaluation                  ├── Evaluation Service
+    └── Export                      └── Export
+
+                                Evaluation Service (stateless façade)
+                                    ├── Resolution
+                                    ├── Summary
+                                    ├── Fingerprint
+                                    └── Equivalence
+```
+
+**C1 does not prove production integration or path equivalence** — that is C5.
+
+##### C1 service lifetime invariant
+
+> **The evaluation service is stateless.** All state via method parameters and return values. **No cross-run state.**
+
+##### Façade rule
+
+Service mirrors Phase B free functions 1:1 — **façade, not redesign**. Consolidation deferred until after Phase C.
+
+##### Dependency direction
+
+| Allowed | Forbidden |
+|---------|-----------|
+| Benchmark → Evaluation Service | Evaluation Service → Benchmark |
+| Service linked by `libbasic_agent` / unit tests | Service requires `run_episodic_learning_benchmark` to build or test |
+
+**Guarantee:** Service is buildable and unit-testable **without** linking the benchmark executable.
+
+##### Deliverables
+
+| # | Item |
+|---|------|
+| 1 | `IEpisodicEvaluationService` (or equivalent) in `episodic_learning_eval.h` |
+| 2 | Façade implementation delegating to existing Phase B logic |
+| 3 | `runScoredEvaluationLoop()` refactored to call service — harness owns orchestration + JSONL append |
+| 4 | Tests E2-C1-01, E2-C1-02, E2-C1-03 |
+
+##### Forbidden
+
+- Change `resolveEvaluation()` / scoring semantics
+- Harness logic inside service (E2-C1-03)
+- Cross-run cached state in service
+- Executive wiring (C2)
+- Premature API consolidation
+
+##### Structural audits
+
+| ID | Asserts |
+|----|---------|
+| **E2-C1-01** | Service callable; benchmark scoped output unchanged (E2-28 fields) |
+| **E2-C1-02** | Harness: no duplicate evaluation algorithm outside service |
+| **E2-C1-03** | Service: no `wiring_stage`, CLI parsing, JSONL paths, benchmark logging |
+
+##### Implementation order
+
+| Step | Work |
+|------|------|
+| 1 | Define stateless interface — methods map 1:1 to Phase B free functions |
+| 2 | Implement façade in `episodic_learning_eval.cpp` (delegate only) |
+| 3 | Refactor `runScoredEvaluationLoop()` → service calls |
+| 4 | Verify harness still owns: arms, wiring stage, envelope, log append |
+| 5 | Add E2-C1-01–03; regression E2-25–E2-28 |
+| 6 | Two-run `B` harness; confirm fingerprint `1ce31c6a…` |
+
+##### Exit criteria
+
+1. Service exists; benchmark is thin orchestrator — **no evaluation algorithm in benchmark**
+2. Service stateless; builds/tests without benchmark executable
+3. `wiring_stage=B` harness unchanged semantically
+4. Phase B fingerprint + E2-28 gate pass
+5. E2-25–E2-28 + E2-C1-01–03 green
+6. **Pause before C2**
+
+**Time estimate:** ~2–3 hours (refactor only).
+
+**Status:** 🔒 **C1 plan locked** (2026-07-04). Implementation not started.
 
 ---
 
