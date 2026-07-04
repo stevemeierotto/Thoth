@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-04 (E2 **Phase B6 complete** — golden baseline archived; see **§ B.6.0**)  
+**Last updated:** 2026-07-04 (E2 **Phase C protocol v1.1** — integration tier roadmap; see **§ C.0.0**)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
@@ -2371,6 +2371,92 @@ B6 complete **only if**:
 | JSONL artifacts | `docs/baselines/artifacts/phase_b/` (run_01, run_02, snapshot) |
 | Runtime semantic changes | None |
 | Fingerprint | `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
+
+---
+
+#### C.0.0 — Phase C implementation plan (integration tier — **v1.1**)
+
+**Authority:** [`docs/C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) v1.1 (locked for implementation)  
+**Prerequisite:** Phase B complete — [`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md), baseline [`benchmark_results/phase_b_baseline_v1.md`](benchmark_results/phase_b_baseline_v1.md)
+
+**Goal:** Integrate the E2 measurement system into the production cognitive architecture as a **passive service** — without changing agent behavior or Phase B evaluation semantics.
+
+**One sentence:** Move E2 from benchmark harness into architecture while preserving Phase B reproducibility; prove path equivalence at close-out.
+
+##### C0 — Integration boundary (informational — not coded)
+
+Phase B contract is an **immutable dependency**. Tweaking evaluation during integration = protocol change (E2 v1.3+), not Phase C work. See `C_PHASE_PROTOCOL.md` § C0.
+
+##### Governing invariant
+
+> **Evaluation is a passive architectural service. It may observe execution, but it must never influence execution.**
+
+All forbidden rules and checkpoint constraints derive from this. Dependency flow is **downward only**: Execution → Episode → Evaluation → Diagnostics → Consumers.
+
+##### Checkpoint sequence (implement in order)
+
+| Step | Work | Gate |
+|------|------|------|
+| **C1** | Evaluation service boundary — extract interface; benchmark becomes thin caller | `wiring_stage=B` unchanged; E2-25–E2-28 green |
+| **C2** | Episode publication — Executive emits `EpisodeCompleted`; no direct eval import | Flag OFF → behavior identical; flag ON → INTEGRATION envelope only |
+| **C3** | Diagnostic layer — presentation only (JSONL); ownership: execution/eval/diagnostics | E2-06 green; no second `evaluation_resolution` authority |
+| **C4** | Architectural telemetry — segregated from benchmark metrics | No benchmark fields in telemetry schema |
+| **C5** | Production validation — **path equivalence** + `PHASE_C_COMPLETE.md` | Same episode → same `evaluation_resolution` (benchmark vs production paths) |
+
+**Time estimate:** C1–C2 **4–6 h**; C3 **4–8 h**; C4 **4–6 h**; C5 **2–4 h**.
+
+##### Scope split
+
+| In Phase C | Forbidden |
+|------------|-----------|
+| Service extraction, episode events, diagnostics JSONL, telemetry schema | Change `evaluation_resolution` / `e2_outcome` semantics |
+| Feature flag (default OFF) | Redefine fingerprint or diagnosis buckets |
+| Path equivalence validation | `official_scoring: true` outside `wiring_stage=B` |
+| `PHASE_C_COMPLETE.md` close-out | Dashboards, UI, visualization, reporting |
+| INTEGRATION tier harness (E2-06) | Mix benchmark metrics with architectural telemetry |
+| | Evaluation modifying planning, retrieval, memory, prompts |
+
+##### Regression gates (every checkpoint)
+
+| Gate | Requirement |
+|------|-------------|
+| Unit tests | E2-25–E2-28 + C-phase tests (E2-C1-01 … E2-C5-02) as added |
+| STRICT benchmark | `THOTH_E2_WIRING_STAGE=B` — fingerprint `1ce31c6a…` stable |
+| E2-28 | Two-run scoped equivalence vs Phase B v1 baseline |
+| Structural audit | `testE2B5ScoredLoopStructuralAudit` green |
+| Passive invariant | No evaluation callback into execution |
+
+##### C5 acceptance criterion (path equivalence)
+
+```
+Episode E → Benchmark path       → evaluation_resolution = R
+Episode E → Production service   → evaluation_resolution = R
+```
+
+Same episode. Same result. Different integration path.
+
+##### Implementation order
+
+| Order | Work | Runtime change? |
+|-------|------|-----------------|
+| 0 | Protocol v1.1 locked ✅ | No |
+| 1 | C1 — Evaluation service boundary | Refactor only |
+| 2 | C2 — Episode publication | Additive — default OFF |
+| 3 | C3 — Diagnostic layer | Additive — JSONL only |
+| 4 | C4 — Architectural telemetry | Additive |
+| 5 | C5 — Path equivalence + close-out | Validation only |
+
+**Status:** 📋 **Planned** — protocol locked; **paused before C1**. No code until C1 explicitly opened.
+
+##### Phase narrative (context)
+
+| Phase | Question |
+|-------|----------|
+| A | Can execution be trusted? ✅ |
+| B | Can measurement be trusted? ✅ |
+| **C** | Can trusted measurement become architecture? |
+| D | Can architecture evolve without losing trust? |
+| E | Can we defend the results scientifically? |
 
 ---
 

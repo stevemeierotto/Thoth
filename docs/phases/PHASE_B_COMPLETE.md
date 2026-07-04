@@ -69,4 +69,4 @@ Phase B established the first authoritative evaluation baseline for Thoth. Evalu
 
 ## Next phase
 
-**Phase C** — INTEGRATION tier harness (diagnostic only; non-authoritative). Pause for confirmation before starting.
+**Phase C** — Integration tier. Protocol locked: [`C_PHASE_PROTOCOL.md`](../C_PHASE_PROTOCOL.md) v1.1. Roadmap: `cursor_list.md` § C.0.0. **Paused before C1.**
