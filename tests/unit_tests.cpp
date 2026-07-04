@@ -5466,6 +5466,137 @@ static bool testE2B4ExportSuccessRateScorableOnly() {
     return true;
 }
 
+static Thoth::EpisodicLearningSummary buildOfficialGoldenSummary() {
+    const auto cases = Thoth::getEpisodicLearningCases();
+    Thoth::BenchmarkAttribution attr{"e2-b5-golden", "e2-b5-golden-env"};
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> evaluations;
+    std::vector<Thoth::EpisodicLearningExpectations> expectations;
+    for (const auto& spec : cases) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr, nullptr, nullptr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+        auto eval = Thoth::evaluateEpisodicLearningCase(
+            spec.id, spec.expectations, cold, warm, cfg);
+        eval.run_block_reason = warmBlock;
+        Thoth::applyCaseEvaluationResolution(eval);
+        evaluations.push_back(eval);
+        expectations.push_back(spec.expectations);
+    }
+    return Thoth::summarizeEpisodicLearning(evaluations, expectations, cfg);
+}
+
+/** E2-25 — B5 official harness envelope on summary JSONL. */
+static bool testE2B5OfficialHarnessEnvelope() {
+    const auto summary = buildOfficialGoldenSummary();
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    const auto fingerprint = Thoth::computeEvaluationFingerprint(cfg);
+    Thoth::EpisodicLearningLogContext ctx;
+    Thoth::EpisodicLearningRunEnvelope envelope{true, true, "B"};
+    const nlohmann::json row =
+        Thoth::episodicLearningSummaryLogRow(ctx, summary, 3, 3, envelope);
+    if (row.value("official_scoring", false) != true ||
+        row.value("scoring_enabled", false) != true ||
+        row.value("wiring_stage", "") != "B") {
+        std::cerr << "testE2B5OfficialHarnessEnvelope: official flags missing\n";
+        return false;
+    }
+    if (!row.contains("evaluation_resolution")) {
+        std::cerr << "testE2B5OfficialHarnessEnvelope: evaluation_resolution missing\n";
+        return false;
+    }
+    (void)fingerprint;
+    return true;
+}
+
+/** E2-26 — golden trio under official config: SCORED_SUCCESS, not_scorable_cases == 0. */
+static bool testE2B5OfficialGoldenTrio() {
+    const auto summary = buildOfficialGoldenSummary();
+    if (summary.not_scorable_cases != 0) {
+        std::cerr << "testE2B5OfficialGoldenTrio: expected not_scorable_cases == 0\n";
+        return false;
+    }
+    for (const auto& eval : summary.case_results) {
+        if (!eval.evaluation_resolution.has_value() ||
+            *eval.evaluation_resolution != Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+            std::cerr << "testE2B5OfficialGoldenTrio: case " << eval.case_id
+                      << " expected SCORED_SUCCESS\n";
+            return false;
+        }
+    }
+    if (!summary.evaluation_resolution.has_value() ||
+        *summary.evaluation_resolution != Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+        std::cerr << "testE2B5OfficialGoldenTrio: summary expected SCORED_SUCCESS\n";
+        return false;
+    }
+    const nlohmann::json caseJson = Thoth::caseEvaluationToJson(summary.case_results.front());
+    if (caseJson.value("e2_outcome", "") != "SUCCESS") {
+        std::cerr << "testE2B5OfficialGoldenTrio: expected derived e2_outcome SUCCESS\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-27 — non-authoritative envelope must not claim official_scoring. */
+static bool testE2B5NonAuthoritativeEnvelope() {
+    Thoth::EpisodicLearningSummary summary;
+    Thoth::EpisodicLearningRunEnvelope envelope{false, true, "SCORING"};
+    const nlohmann::json row =
+        Thoth::episodicLearningSummaryLogRow({}, summary, 0, 0, envelope);
+    if (row.value("official_scoring", true) != false) {
+        std::cerr << "testE2B5NonAuthoritativeEnvelope: SCORING must not be official\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-28 — scoped equivalence determinism across two identical evaluation builds. */
+static bool testE2B5OfficialFingerprintDeterminism() {
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    const auto fp = Thoth::computeEvaluationFingerprint(cfg);
+    const auto summary_a = buildOfficialGoldenSummary();
+    const auto summary_b = buildOfficialGoldenSummary();
+    const auto snap_a = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_a, fp.toJson(), cfg.toJson());
+    const auto snap_b = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_b, fp.toJson(), cfg.toJson());
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(snap_a, snap_b)) {
+        std::cerr << "testE2B5OfficialFingerprintDeterminism: scoped snapshots differ\n";
+        return false;
+    }
+    if (Thoth::episodicLearningFingerprintMismatchBucket(snap_a, snap_b, "h1", "h1") != 0) {
+        std::cerr << "testE2B5OfficialFingerprintDeterminism: diagnosis bucket mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** B5 — scored loop structural audit: no wiring_stage references inside runScoredEvaluationLoop. */
+static bool testE2B5ScoredLoopStructuralAudit() {
+    std::ifstream in("external/basic_agent/src/run_episodic_learning_benchmark.cpp");
+    if (!in.is_open()) {
+        in.open("/home/steve/Thoth/external/basic_agent/src/run_episodic_learning_benchmark.cpp");
+    }
+    if (!in.is_open()) {
+        std::cerr << "testE2B5ScoredLoopStructuralAudit: cannot read harness source\n";
+        return false;
+    }
+    const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto fnPos = source.find("ScoredLoopOutcome runScoredEvaluationLoop");
+    const auto fnEnd = source.find("int runScoredEvaluationHarness", fnPos);
+    if (fnPos == std::string::npos || fnEnd == std::string::npos) {
+        std::cerr << "testE2B5ScoredLoopStructuralAudit: runScoredEvaluationLoop not found\n";
+        return false;
+    }
+    const std::string body = source.substr(fnPos, fnEnd - fnPos);
+    if (body.find("wiring_stage") != std::string::npos ||
+        body.find("wiringStage") != std::string::npos) {
+        std::cerr << "testE2B5ScoredLoopStructuralAudit: stage branching inside scored loop\n";
+        return false;
+    }
+    return true;
+}
+
 static bool testE2CaseById(const std::string& caseId) {
     const auto cases = Thoth::getEpisodicLearningCases();
     const Thoth::EpisodicLearningCase* spec = nullptr;
@@ -5702,6 +5833,11 @@ int main() {
     if (!testE2B4ExportScoredSuccessCase()) failures++;
     if (!testE2B4ExportNotScorableSummaryRollup()) failures++;
     if (!testE2B4ExportSuccessRateScorableOnly()) failures++;
+    if (!testE2B5OfficialHarnessEnvelope()) failures++;
+    if (!testE2B5OfficialGoldenTrio()) failures++;
+    if (!testE2B5NonAuthoritativeEnvelope()) failures++;
+    if (!testE2B5OfficialFingerprintDeterminism()) failures++;
+    if (!testE2B5ScoredLoopStructuralAudit()) failures++;
     if (!testE2CaseById("E2-01")) failures++;
     if (!testE2CaseById("E2-02")) failures++;
     if (!testE2CaseById("E2-03")) failures++;

@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-02 (E2 **Phase B3 plan v4.1** — plumbing-first order; see **§ B.3.0**)  
+**Last updated:** 2026-07-04 (E2 **Phase B6 complete** — golden baseline archived; see **§ B.6.0**)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
@@ -1145,10 +1145,10 @@ E2-11 remains guard unit test; add **E2-12** (or B-phase tests) for block → `N
 | **B2** | Typed catch in `executeRetrieval` → `StepResult.run_block_reason`; **no plan/JSON inference** | See **§ B.2.0 v2**; case field stays `NONE` until B3 |
 | **B3** | **`resolveEvaluation()`** + minimal transport + rollup | See **§ B.3.0 v4.1** — plumbing-first; `PlanStepOutcome` deferred post–Phase B |
 | **B4** | JSONL export: `evaluation_resolution` (canonical), `scoring_block_reason` (NOT_SCORABLE metadata), derived `e2_outcome`, optional `e2_outcome_detail` | Protocol doc alignment; single-authority rule documented |
-| **B5** | Harness `wiring_stage=B` (or `OFFICIAL`): `official_scoring: true`, full pins, `evaluateEpisodicLearningCase` + re-baseline run | First authoritative `e2_outcome` only after B1–B4 green |
-| **B6** | Golden re-baseline commit: record fingerprint + mean lift under new semantics | Pause for confirmation before Phase C |
+| **B5** | Harness `wiring_stage=B` only: `official_scoring: true`, full pins, shared scored loop, re-baseline run + fingerprint reproducibility gate | First authoritative `e2_outcome` only after B1–B4 green; **two identical runs** before B6 |
+| **B6** | Golden baseline archive + Phase B completion gate — verification docs, fingerprint lock, immutable JSONL artifacts | **No runtime semantic changes**; pause before Phase C |
 
-**Time estimate:** B1–B4 **2–4 hours**; B5 re-baseline run **1–2 hours** (analysis, not code).
+**Time estimate:** B1–B4 **2–4 hours**; B5 re-baseline run **1–2 hours**; B6 archive **~1–2 hours** (verification + docs only).
 
 ---
 
@@ -1950,6 +1950,430 @@ struct PlanStep {
 
 ---
 
+#### B.5.0 — B5 implementation plan (official harness switch — **v4**)
+
+**Goal:** Establish the **single authoritative** STRICT checkpoint — `wiring_stage=B` — and produce the first official baseline run with reproducible evaluation fingerprint. B5 is a **protocol milestone**, not another evaluator redesign.
+
+**One sentence:** Flip default harness to `B`, enforce that only `B` may emit `official_scoring: true`, run the shared scored loop twice with identical fingerprints, then pause before B6 archives the baseline.
+
+##### Phase narrative (checkpoint story)
+
+| Phase | Question |
+|-------|----------|
+| **A** | Can we trust execution? |
+| **B** | Can we trust evaluation? |
+| **C** | Can we trust integration? |
+| **D** | Can we trust evolution? |
+| **E** | Can we trust the science? |
+
+B5 is where Phase B answers “yes” for the first time — under frozen protocol output.
+
+##### Scope split
+
+| In B5 | Deferred to B6 |
+|-------|------------------|
+| `wiring_stage=B` harness branch ( **`B` only — no `OFFICIAL` alias** ) | Golden re-baseline commit to `docs/benchmark_results.md` |
+| Default `THOTH_E2_WIRING_STAGE` → `"B"` | Publication-ready baseline narrative |
+| Official Harness Invariant + Protocol Freeze (documented) | Phase C (INTEGRATION tier) |
+| Single scored-loop extraction (shared by B; A5 uses checkpoint envelope only) | CI nightly authoritative config |
+| E2-25–E2-28 tests | Fingerprint archival as project record |
+| First + second verification re-baseline runs | |
+
+**Forbidden in B5:**
+
+- `OFFICIAL` as a second wiring-stage identifier — protocol is `A5`, `B`, `C`, … only
+- Modify `resolveEvaluation()` or B3/B4 semantics
+- Duplicate scored-loop logic (A5 checkpoint vs B official must share one implementation)
+- Treat `SCORING` or any non-`B` stage as authoritative
+- Archive baseline in B5 (B6 only, after reproducibility gate)
+
+##### B5.0a — Official Harness Invariant
+
+> **Exactly one wiring stage may be authoritative.**
+
+| Class | Stages |
+|-------|--------|
+| **Authoritative** | `B` **only** |
+| **Non-authoritative** | `A1`–`A5`, `SCORING`, experimental, future dev branches |
+
+**Rule:** No stage other than `B` may emit `official_scoring: true`. Harness must enforce at JSONL emission and `EpisodicLearningRunRecorder` emit sites.
+
+Env contract: `THOTH_E2_WIRING_STAGE=B` — no alternate name.
+
+##### B5.0b — Protocol freeze (beginning B5)
+
+Beginning with B5, these become **immutable protocol output**:
+
+| Field | Freeze |
+|-------|--------|
+| **`evaluation_resolution`** | Meaning frozen — `SCORED_SUCCESS` \| `SCORED_FAILURE` \| `NOT_SCORABLE` |
+| **`e2_outcome`** | Derived export artifact only; semantics frozen at B4 rules |
+
+Future checkpoints (Phase C+) may **extend metadata** but **may not redefine** the meaning of `evaluation_resolution` or `e2_outcome`. Phase C adds INTEGRATION tier behavior; it does not retroactively change STRICT B semantics.
+
+##### B5.0b1 — Fingerprint dependency (immutability layering)
+
+B5 introduces two immutability layers that must **not diverge conceptually**:
+
+| Layer | What it guards |
+|-------|----------------|
+| **Protocol freeze** | `evaluation_resolution` meaning is immutable from B5 |
+| **Reproducibility gate** | `fingerprint_hash` identical across two official runs |
+
+**Dependency rule (mandatory):**
+
+> Fingerprint stability is a **function of** evaluation stability — not a separate truth domain.
+
+`evaluation_fingerprint_hash` is a deterministic function of:
+
+- `strictConfig` (`e2_eval_config` — version pins, tier)
+- retrieval corpus hash (`corpus_snapshot_id` / index hash)
+- **`evaluation_resolution` output** (per-case + summary rollup classification)
+
+**Hidden assumption (must hold for fingerprint gate to be meaningful):**
+
+Corpus hash + retrieval stability are fully deterministic only when:
+
+- embedding model is **frozen** (pinned in `e2_eval_config`)
+- retrieval ordering is **stable** (no nondeterministic tie-breaking)
+- vector/index tie-breaking is **deterministic** (STRICT kernel path)
+
+If any of these are unpinned, fingerprint instability will **masquerade as** evaluation instability. Root-cause via diagnosis table below — do not default to “semantic drift.”
+
+**Fingerprint mismatch diagnosis (mandatory reference):**
+
+| # | Cause | How to detect | Action |
+|---|-------|---------------|--------|
+| **1** | **Config mismatch** | `e2_eval_config` / `strictConfig` diff between runs | Fix pins; re-run |
+| **2** | **Corpus drift** | `corpus_hash` / `index_hash` diff | Re-index or pin corpus snapshot |
+| **3** | **Retrieval nondeterminism** | Identical inputs, **different** retrieved chunk order or hit set | Fix ordering/tie-break; do not archive baseline |
+| **4** | **Semantic drift** (real evaluation change) | Identical inputs + identical retrieval, **different** `evaluation_resolution` | Resolver/case assembly changed — baseline invalid |
+
+Shortcut rules:
+
+| Signal | Likely cause |
+|--------|--------------|
+| Fingerprint mismatch, **same** `evaluation_resolution` | #1, #2, or #3 — not semantic drift |
+| Fingerprint match, **different** `evaluation_resolution` | **#4 semantic drift** — do not treat as config noise |
+| Both differ | Start at #1–#3 before assuming #4 |
+
+Do not treat fingerprint mismatches as config bugs when the underlying cause is semantic drift — and do not treat retrieval noise as semantic drift without ruling out #1–#3.
+
+##### B5.0b2 — Retrieval canonicalization rule
+
+> All retrieval outputs must be **sorted and normalized** before entering `runScoredEvaluationLoop()`.
+
+STRICT kernel (`e2StrictRetrieve`) already ranks by score with `chunk_id` tie-break — this rule makes that requirement **explicit at protocol level** so fingerprint/evaluation layers do not mis-diagnose retrieval ordering drift as semantic drift (#3 vs #4).
+
+Prerequisite for the three overlapping guarantees (structural, semantic, reproducibility) to remain consistent.
+
+##### B5.0b3 — Three guarantees (must hold together)
+
+| Guarantee | Layer | Enforcement |
+|-----------|-------|-------------|
+| **A — Structural** | Single `runScoredEvaluationLoop()`; **zero** stage branches inside | Source audit test |
+| **B — Semantic** | `evaluation_resolution` authoritative; `SCORING` is config-only | Official Harness Invariant + resolver freeze |
+| **C — Reproducibility** | E2-28 equivalence-class rule | Two-run gate before B6 |
+
+These are consistent **only if** retrieval canonicalization (B5.0b2) holds before evaluation begins.
+
+##### B5.0c — Structural invariant (scored loop)
+
+> **Exactly one scored-loop implementation shall exist — enforced structurally, not by convention alone.**
+
+| Rule | Meaning |
+|------|---------|
+| **Single entry point** | `runScoredEvaluationLoop(const ScoredLoopConfig& config)` (name TBD) — sole owner of case assembly, `applyCaseEvaluationResolution()`, `summarizeEpisodicLearning()`, JSONL emit |
+| **Envelope-only branching** | `A5`, `B`, and `SCORING` differ only in **outer** `ScoredLoopConfig` envelope (`official_scoring`, `wiring_stage`, early-return policy) — **no** stage conditionals **inside** the loop |
+| **Forbidden inside loop** | `if (wiringStage == …)` anywhere in loop body — forking is not the only risk; conditional logic inside shared code silently diverges semantics |
+| **Enforcement** | Unit test or source audit: scored-loop function body contains **zero** `wiring_stage` / `wiringStage` references — this is the real invariant mechanism |
+
+`A5` continues to return early after equivalence proof (checkpoint envelope). `B` calls `runScoredEvaluationLoop()` with `official_scoring: true`.
+
+> **`SCORING` is a configuration of the evaluation loop, not an alternative evaluation loop.** It delegates to `runScoredEvaluationLoop()` with a non-authoritative envelope (`official_scoring: false`) — never a forked body, never alternate control paths inside the loop.
+
+##### B5.0d — Official gate contract (live `B` run)
+
+| Field | Value |
+|-------|-------|
+| `wiring_stage` | `"B"` |
+| `official_scoring` | `true` |
+| `scoring_enabled` | `true` |
+| `scoring_tier` | `"STRICT"` |
+| `evaluation_fingerprint` | From `computeEvaluationFingerprint(strictConfig)` — **must be reproducible** |
+| `e2_eval_config` | Full pinned `E2EvalConfig` |
+| **`evaluation_resolution`** | Canonical per case + run rollup (frozen output) |
+| `e2_outcome` | Derived — only when `SCORED_*` |
+| `scorable_cases` / `not_scorable_cases` | Always on official summary |
+| `not_scorable_by_reason` / `success_rate` | Per B4 export rules |
+
+##### B5.0e — Implementation order
+
+| Phase | Order | Work |
+|-------|-------|------|
+| **A — Single loop** | 1 | Extract `runScoredEvaluationLoop(ScoredLoopConfig)` — **zero** `wiringStage` branches inside |
+| | 2 | Add audit test: scored-loop body has no `wiring_stage` / `wiringStage` references |
+| | 3 | A5 branch: early-return checkpoint envelope only — **must not** duplicate loop body |
+| **B — B branch** | 4 | `wiringStage == "B"` only — official banner, flags, recorder |
+| | 5 | Default unset env → `"B"` |
+| | 6 | Assert/guard: only `B` path sets `official_scoring: true` on JSONL |
+| **C — Recorder** | 7 | `EpisodicLearningRunRecorder::completeOfficial()` — resolution-aware via `e2OutcomeForExport()` |
+| **D — Tests** | 8 | E2-25–E2-27 (see below) |
+| | 9 | **E2-28** — scoped determinism (see B5.0f) |
+| **E — Re-baseline** | 10 | Run 1: first authoritative baseline |
+| | 11 | Run 2: verification — scoped fields match per E2-28 |
+| **F — Docs** | 12 | `E2_PROTOCOL.md` — Official Harness Invariant + Protocol Freeze + Fingerprint dependency |
+| | 13 | B5 completion snapshot in `cursor_list.md` |
+
+**Time estimate:** ~1.5–2.5 h code + ~1–2 h two-run verification/analysis.
+
+##### B5.0f — Tests
+
+| ID | Asserts |
+|----|---------|
+| **E2-25** | `THOTH_E2_WIRING_STAGE=B` smoke: `official_scoring: true`, `scoring_enabled: true`, `wiring_stage: "B"`, `evaluation_resolution` present |
+| **E2-26** | Golden trio under `B`: all `SCORED_SUCCESS`, derived `e2_outcome: SUCCESS`, `not_scorable_cases == 0` |
+| **E2-27** | Explicit `A5`: `official_scoring: false`; no authoritative claims |
+| **E2-28** | **Official determinism (scoped)** — run identical `B` benchmark twice; compare **only** the fields below; runs may differ elsewhere |
+| **Regression** | E2-01–E2-24; A5 equivalence when `THOTH_E2_WIRING_STAGE=A5` |
+
+**E2-28 comparison scope (mandatory):**
+
+| **Included** (must match exactly) | **Excluded** (may differ) |
+|-----------------------------------|---------------------------|
+| `evaluation_resolution` per case + summary | `timestamp_ms`, `run_id` |
+| `evaluation_fingerprint.fingerprint_hash` | Log line ordering |
+| `e2_eval_config` (canonical JSON) | Debug / diagnostic metadata |
+| Scorable classification (`scorable_cases`, `not_scorable_cases`, per-case resolution) | `e2_outcome_detail`, wall-clock fields |
+
+**Equivalence class rule:** Reproducibility means membership in the same **equivalence class of evaluation outputs** — not raw JSONL byte equality. This prevents false negatives (ordering), false positives (timestamps), and CI noise failures.
+
+**Equivalence class rule (E2-28):** Two runs are equivalent **iff**:
+
+1. `evaluation_resolution` is identical (per case + summary)
+2. E2-28 scoped fields match (`fingerprint_hash`, `e2_eval_config`, scorable classification)
+3. Fingerprint mismatch diagnosis (buckets #1–#4) maps to the **same bucket** on both runs — the diagnostic system itself must be reproducible
+
+Reproducibility = membership in the same **equivalence class of evaluation outputs** — not raw JSONL byte equality.
+
+##### B5.0g — Exit criteria (stop before B6)
+
+1. `wiring_stage=B` is default; **`OFFICIAL` alias does not exist**
+2. Official Harness Invariant enforced — only `B` emits `official_scoring: true`
+3. Structural scored-loop invariant — single `runScoredEvaluationLoop()`; **zero** `wiringStage` branches inside; audit test green
+4. Protocol Freeze + Fingerprint dependency documented — layers linked, not conflated
+5. E2-25–E2-28 green; full regression green
+6. **First** authoritative re-baseline run completed; scoped fields verified
+7. **Second** verification run: E2-28 scoped fields match (resolution + fingerprint + config + scorable classification)
+8. A1–A5 invariants preserved when checkpoints explicitly selected
+9. **Pause for review before B6** — baseline archive only after reproducibility gate (items 6–7)
+
+**B6 gate:** One run proves it works. Two runs prove it's reproducible. Only then may B6 archive the golden baseline.
+
+**Formal definition:** B5 establishes a **deterministic evaluation kernel** with a reproducibility gate, a structured failure taxonomy (diagnosis #1–#4), and strict separation between execution, retrieval, and semantic evaluation layers — a **measurement theory boundary**, not merely a checkpoint flag.
+
+**Status:** ✅ **B5 implemented** (2026-07-04). B6 archived baseline (2026-07-04).
+
+##### B5 completion snapshot
+
+| Check | Result |
+|-------|--------|
+| Default `THOTH_E2_WIRING_STAGE` | `B` |
+| `runScoredEvaluationLoop()` | Single implementation; structural audit green |
+| Official Harness Invariant | Only `B` emits `official_scoring: true` |
+| `SCORING` | Config envelope of same loop — not alternative |
+| E2-25–E2-28 + structural audit | Green |
+| Two-run `B` gate | Matching scoped fields (fingerprint + resolution + scorable rollup) |
+| A5 explicit regression | `equivalence=yes` |
+
+---
+
+#### B.6.0 — B6 implementation plan (golden baseline archive — **v1**)
+
+**Goal:** Archive the first authoritative Phase B baseline produced by B5, verify reproducibility evidence, and finalize Phase B as a **measurement-stable** evaluation system.
+
+**One sentence:** B6 is an archival + verification checkpoint — lock the Phase B baseline, document reproducibility proof, and mark Phase B complete **without changing any runtime semantics**.
+
+| In B6 | Forbidden |
+|-------|-----------|
+| Verification docs + immutable artifact archive | Modify `resolveEvaluation()` or scoring logic |
+| Fingerprint lock + Phase B completion declaration | Modify retrieval logic or canonicalization |
+| JSONL snapshot extraction (run #1 / #2) | Alter E2-25–E2-28 definitions |
+| Optional CI hardening (B6.6) | Introduce new `evaluation_resolution` fields |
+
+##### B6.0a — Inputs (must exist from B5 — hard prereq)
+
+If **any** item missing → **FAIL B6** (do not proceed).
+
+| # | Artifact / evidence |
+|---|---------------------|
+| 1 | B5 run #1 JSONL output (authoritative `wiring_stage=B` summary row) |
+| 2 | B5 run #2 JSONL output (reproducibility run) |
+| 3 | `evaluation_fingerprint.fingerprint_hash` (run #1) |
+| 4 | `evaluation_fingerprint.fingerprint_hash` (run #2) — must match #3 |
+| 5 | `e2_eval_config` snapshot (pinned `strictConfig`) |
+| 6 | `corpus_hash` / `index_hash` snapshot |
+| 7 | Scorable / not_scorable summary rollup |
+| 8 | E2-25–E2-28 + structural audit — green |
+
+**Note:** `logs/episodic_learning_benchmark.jsonl` is append-only. B6 must **extract and freeze** the two B summary rows into immutable artifact files — not assume a single-run log path.
+
+##### B6.1 — Reproducibility verification (hard gate)
+
+Compare run #1 vs run #2 using **E2-28 scoped equivalence only**:
+
+| Must match | Must NOT fail on |
+|------------|------------------|
+| `evaluation_resolution` (per case + summary) | `timestamp_ms` |
+| Scorable classification (`scorable_cases`, `not_scorable_cases`, per-case resolution) | `run_id` / UUIDs |
+| `not_scorable_by_reason` breakdown | Log line ordering |
+| E2-28 diagnostic bucket (same bucket #0 = equivalent) | Debug metadata |
+| `fingerprint_hash` | File ordering |
+| `e2_eval_config` (canonical JSON) | |
+
+**Output:** `docs/baselines/phase_b_baseline_verification.md`
+
+| Section | Content |
+|---------|---------|
+| Pass/fail matrix | Per scoped field |
+| Fingerprint comparison | hash #1 vs #2 |
+| Diagnosis confirmation | Buckets #1–#4 ruled out or resolved |
+| Conclusion | **“Semantic equivalence confirmed”** (only if all gates pass) |
+
+##### B6.2 — Golden baseline snapshot
+
+**Output:** `docs/benchmark_results/phase_b_baseline_v1.md`
+
+| Required section | Content |
+|------------------|---------|
+| B5 system summary | Short — measurement boundary, not checkpoint |
+| `e2_eval_config` | Canonical JSON + hash |
+| `corpus_hash` / `index_hash` | From B5 run attribution |
+| `evaluation_fingerprint_hash` | Locked value |
+| Rollup | `scorable_cases`, `not_scorable_cases`, `mean_episodic_lift` |
+| Test evidence | E2-25–E2-28 summary (pass) |
+| Consistency statement | *“Two-run reproducibility gate passed under E2-28 equivalence constraints.”* |
+
+Cross-ref existing `docs/benchmark_results.md` archive entry if applicable — do not overwrite unrelated benchmark history.
+
+##### B6.3 — JSONL archival
+
+Copy or extract immutable artifacts to:
+
+```
+docs/baselines/artifacts/phase_b/
+  run_01_summary.json      # authoritative B5 run #1 EPISODIC_LEARNING_SUMMARY
+  run_02_summary.json      # B5 run #2 verification summary
+  episodic_learning_benchmark_snapshot.jsonl   # optional full append-only excerpt
+```
+
+| Rule | Meaning |
+|------|---------|
+| Run #1 + #2 preserved | Frozen at B6 time |
+| No post-B6 modification | Artifacts are read-only record |
+| Source | Extract from `logs/episodic_learning_benchmark.jsonl` by `wiring_stage=B` summary rows |
+
+##### B6.4 — Fingerprint lock declaration
+
+**Output:** `docs/baselines/fingerprint_lock.md`
+
+| Must define | Source |
+|-------------|--------|
+| `fingerprint_hash` derivation | B5.0b1 dependency chain |
+| Dependency chain | `strictConfig` → `corpus_hash` → `evaluation_resolution` output |
+| Diagnosis table | Buckets #1–#4 (config / corpus / retrieval nondeterminism / semantic drift) |
+| Primary rule | *“Fingerprint is a derived artifact of evaluation stability, not a primary identifier.”* |
+
+##### B6.4a — Baseline provenance
+
+**Output:** `docs/baselines/BASELINE_PROVENANCE.md`
+
+Archive **how** the baseline came to exist — not just what it is. Required for reproducibility years later.
+
+| Field | Example |
+|-------|---------|
+| Baseline version | Phase B v1 |
+| Created from | B5 implementation |
+| Archived by | B6 |
+| Git commit SHA | `e143efe` (or current HEAD at archive time) |
+| Creation date | ISO date |
+| Toolchain / compiler | `g++` version from build |
+| Build configuration | Debug / Release preset |
+| Protocol version | E2 Protocol revision (e.g. v1.2) |
+| Notes | Optional freeform |
+
+##### B6.5 — Phase B completion gate
+
+**Output:** `docs/phases/PHASE_B_COMPLETE.md`
+
+**Lead with Phase B Summary** (top of file):
+
+> Phase B established the first authoritative evaluation baseline for Thoth. Evaluation semantics, export contracts, fingerprint derivation, and reproducibility requirements are now frozen. Future phases may extend evaluation metadata but may not redefine the meaning of `evaluation_resolution`, `e2_outcome`, or the Phase B fingerprint contract without creating a new protocol version.
+
+| Required declaration | |
+|------------------------|---|
+| B5 → B6 transition summary | |
+| Structural invariant satisfied | Single `runScoredEvaluationLoop()` |
+| Semantic invariants satisfied | Protocol freeze; only `B` authoritative |
+| Reproducibility gate passed | E2-28 two-run evidence |
+| **Phase B complete statement** | *“Phase B is complete: evaluation is now reproducible and authoritative.”* |
+| Layer roles post-B6 | **`B`** = baseline evaluation layer; **`A5`** = execution-only legacy compatibility; **`SCORING`** = non-authoritative configuration mode |
+
+##### B6.6 — Optional CI hardening (non-breaking)
+
+Only if trivial — **not required for B6 exit**:
+
+| Item | Behavior |
+|------|----------|
+| Nightly regression | Uses `wiring_stage=B` config only |
+| Fingerprint gate | Fail CI if two consecutive `B` runs mismatch E2-28 scoped fields |
+| Structural audit | `testE2B5ScoredLoopStructuralAudit` in CI fast path |
+
+##### B6.0b — Implementation order
+
+| Order | Work | Runtime change? |
+|-------|------|-----------------|
+| 1 | Verify B6.0a inputs exist | No |
+| 2 | Run E2-28 comparison script or manual matrix → `phase_b_baseline_verification.md` | No |
+| 3 | Write `phase_b_baseline_v1.md` | No |
+| 4 | Extract + copy JSONL artifacts → `docs/baselines/artifacts/phase_b/` | No |
+| 5 | Write `fingerprint_lock.md` + `BASELINE_PROVENANCE.md` | No |
+| 6 | Write `PHASE_B_COMPLETE.md` (with Phase B Summary lead) | No |
+| 7 | Update `cursor_list.md` B6 snapshot; append `benchmark_results.md` index line | No |
+| 8 | (Optional) B6.6 CI | Yes — harness/CI only |
+
+**Time estimate:** ~1–2 hours (docs + artifact extraction only).
+
+##### B6.0c — Exit criteria
+
+B6 complete **only if**:
+
+1. Golden baseline document exists (`phase_b_baseline_v1.md`)
+2. Fingerprint lock documented (`fingerprint_lock.md`)
+3. Two-run reproducibility proven and recorded (`phase_b_baseline_verification.md`)
+4. JSONL archived immutable (`docs/baselines/artifacts/phase_b/`)
+5. Phase B marked COMPLETE (`PHASE_B_COMPLETE.md`)
+6. **No semantic changes** introduced in code
+7. **Pause for confirmation** — Phase C (INTEGRATION tier) next
+
+**Status:** ✅ **B6 complete** (2026-07-04). **Paused before Phase C.**
+
+##### B6 completion snapshot
+
+| Check | Result |
+|-------|--------|
+| B6.0a inputs | All present (two B runs, fingerprint, config, corpus hash, E2-25–E2-28 green) |
+| `phase_b_baseline_verification.md` | PASS — E2-28 scoped equivalence |
+| `phase_b_baseline_v1.md` | Golden baseline locked |
+| `fingerprint_lock.md` | Fingerprint contract documented |
+| `BASELINE_PROVENANCE.md` | Provenance archived (commit SHA, toolchain, protocol) |
+| `PHASE_B_COMPLETE.md` | Phase B Summary + completion declaration |
+| JSONL artifacts | `docs/baselines/artifacts/phase_b/` (run_01, run_02, snapshot) |
+| Runtime semantic changes | None |
+| Fingerprint | `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
+
+---
+
 #### B.2 — Harness branch (after B1–B4)
 
 ```
@@ -1958,7 +2382,7 @@ THOTH_E2_WIRING_STAGE unset → default "B" (after Phase B lands)
 A5:  kernel + guard; no official scoring
 B:   official_scoring: true; evaluation_resolution emitted; e2_outcome only when SCORED_*
      run_block_reason / scoring_block_reason when NOT_SCORABLE
-SCORING: legacy dev knob — never authoritative
+SCORING: configuration of same scored loop — dev envelope only; never authoritative
 ```
 
 #### B.3 — Gate contract (official run)
@@ -2004,9 +2428,9 @@ SCORING: legacy dev knob — never authoritative
 6. Arm status never encodes structural aborts (boundary rule verified)  
 7. `scoring_block_reason` + rollup metrics implemented — `NOT_SCORABLE` visible, not silently dropped  
 8. Precedence tests green (E2-12 block+arm, E2-13 non-block only, E2-14 rollup assertions)  
-9. First authoritative re-baseline logged with fingerprint + `scorable_cases` / `not_scorable_cases`  
+9. First authoritative re-baseline completed **and** second verification run matches E2-28 scoped fields (resolution + `fingerprint_hash` + `e2_eval_config` + scorable classification) — fingerprint stability treated as function of evaluation stability, not independent truth  
 10. A1–A5 invariants preserved  
-11. **Pause for confirmation** — Phase C (INTEGRATION tier) next  
+11. **Pause for confirmation** — Phase C (INTEGRATION tier) next; B6 archives baseline only after item 9  
 
 #### B files (expected)
 

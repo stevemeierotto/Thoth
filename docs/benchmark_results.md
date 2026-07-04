@@ -12,6 +12,7 @@ Mean nDCG@5 deltas **shrink as the corpus and test suite harden**. Always cite *
 | 2026-03-14 | 311 chunks (research papers) | mixed | +0.060 | +0.214 | Research corpus, pre-hardened suite |
 | 2026-03-14 | 311 chunks (research papers) | **100 hardened** | **+0.041** | **+0.202** | **Canonical overall + disambiguation claims** |
 | 2026-03-23 | 311 chunks | — | +0.019 | — | Regression / stability check |
+| **2026-07-04** | E2 mock corpus (TfIdf:2) | **3 (E2-01–03)** | — | — | **Phase B authoritative baseline** — see [`phase_b_baseline_v1.md`](benchmark_results/phase_b_baseline_v1.md) |
 
 **Rules of thumb**
 
@@ -229,5 +230,24 @@ The system employs a multi-tier verification process for autonomous learning:
 | Mean Precision@5 | 0.600 | 0.620 | +0.020 |
 | Mean MRR | 0.683 | 0.700 | +0.017 |
 | Mean nDCG@5 | 0.600 | 0.619 | +0.019 |
+
+---
+
+## E2 Episodic Learning — Phase B Baseline v1 (2026-07-04)
+
+**Authoritative record:** [`benchmark_results/phase_b_baseline_v1.md`](benchmark_results/phase_b_baseline_v1.md)
+
+| Field | Value |
+| :--- | :--- |
+| Wiring stage | `B` (`official_scoring: true`) |
+| Protocol | E2 v1.2 |
+| Cases | E2-01, E2-02, E2-03 |
+| `evaluation_resolution` | `SCORED_SUCCESS` (all cases + rollup) |
+| `mean_episodic_lift` | 1.0 |
+| `success_rate` | 1.0 |
+| `evaluation_fingerprint_hash` | `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
+| Reproducibility | Two-run E2-28 gate passed — see [`baselines/phase_b_baseline_verification.md`](baselines/phase_b_baseline_verification.md) |
+| Provenance | [`baselines/BASELINE_PROVENANCE.md`](baselines/BASELINE_PROVENANCE.md) |
+| Frozen artifacts | `baselines/artifacts/phase_b/` |
 
 ---

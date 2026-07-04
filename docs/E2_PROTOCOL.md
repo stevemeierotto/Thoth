@@ -366,6 +366,20 @@ Causal separation continues: **evaluation (B3 compute) → export (B4 serialize)
 
 **Single-authority rule:** Export reads `evaluation_resolution` first; **never infer resolution from `e2_outcome`**. All JSONL construction for case and summary payloads goes through `caseEvaluationToJson()` / `episodicLearningSummaryToJson()` — no inline duplicate serializers in the harness.
 
+### Official harness (Phase B5)
+
+**Measurement theory boundary:** B5 establishes the deterministic evaluation kernel with reproducibility gate and failure taxonomy — not merely a checkpoint flag.
+
+| Rule | Meaning |
+|------|---------|
+| **Authoritative stage** | `THOTH_E2_WIRING_STAGE=B` only — no `OFFICIAL` alias |
+| **Official Harness Invariant** | Only `B` may emit `official_scoring: true` |
+| **Scored loop** | Single `runScoredEvaluationLoop()` — zero `wiring_stage` branches inside |
+| **`SCORING`** | Configuration of the same loop — not an alternative loop |
+| **Retrieval canonicalization** | All retrieval outputs sorted/normalized before scored loop (STRICT kernel: score + `chunk_id` tie-break) |
+| **Protocol freeze** | From B5, `evaluation_resolution` and `e2_outcome` meaning are immutable; later phases extend metadata only |
+| **Reproducibility (E2-28)** | Two `B` runs equivalent iff scoped fields + diagnosis bucket match — not byte-identical JSONL |
+
 ---
 
 ## Retrieval failure behavior (STRICT)

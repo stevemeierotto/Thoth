@@ -1,0 +1,205 @@
+{
+  "case_count": 3,
+  "case_results": [
+    {
+      "case_id": "E2-01",
+      "cold": {
+        "arm": "cold",
+        "arm_scoring_status": "OK",
+        "final_success_score": 0.0,
+        "planning_time_ms": 0,
+        "retrieval": {
+          "arm_scoring_status": "OK",
+          "chunks": [],
+          "forbidden_tokens_found": [],
+          "matched_token": "",
+          "retrieved_chunk_id": "",
+          "retrieved_memory_id": "",
+          "warm_retrieval_hit": false
+        },
+        "terminal_state": "FAILED",
+        "total_tokens": 0,
+        "wall_clock_ms": 1772
+      },
+      "e2_outcome": "SUCCESS",
+      "e2_outcome_detail": "resolution=SCORED_SUCCESS;block=NONE;arm=OK",
+      "evaluation_resolution": "SCORED_SUCCESS",
+      "failure_reason": "",
+      "lift": 1.0,
+      "passes": true,
+      "run_block_reason": "NONE",
+      "warm": {
+        "arm": "warm",
+        "arm_scoring_status": "OK",
+        "final_success_score": 1.0,
+        "planning_time_ms": 0,
+        "retrieval": {
+          "arm_scoring_status": "OK",
+          "chunks": [
+            {
+              "chunk_id": "episode:e2-01-plant",
+              "source": "evaluation",
+              "source_id": "e2-01-plant",
+              "validation_status": "valid"
+            }
+          ],
+          "forbidden_tokens_found": [],
+          "matched_token": "Apollo",
+          "retrieved_chunk_id": "episode:e2-01-plant",
+          "retrieved_memory_id": "e2-01-plant",
+          "warm_retrieval_hit": true
+        },
+        "terminal_state": "COMPLETED",
+        "total_tokens": 0,
+        "wall_clock_ms": 2896
+      }
+    },
+    {
+      "case_id": "E2-02",
+      "cold": {
+        "arm": "cold",
+        "arm_scoring_status": "OK",
+        "final_success_score": 0.0,
+        "planning_time_ms": 0,
+        "retrieval": {
+          "arm_scoring_status": "OK",
+          "chunks": [],
+          "forbidden_tokens_found": [],
+          "matched_token": "",
+          "retrieved_chunk_id": "",
+          "retrieved_memory_id": "",
+          "warm_retrieval_hit": false
+        },
+        "terminal_state": "FAILED",
+        "total_tokens": 0,
+        "wall_clock_ms": 1589
+      },
+      "e2_outcome": "SUCCESS",
+      "e2_outcome_detail": "resolution=SCORED_SUCCESS;block=NONE;arm=OK",
+      "evaluation_resolution": "SCORED_SUCCESS",
+      "failure_reason": "",
+      "lift": 1.0,
+      "passes": true,
+      "run_block_reason": "NONE",
+      "warm": {
+        "arm": "warm",
+        "arm_scoring_status": "OK",
+        "final_success_score": 1.0,
+        "planning_time_ms": 0,
+        "retrieval": {
+          "arm_scoring_status": "OK",
+          "chunks": [
+            {
+              "chunk_id": "episode:e2-02-plant",
+              "source": "evaluation",
+              "source_id": "e2-02-plant",
+              "validation_status": "valid"
+            }
+          ],
+          "forbidden_tokens_found": [],
+          "matched_token": "Zephyrx7",
+          "retrieved_chunk_id": "episode:e2-02-plant",
+          "retrieved_memory_id": "e2-02-plant",
+          "warm_retrieval_hit": true
+        },
+        "terminal_state": "COMPLETED",
+        "total_tokens": 0,
+        "wall_clock_ms": 1651
+      }
+    },
+    {
+      "case_id": "E2-03",
+      "cold": {
+        "arm": "cold",
+        "arm_scoring_status": "OK",
+        "final_success_score": 1.0,
+        "planning_time_ms": 0,
+        "retrieval": {
+          "arm_scoring_status": "OK",
+          "chunks": [
+            {
+              "chunk_id": "e2-distractor.md",
+              "source": "corpus",
+              "source_id": "e2-distractor.md",
+              "validation_status": "valid"
+            }
+          ],
+          "forbidden_tokens_found": [],
+          "matched_token": "",
+          "retrieved_chunk_id": "",
+          "retrieved_memory_id": "",
+          "warm_retrieval_hit": false
+        },
+        "terminal_state": "COMPLETED",
+        "total_tokens": 0,
+        "wall_clock_ms": 1773
+      },
+      "e2_outcome": "SUCCESS",
+      "e2_outcome_detail": "resolution=SCORED_SUCCESS;block=NONE;arm=OK",
+      "evaluation_resolution": "SCORED_SUCCESS",
+      "failure_reason": "",
+      "lift": 0.0,
+      "passes": true,
+      "run_block_reason": "NONE",
+      "warm": {
+        "arm": "warm",
+        "arm_scoring_status": "OK",
+        "final_success_score": 1.0,
+        "planning_time_ms": 0,
+        "retrieval": {
+          "arm_scoring_status": "OK",
+          "chunks": [
+            {
+              "chunk_id": "e2-distractor.md",
+              "source": "corpus",
+              "source_id": "e2-distractor.md",
+              "validation_status": "valid"
+            }
+          ],
+          "forbidden_tokens_found": [],
+          "matched_token": "",
+          "retrieved_chunk_id": "",
+          "retrieved_memory_id": "",
+          "warm_retrieval_hit": false
+        },
+        "terminal_state": "COMPLETED",
+        "total_tokens": 0,
+        "wall_clock_ms": 1960
+      }
+    }
+  ],
+  "cases_passed": 3,
+  "e2_eval_config": {
+    "cross_session_enabled": false,
+    "heuristics_allowed": false,
+    "official_scoring": true,
+    "tier": "STRICT",
+    "versions": {
+      "corpus_snapshot_id": "a3cb8067569c3b59146d0d63eb153d9ae9d094f1cc2b5a28c04fa73f7a010fef",
+      "embedding_model_version": "TfIdf:2",
+      "model_version_or_weights_hash": "mock",
+      "retrieval_engine_version": "e2_strict_retrieval_v1"
+    }
+  },
+  "e2_outcome": "SUCCESS",
+  "env_hash": "3d07ac545db87101d1fb9006526a3b2c15a0762d8593b81af987c43214cde91a",
+  "evaluation_fingerprint": {
+    "canonical_json": "{\"protocol_version\":\"1.2\",\"scoring_function\":\"ExecutiveController::calculate_trajectory_score\",\"strict_retrieval_engine\":\"e2_strict_retrieval_v1\",\"tier\":\"STRICT\",\"versions\":{\"corpus_snapshot_id\":\"a3cb8067569c3b59146d0d63eb153d9ae9d094f1cc2b5a28c04fa73f7a010fef\",\"embedding_model_version\":\"TfIdf:2\",\"model_version_or_weights_hash\":\"mock\",\"retrieval_engine_version\":\"e2_strict_retrieval_v1\"}}",
+    "fingerprint_hash": "1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4"
+  },
+  "evaluation_resolution": "SCORED_SUCCESS",
+  "event": "EPISODIC_LEARNING_SUMMARY",
+  "mean_episodic_lift": 1.0,
+  "not_scorable_by_reason": {},
+  "not_scorable_cases": 0,
+  "official_scoring": true,
+  "outcome_rationale": "all scorable cases pass table expectations and mean_episodic_lift > 0",
+  "run_id": "run-1783192389220",
+  "scorable_cases": 3,
+  "scoring_enabled": true,
+  "scoring_function": "ExecutiveController::calculate_trajectory_score",
+  "scoring_tier": "STRICT",
+  "success_rate": 1.0,
+  "timestamp_ms": 1783192389294,
+  "wiring_stage": "B"
+}
