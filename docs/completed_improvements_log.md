@@ -1,7 +1,50 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-01 (E1 Checkpoint E — benchmark environment pinning complete)
+Last updated: 2026-07-05 (E2 Phase C — integration tier complete; Phase D D0 locked)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+
+### E2 track — status at a glance
+
+| Phase | Question | Status | Close-out |
+|-------|----------|--------|-----------|
+| **A** | Can execution be trusted? | ✅ Complete 2026-07-02 | A1–A5 checkpoints; E2-08–E2-11 |
+| **B** | Can measurement be trusted? | ✅ Complete 2026-07-04 | [`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md); fingerprint `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
+| **C** | Can trusted measurement become architecture? | ✅ Locked 2026-07-05 | [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) |
+| **D** | Can architecture evolve without losing trust? | 🔒 D0 locked | [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) v1.0 — paused before D1 |
+| **E** | Can we defend the results scientifically? | 📋 Planned | — |
+
+### E2 Phase C — Integration tier ✅ locked (2026-07-05)
+
+**Authority:** [`C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) v1.1  
+**Baseline:** Phase B v1 fingerprint unchanged  
+**Close-out:** [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md)
+
+**Governing invariant:** Evaluation is a passive architectural service — it may observe execution, but must never influence execution.
+
+| Checkpoint | Deliverable | Tests |
+|------------|-------------|-------|
+| **E2-C1** | `IEpisodicEvaluationService` — stateless façade over Phase B kernel | E2-C1-01..03 |
+| **E2-C2** | `EpisodeCompleted` publication + `EvaluationSubscriber` + event channel | E2-C2-01..04 |
+| **E2-C3** | `DiagnosticService` — presentation-only JSONL | E2-C3-01..04 |
+| **E2-C4** | `PipelineTelemetryService` — architectural telemetry sink | E2-C4-01..05, E2-C4-03b |
+| **E2-C5** | Path equivalence under pinned STRICT config on golden fixtures | E2-C5-01..05 |
+
+**C5 record:** Benchmark orchestration (`runBenchmarkPathArtifacts`) and production orchestration (`runProductionPathArtifacts`) produce identical `evaluation_resolution`, scorable classification, failure/diagnosis buckets, and `fingerprint_hash` on mapping-safe fixtures (E2-01..03). Scope: pinned semantic config — not raw INTEGRATION-default vs STRICT object equality.
+
+**Regression gates (all green):**
+
+| Gate | Result |
+|------|--------|
+| `THOTH_E2_WIRING_STAGE=B` harness | E2 SUCCESS, 3/3 cases |
+| Phase B fingerprint (E2-28) | Stable |
+| `THOTH_E2_C5=1` equivalence matrix | E2-01/02/03 MATCH |
+| Passive invariant | Publication default OFF; no eval → Executive callback |
+
+**Key files (basic_agent):** `episodic_evaluation_service.*`, `episode_events.h`, `episode_event_channel.*`, `evaluation_subscriber.*`, `diagnostic_service.*`, `pipeline_telemetry_service.*`, `e2_path_equivalence.*`
+
+**Review note:** E2-C5-03 aliases E2-C5-01; proof coverage unchanged via `diffPathEquivalence()`.
+
+**Next:** Phase D D0 locked — [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md). Constitutional rule: Observe, Record, Replay, Present — Never Decide.
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
 

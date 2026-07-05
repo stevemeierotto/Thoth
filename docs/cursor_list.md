@@ -1,7 +1,9 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-04 (E2 **Phase C1 plan locked** — evaluation service extraction; see **§ C.1.0**)  
+**Last updated:** 2026-07-05 (E2 **Phase C locked**; **Phase D D0 locked** — see `docs/phases/PHASE_C_COMPLETE.md`, `docs/D_PHASE_PROTOCOL.md`)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
+
+**Active E2 work:** 🔒 Phase C complete — **paused before D1** (`cursor_list.md` § **D.0.0**).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -98,7 +100,9 @@ Agree on direction; adjust sequencing:
 ### Consolidated roadmap (reflection snapshot)
 
 ```
-Now      G1 diagnostic + E2          (trajectory ablation; episodic learning eval)
+Now      E2 Phase D (D1+)           (passive consumer evolution — D0 locked)
+Done     E2 Phase C                 (integration tier — locked 2026-07-05)
+Done     E2 Phase B                 (authoritative STRICT baseline)
 Next     C6 Phase 3 + E3             (longitudinal metrics; SCR harness)
 Parallel B1 (if V3 Zenodo)           (hardened corpus)
 Later    M4                         (range restore — M3 ✅)
@@ -115,10 +119,12 @@ Last     UI polish (§6), S1 apply_diff (owner discretion)
 
 ---
 
-## E2 — Episodic learning eval kernel migration (active plan)
+## E2 — Episodic learning eval (Phases A–C complete; Phase D D0 locked)
 
-**Status:** 🔶 In progress — protocol steps 1–5 complete; harness wiring pending  
+**Status:** 🔒 Phase C locked (2026-07-05); Phase D D0 locked — **paused before D1**  
 **Spec:** `docs/E2_PROTOCOL.md` v1.2 (preregistered constants; do not change mid-run)  
+**Phase C close-out:** `docs/phases/PHASE_C_COMPLETE.md`  
+**Phase D protocol:** `docs/D_PHASE_PROTOCOL.md` v1.0  
 **What this is:** Converting a coupled cognitive runtime into a **two-layer evaluation kernel** with determinism boundaries — not a refactor.
 
 | Layer | Role |
@@ -224,8 +230,9 @@ See **`docs/E2_PROTOCOL.md` § STRICT retrieval boundary** for the canonical dia
 | **A3** | `e2StrictRetrieve()` + boundary provenance; layer ownership contract | ✅ 2026-07-02 — **E2-10**; `retrieval_enabled: true`; purity verified; **not** official scoring. **Close-out:** token-overlap episode gating + **provisional 0.25 threshold** documented in `E2_PROTOCOL.md` § STRICT kernel scoring (A3) |
 | **A4** | Executive delegates to same `e2StrictRetrieve()`; context injection + single dispatch + full equivalence | E2-01–E2-07; static dispatch audit + golden-case runtime proof |
 | **A5** | Diagnostic fuse; A3→A4 transition enforced; failure-domain separation; first `rag.cpp` touch (guard only) | ✅ 2026-07-02 — **E2-11** |
-| **B** | STRICT re-baseline (after 0 + A1–A5) | Authoritative SUCCESS/FAILURE **only after A4 proves harness–executive retrieval equivalence** |
-| **C** | `--tier integration` + E2-06 + `completed_improvements_log.md` close-out | INTEGRATION non-scoring |
+| **B** | STRICT re-baseline (after 0 + A1–A5) | ✅ 2026-07-04 — authoritative baseline; fingerprint `1ce31c6a…` |
+| **C** | Integration tier (C1–C5) | ✅ 2026-07-05 — passive eval in architecture; path equivalence proven |
+| **D** | Evolution tier (D0–D5) | 🔒 D0 locked — paused before D1 |
 
 **Scope estimate:** Phase A ≈ **3–5 sub-sessions** (not one session) — largest change since E1 Checkpoint C.
 
@@ -2397,11 +2404,11 @@ All forbidden rules and checkpoint constraints derive from this. Dependency flow
 
 | Step | Work | Gate |
 |------|------|------|
-| **C1** | Evaluation service boundary — extract interface; benchmark becomes thin caller | `wiring_stage=B` unchanged; E2-25–E2-28 green |
-| **C2** | Episode publication — Executive emits `EpisodeCompleted`; no direct eval import | Flag OFF → behavior identical; flag ON → INTEGRATION envelope only |
-| **C3** | Diagnostic layer — presentation only (JSONL); ownership: execution/eval/diagnostics | E2-06 green; no second `evaluation_resolution` authority |
-| **C4** | Architectural telemetry — segregated from benchmark metrics | No benchmark fields in telemetry schema |
-| **C5** | Production validation — **path equivalence** + `PHASE_C_COMPLETE.md` | Same episode → same `evaluation_resolution` (benchmark vs production paths) |
+| **E2-C1** | Evaluation service boundary — extract interface; benchmark becomes thin caller | `wiring_stage=B` unchanged; E2-25–E2-28 green |
+| **E2-C2** | Episode publication — Executive emits `EpisodeCompleted`; no direct eval import | Flag OFF → behavior identical; flag ON → INTEGRATION envelope only |
+| **E2-C3** | Diagnostic layer — presentation only (JSONL); ownership: execution/eval/diagnostics | E2-06 green; no second `evaluation_resolution` authority |
+| **E2-C4** | Architectural telemetry — segregated from benchmark metrics | No benchmark fields in telemetry schema |
+| **E2-C5** | Production validation — **path equivalence** + `PHASE_C_COMPLETE.md` | Same episode → same `evaluation_resolution` (benchmark vs production paths) |
 
 **Time estimate:** C1–C2 **4–6 h**; C3 **4–8 h**; C4 **4–6 h**; C5 **2–4 h**.
 
@@ -2420,7 +2427,7 @@ All forbidden rules and checkpoint constraints derive from this. Dependency flow
 
 | Gate | Requirement |
 |------|-------------|
-| Unit tests | E2-25–E2-28 + C-phase tests (E2-C1-01 … E2-C5-02) as added |
+| Unit tests | E2-25–E2-28 + C-phase tests (E2-C1-01 … E2-C5-02, incl. E2-C2-04) as added |
 | STRICT benchmark | `THOTH_E2_WIRING_STAGE=B` — fingerprint `1ce31c6a…` stable |
 | E2-28 | Two-run scoped equivalence vs Phase B v1 baseline |
 | Structural audit | `testE2B5ScoredLoopStructuralAudit` green |
@@ -2440,13 +2447,13 @@ Same episode. Same result. Different integration path.
 | Order | Work | Runtime change? |
 |-------|------|-----------------|
 | 0 | Protocol v1.1 locked ✅ | No |
-| 1 | C1 — Evaluation service boundary | Refactor only |
-| 2 | C2 — Episode publication | Additive — default OFF |
-| 3 | C3 — Diagnostic layer | Additive — JSONL only |
-| 4 | C4 — Architectural telemetry | Additive |
-| 5 | C5 — Path equivalence + close-out | Validation only |
+| 1 | E2-C1 — Evaluation service boundary | Refactor only ✅ |
+| 2 | E2-C2 — Episode publication | Additive — default OFF ✅ |
+| 3 | C3 — Diagnostic layer | Additive — JSONL only ✅ |
+| 4 | C4 — Architectural telemetry | Additive ✅ |
+| 5 | C5 — Path equivalence + close-out | Validation only ✅ |
 
-**Status:** 📋 **C1 locked** — ready for implementation; paused until C1 explicitly opened.
+**Status:** 🔒 **Phase C locked** (2026-07-05). E2-C1–C5 complete; `PHASE_C_COMPLETE.md` written. **Paused before Phase D** — D0 locked in `D_PHASE_PROTOCOL.md`.
 
 ##### Phase narrative (context)
 
@@ -2454,8 +2461,8 @@ Same episode. Same result. Different integration path.
 |-------|----------|
 | A | Can execution be trusted? ✅ |
 | B | Can measurement be trusted? ✅ |
-| **C** | Can trusted measurement become architecture? |
-| D | Can architecture evolve without losing trust? |
+| **C** | Can trusted measurement become architecture? ✅ |
+| **D** | Can architecture evolve without losing trust? 🔒 D0 locked |
 | E | Can we defend the results scientifically? |
 
 ---
@@ -2546,9 +2553,592 @@ Service mirrors Phase B free functions 1:1 — **façade, not redesign**. Consol
 5. E2-25–E2-28 + E2-C1-01–03 green
 6. **Pause before C2**
 
-**Time estimate:** ~2–3 hours (refactor only).
+**Status:** ✅ **E2-C1 complete** (2026-07-04). **E2-C2 complete** (2026-07-04). **Paused before E2-C3.**
 
-**Status:** 🔒 **C1 plan locked** (2026-07-04). Implementation not started.
+##### C1 completion snapshot
+
+| Check | Result |
+|-------|--------|
+| `IEpisodicEvaluationService` + stateless façade | `episodic_evaluation_service.h` / `.cpp` in `e2_eval_kernel` |
+| Harness thin caller | `runScoredEvaluationLoop` uses `evalService` only |
+| E2-C1-01 service equivalence | Green |
+| E2-C1-02 no eval algorithm in harness loop | Green |
+| E2-C1-03 no benchmark logic in service | Green |
+| E2-25–E2-28 regression | Green |
+| `wiring_stage=B` harness | SUCCESS; 3/3 scorable |
+| Phase B fingerprint | Unchanged (service delegates to Phase B functions) |
+
+---
+
+#### C.2.0 — C2 implementation plan (episode publication — **v1**)
+
+**Authority:** [`docs/C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) § C2  
+**One problem:** Introduce an event boundary without coupling Executive to evaluation.
+
+**C1:** Can evaluation exist independently? ✅  
+**C2:** Can execution publish information without knowing evaluation exists?
+
+##### C2 architectural target
+
+```
+Executive
+    │ publishes (fire-and-forget)
+    ▼
+Event channel          ← delivery outside Executive
+    │
+    ▼
+EvaluationSubscriber   ← first consumer (more in Phase D+)
+    │ trajectory → observation mapping (subscriber only)
+    ▼
+IEpisodicEvaluationService (INTEGRATION tier)
+```
+
+Future: `ReplaySubscriber`, `MetricsSubscriber`, `TraceSubscriber` — Executive unchanged.
+
+##### Invariants
+
+| Invariant | Rule |
+|-----------|------|
+| **Fire-and-forget** | Publication is Executive's job; delivery is not |
+| **Immutable event** | `EpisodeCompleted` — subscribers read-only, no mutation |
+| **Subscriber isolation** | Subscriber failures must not affect goal outcome or Executive state |
+| **Mapping ownership** | Trajectory-to-observation mapping exclusively in `EvaluationSubscriber` |
+| **Passive service** | Evaluation never on critical execution path |
+
+##### Event ownership
+
+| Layer | Owns |
+|-------|------|
+| Executive | Event creation |
+| Event channel | Event distribution |
+| EvaluationSubscriber | Event consumption + trajectory mapping |
+| Evaluation service | Interpretation (Phase B frozen) |
+
+##### Deliverables
+
+| # | Item |
+|---|------|
+| 1 | Immutable `EpisodeCompleted` struct |
+| 2 | `IEpisodeEventChannel` — publish + subscriber registration |
+| 3 | Executive publication hook at `PLAN_COMPLETED` / `PLAN_FAILED` (flag-gated) |
+| 4 | `EvaluationSubscriber` — maps event → service call (INTEGRATION) |
+| 5 | `Config::enable_episodic_evaluation_publication` — default `false` |
+| 6 | Tests E2-C2-01–04 |
+
+##### Forbidden
+
+- Executive imports `IEpisodicEvaluationService` or calls `evaluateCase`
+- Executive knows consumer count or identity
+- Trajectory extraction in Executive or evaluation service
+- Subscriber failures altering plan completion
+- `official_scoring: true` from production subscriber
+- Auto-enable publication flag
+
+##### Structural audits
+
+| ID | Asserts |
+|----|---------|
+| **E2-C2-01** | Flag OFF → Executive behavior identical |
+| **E2-C2-02** | Flag ON → channel delivers to `EvaluationSubscriber`; Executive has no eval import |
+| **E2-C2-03** | Subscriber output INTEGRATION only; `official_scoring: false` |
+| **E2-C2-04** | Subscriber: no planner, RAG, memory mutation, Executive state access |
+
+##### Implementation order
+
+| Step | Work |
+|------|------|
+| 1 | Define immutable `EpisodeCompleted` + `IEpisodeEventChannel` |
+| 2 | Add feature flag to `Config` (default `false`) |
+| 3 | Executive: publish to channel on terminal events (no eval) |
+| 4 | Implement `EvaluationSubscriber` + trajectory mapping |
+| 5 | Wire channel + subscriber at agent init (flag ON only) |
+| 6 | Subscriber try/catch — failures logged, execution unaffected |
+| 7 | E2-C2-01–04 + E2-25–E2-28 + E2-C1 regression |
+| 8 | `wiring_stage=B` harness unchanged |
+| 9 | **Pause before C3** |
+
+##### Exit criteria
+
+1. Fire-and-forget publication; delivery outside Executive
+2. Immutable `EpisodeCompleted`; all subscribers see same snapshot
+3. Subscriber failure isolation verified
+4. Benchmark authority path unchanged
+5. E2-C2-01–04 green
+
+**Status:** ✅ **E2-C2 complete** (2026-07-04). **Paused before E2-C3.**
+
+##### E2-C2 completion snapshot
+
+| Check | Result |
+|-------|--------|
+| `EpisodeCompleted` (execution domain) | Immutable event struct |
+| `InProcessEpisodeEventChannel` | Fire-and-forget delivery; subscriber failures isolated |
+| Executive publication hook | `publish_episode_completed_unlocked` — no eval imports |
+| `EvaluationSubscriber` | INTEGRATION tier only; deterministic mapping |
+| `enable_episodic_evaluation_publication` | Default `false` |
+| E2-C2-01–04 + mapping test | Green |
+| E2-25–E2-28 + E2-C1 regression | Green |
+| `wiring_stage=B` harness | SUCCESS; 3/3 scorable |
+
+**Time estimate:** ~2–3 hours (additive — default OFF).
+
+**Status:** ✅ **E2-C2 complete** (2026-07-04). **Paused before E2-C3.**
+
+---
+
+#### C.3.0 — E2-C3 implementation plan (diagnostic layer — **v1.1**)
+
+**Authority:** [`docs/C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) § E2-C3  
+**One problem:** Explain evaluation results without participating in producing them.
+
+##### C3.0 — Hard boundary invariant
+
+> Diagnostics explain evaluation — they do not participate in producing it.
+
+| Must NOT | |
+|----------|--|
+| Call evaluation service | |
+| Call Executive / access `EpisodeCompleted` | |
+| Subscribe to event channel | |
+| Modify evaluation outputs | |
+| Influence scoring or execution | |
+| Influence evaluation selection, scoring, or output formatting | No feedback into evaluation |
+
+> **Diagnostics are not part of the evaluation contract** — downstream presentation only, not extended evaluation output.
+
+##### Pipeline (implemented C2 reality)
+
+```
+EpisodeCompleted → EvaluationSubscriber → EvaluationService → DiagnosticService → JSONL
+```
+
+Diagnostics consume **only** `EvaluationSubscriber` outputs — never raw execution events.
+
+##### Input contract (C2 output only)
+
+- `EpisodicLearningCaseEvaluation` (post-resolution)
+- `EpisodicLearningSummary`
+- `EvaluationDiagnosticsContext` (`run_id`, `env_hash`, `fingerprint_hash`, `e2_eval_config`) — **must not** include evaluation results or derived fields (resolution, scores, classification)
+
+##### Diagnostic service
+
+| Component | Role |
+|-----------|------|
+| `IDiagnosticService` | Interface |
+| `EvaluationDiagnosticService` | Stateless implementation |
+| `generateDiagnostics(eval, config, context)` | Per-case |
+| `generateRunDiagnostics(summary, context)` | Run-level |
+
+##### Output: `EvaluationDiagnostics`
+
+`run_id`, `case_id`, `evaluation_resolution_snapshot`, `diagnosis_bucket` (#0–#4), `failure_classification`, `structured_explanation`, optional `trace_links`
+
+**Canonical JSONL `event_type` values (only):** `E2_EVAL_DIAGNOSTIC_CASE`, `E2_EVAL_DIAGNOSTIC_SUMMARY` — separate from authoritative `EPISODIC_LEARNING_*`. No `E2_DIAGNOSTIC_*` (without `EVAL`) or other variants.
+
+##### Integration
+
+C3 runs as a **post-processing stage** after `EvaluationSubscriber` has produced evaluation artifacts (per-case + summary). Not a hook inside subscriber evaluation logic — implementation placement flexible as long as artifacts are complete.
+
+##### Determinism
+
+Pure function of evaluation output + context. No runtime state. Same input → same output.
+
+##### Tests
+
+| ID | Asserts |
+|----|---------|
+| E2-C3-01 | No eval/scoring function calls in diagnostic code |
+| E2-C3-02 | Deterministic output |
+| E2-C3-03 | Non-interference — no mutation of evaluation fields |
+| E2-C3-04 | C2→C3 preserves E2-25–E2-28 + fingerprint |
+
+##### Structural audits
+
+- **One-way dependency:** Evaluation → Diagnostics only; diagnostics import exported data structures, not eval internals
+- `episodic_evaluation_service` does NOT import diagnostics
+- Diagnostic code does NOT import `episode_events`, `executive_controller`, or event-channel path
+- No reverse dependency edges; no shared utility creep into scoring helpers
+
+##### Exit criteria
+
+1. Diagnostic service exists; wired post-evaluation in subscriber pipeline
+2. Structured JSONL diagnostics emitted
+3. E2-C3-01–04 green
+4. E2-06 rules hold on integration path
+5. STRICT benchmark + E2-28 unchanged
+6. **Pause before E2-C4**
+
+**Time estimate:** ~4–8 hours.
+
+**Status:** ✅ **E2-C3 complete** (2026-07-05). **Paused before E2-C4.**
+
+---
+
+#### C.4.0 — E2-C4 implementation plan (telemetry layer — **v1**)
+
+**Authority:** [`docs/C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) § E2-C4  
+**One problem:** Measure the integrated evaluation pipeline without influencing execution, evaluation, or diagnostics.
+
+**One sentence:** E2-C4 introduces architectural telemetry that measures the evaluation pipeline while remaining completely observational.
+
+##### C4.0 — Hard boundary invariant
+
+> Telemetry is measurement, not decision-making.
+
+> **Telemetry is not part of the evaluation contract, the diagnostic contract, or the execution contract.**
+
+| Must NOT | |
+|----------|--|
+| Alter execution | |
+| Call evaluation service | |
+| Call diagnostic service | |
+| Modify evaluation or diagnostic artifacts | |
+| Influence scoring, resolution, or output formatting | |
+| Influence diagnostic classification or explanations | |
+| Change fingerprints or `evaluation_resolution` | |
+| Block upstream stages on flush failure | |
+| Share schema namespace with benchmark metrics | |
+
+##### Pipeline (implemented C1–C3 reality)
+
+```
+Execution → EpisodeCompleted → EvaluationSubscriber → EvaluationService → DiagnosticService → TelemetryService → JSONL
+```
+
+Telemetry observes the **completed pipeline** — never becomes part of it.
+
+##### Telemetry ownership
+
+| Layer | Owns |
+|-------|------|
+| Execution | State |
+| Evaluation | Correctness |
+| Diagnostics | Interpretation |
+| **Telemetry** | **Architectural measurement** (latencies, counts) |
+
+Telemetry must **never reinterpret** evaluation results.
+
+##### Input contract (timing snapshots + attribution only)
+
+- `E2PipelineTelemetryContext` — `run_id`, `env_hash`, `plan_id`, clock anchors only (**must not** include eval/diag results)
+- `E2PipelineStageTimings` — per-stage `duration_ms` (`mapping`, `evaluation`, `diagnostics`, `pipeline_total`)
+
+##### Telemetry service
+
+| Component | Role |
+|-----------|------|
+| `IE2PipelineTelemetryService` | Interface |
+| `E2PipelineTelemetryService` | Stateless implementation |
+| `recordPipelineRun(timings, context)` | Aggregate + emit record |
+| `e2PipelineTelemetryToJson(record)` | JSONL serializer |
+
+##### Output: `E2PipelineTelemetryRecord`
+
+`run_id`, `plan_id`, `telemetry_tier: "ARCHITECTURE"`, `telemetry_schema_version`, `pipeline_duration_ms`, `stages[]`, `episodes_processed`, optional `publication_to_subscriber_ms`, reserved `queue_delay_ms`
+
+**Canonical JSONL `event_type` values (only):** `E2_EVAL_TELEMETRY_PIPELINE` — separate from `EPISODIC_LEARNING_*` and `E2_EVAL_DIAGNOSTIC_*`. No `E2_TELEMETRY_*` (without `EVAL`) variants.
+
+##### Candidate metrics (architecture only)
+
+| Metric | Notes |
+|--------|-------|
+| `mapping_duration_ms` | Subscriber mapping |
+| `evaluation_duration_ms` | C1 service wall time |
+| `diagnostic_duration_ms` | C3 generation wall time |
+| `pipeline_duration_ms` | End-to-end integration path |
+| `publication_to_subscriber_ms` | `completed_at_ms` → subscriber entry |
+| `episodes_processed` | Throughput count |
+
+**Excluded from telemetry:** `success`, `lift`, `evaluation_resolution`, `fingerprint_hash`, `e2_outcome`, `diagnosis_bucket`, `failure_classification`
+
+##### Integration
+
+C4 runs as a **post-processing stage** after evaluation + diagnostic artifacts and stage timings exist. **Synchronous computation, best-effort persistence** — `recordPipelineRun` inline; emission failures swallowed.
+
+**Clock invariant:** durations = `steady_clock`; absolute correlation = `system_clock`. Never derive durations from `system_clock`.
+
+**Testing observation interfaces** (not production API): `lastStageTimingsForTests()`, `lastTelemetryRecordForTests()` — permanent, same family as C2/C3 hooks.
+
+##### Config
+
+| Flag | Default |
+|------|---------|
+| `enable_episodic_pipeline_telemetry` | `false` |
+| `enable_episodic_evaluation_publication` | `false` (existing — telemetry does not auto-enable) |
+
+##### Tests
+
+| ID | Asserts |
+|----|---------|
+| E2-C4-01 | Schema segregation — `telemetry_tier: ARCHITECTURE`; no benchmark/diagnostic authority fields |
+| E2-C4-02 | Non-blocking — telemetry failure does not alter eval/diagnostic artifacts |
+| E2-C4-03 | Structural audit — no eval/diagnostic service calls in telemetry code |
+| E2-C4-03b | Subscriber telemetry block — no eval/diag semantic field references |
+| E2-C4-04 | Non-interference — eval/diagnostic/fingerprint unchanged after telemetry |
+| E2-C4-05 | Regression — E2-25–E2-28 + E2-C1–C3 green; fingerprint stable |
+
+##### Structural audits
+
+- **One-way dependency:** Pipeline → Telemetry only; telemetry imports exported timing/attribution structs
+- `episodic_evaluation_service`, `diagnostic_service`, `executive_controller` do NOT import telemetry
+- Telemetry does NOT import eval/diag/exec internals
+- No shared utility creep
+
+##### Files
+
+| File | Expected change |
+|------|-----------------|
+| `pipeline_telemetry_service.h` | **New** — interface + data model |
+| `pipeline_telemetry_service.cpp` | **New** — stateless service + JSONL |
+| `evaluation_subscriber.cpp` | **Modified** — stage timing capture + post-pipeline telemetry hook |
+| `evaluation_subscriber.h` | **Modified** — optional test hook for last telemetry record |
+| `config.h` / `config.cpp` | **Modified** — `enable_episodic_pipeline_telemetry` flag |
+| `external/basic_agent/CMakeLists.txt` | **Modified** — add telemetry source to `e2_eval_kernel` |
+| `tests/unit_tests.cpp` | **Modified** — E2-C4-01–05 |
+| `docs/C_PHASE_PROTOCOL.md` | **Modified** — § E2-C4 (this plan) |
+
+| File | Explicitly unchanged |
+|------|----------------------|
+| `episodic_evaluation_service.h` / `.cpp` | No telemetry import |
+| `diagnostic_service.h` / `.cpp` | No telemetry import |
+| `executive_controller.cpp` | No telemetry import; not blocked on flush |
+| `run_episodic_learning_benchmark.cpp` | Benchmark authority path unchanged |
+| `episode_events.h` | Execution domain unchanged |
+
+##### Implementation order
+
+| Step | Work |
+|------|------|
+| 1 | Define `E2PipelineTelemetryContext`, `E2PipelineStageTimings`, `E2PipelineTelemetryRecord` |
+| 2 | Implement `IE2PipelineTelemetryService` + `e2PipelineTelemetryToJson()` |
+| 3 | Add stage timing capture in `EvaluationSubscriber` (local chrono segments) |
+| 4 | Wire post-pipeline `recordPipelineRun()` — best-effort, flag-gated |
+| 5 | Add `enable_episodic_pipeline_telemetry` to `Config` (default `false`) |
+| 6 | E2-C4-01–05 + E2-25–E2-28 + E2-C1–C3 regression |
+| 7 | Manual: flag ON integration run — verify telemetry JSONL shape; flag OFF — identical eval/diag output |
+| 8 | **Pause before E2-C5** |
+
+##### Manual verification
+
+1. `enable_episodic_pipeline_telemetry=true` + publication ON → `E2_EVAL_TELEMETRY_PIPELINE` row with stage timings
+2. Telemetry row contains no `evaluation_resolution`, `lift`, `fingerprint_hash`, `diagnosis_bucket`
+3. Telemetry throw/inject test — subscriber still produces same summary + diagnostics
+4. `THOTH_E2_WIRING_STAGE=B` harness — fingerprint `1ce31c6a…` unchanged
+
+**Checkpoint 2 fingerprint note:** Subscriber proof uses INTEGRATION tier (no STRICT fingerprint). Do **not** compare `makeE2StrictTestConfig()` fingerprint to the Phase B baseline — that fixture pins `corpus_snapshot_id="e2-test-corpus"` while the official harness pins `corpus_snapshot_id=benchmarkRun.index_hash()` (runtime index hash). That is E2-28 bucket **#1 config mismatch** by design; harness authority is verified only via `run_episodic_learning_benchmark` with `wiring_stage=B`, not unit-test STRICT fixtures.
+
+##### Exit criteria
+
+1. Telemetry service exists; post-pipeline wiring complete
+2. `E2_EVAL_TELEMETRY_PIPELINE` JSONL when flag ON
+3. E2-C4-01–05 green
+4. E2-06 rules hold — no authoritative scoring fields in telemetry
+5. STRICT benchmark + E2-28 unchanged
+6. **Pause before E2-C5**
+
+**Time estimate:** ~4–6 hours.
+
+**Expected risks:**
+
+| Risk | Mitigation |
+|------|------------|
+| Timing capture bleeds into eval/diag logic | Keep chrono variables local to subscriber orchestration only |
+| Schema drift toward benchmark fields | E2-C4-01 forbidden-field audit |
+| Telemetry failure blocks subscriber | try/catch + best-effort; E2-C4-02 |
+| `DecisionTraceLogger` mixing temptation | Explicitly out of C4 scope |
+
+**Architectural invariants preserved:** Passive service; downward-only dependency; Phase B contract frozen; diagnostics/evaluation contracts untouched.
+
+**E2-C4 does not prove:** Path equivalence (benchmark vs production `evaluation_resolution` match) — **E2-C5 only**.
+
+**Status:** ✅ **E2-C4 complete** (2026-07-05). Checkpoints 1–3 green; E2-C4-01–05 + E2-25–E2-28 + E2-C1–C3 regression green; `wiring_stage=B` harness SUCCESS. C4 hardening: telemetry sink closure + E2-C4-03b. **Paused before E2-C5.**
+
+---
+
+#### C.5.0 — E2-C5 implementation plan (path equivalence — **v1 locked**)
+
+**Authority:** [`docs/C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) § E2-C5  
+**One problem:** Prove benchmark and production orchestration produce identical evaluation semantics — without changing eval, diagnostic, or telemetry logic.
+
+**One sentence:** C5 is a proof, not a feature — equivalence under pinned evaluation semantics.
+
+##### C5.0 — Scope label (not raw production vs benchmark)
+
+| C5 proves | C5 does not prove |
+|-----------|-------------------|
+| Orchestration equivalence under **pinned semantic config** | `E2EvalConfig` object identity across INTEGRATION defaults vs STRICT harness |
+| Production pipeline under **strict-mode simulation** (test seam) | Live INTEGRATION-tier subscriber == STRICT harness (C2/C3 own envelope rules) |
+| Kernel outputs match after observation normalization | Mapping structural parity on non-evaluation fields |
+
+Production defaults INTEGRATION; benchmark uses STRICT — intentional, unchanged.
+
+##### C5.1 — Core invariant (semantic fields)
+
+Per mapping-safe fixture, under pinned config, both paths must agree on:
+
+`evaluation_resolution`, scorable classification, `not_scorable_by_reason`, `failure_classification`, `diagnosis_bucket` (#0–#4).
+
+**Ignore in diff:** timestamps, telemetry, logs, envelope-only tier labels.
+
+##### C5.2 — Config semantics
+
+Compare **evaluation equivalence under equivalent semantic configuration** — not raw config object equality.
+
+**Test-only seam (approved):** `setEvaluationSubscriberEvalConfigForTests(std::optional<E2EvalConfig>)` — unset = production `integrationDefaults()`; set = C5 pinned STRICT pins only.
+
+##### C5.3 — Fingerprint rule
+
+`fingerprint_hash` valid only when both paths share identical corpus/retrieval/strict pins and fingerprint is computed **post-normalization** into kernel inputs via same `computeFingerprint(pinnedConfig)`.
+
+##### C5.4 — Mapping fidelity (Checkpoint 0 prerequisite)
+
+**Not path equivalence.** Checkpoint 0 validates that the production mapper preserves evaluation-relevant semantics before equivalence testing begins.
+
+**Round-trip (tests only):**
+
+```text
+Benchmark arm observations
+  → episodeFromBenchmarkArms()        [synthetic EpisodeCompleted — NOT production]
+  → mapEpisodeToProductionObservations()
+  → compare evaluation-relevant fields to original benchmark arm observations
+```
+
+**Evaluation-relevant (must match):** cold/warm `terminal_state`, scores, `arm_scoring_status`, retrieval chunks/hit flags, runtime guard / block state, expectations pins.
+
+**Excluded:** timestamps, event IDs, telemetry IDs, subscriber envelopes, logging metadata, plan_snapshot fields not consumed by mapping.
+
+**On failure:** mapping analysis first — do not modify evaluator; fix mapper only if evaluation semantics are lost.
+
+**Checkpoint 0 gate:** Prove benchmark-to-production mapping preserves all evaluation-relevant semantics required by the E2 evaluation kernel. Validates that both orchestration paths can provide identical evaluator inputs before equivalence testing begins.
+
+##### C5.4.1 — Checkpoint scope
+
+| # | Proves | Path equivalence? |
+|---|--------|-------------------|
+| 0 | Mapping fidelity (evaluator inputs preserved) | No — prerequisite |
+| 1–3 | Orchestration equivalence under pinned config | Yes |
+
+##### C5.5 — Architecture
+
+```text
+Benchmark:  runScoredEvaluationLoop → EvaluationService → DiagnosticService
+Production: EpisodeCompleted → map → Subscriber → EvaluationService → DiagnosticService
+```
+
+##### C5.6 — Tests (full registry)
+
+| ID | Asserts |
+|----|---------|
+| E2-C5-01 | Semantic equivalence under pinned config |
+| E2-C5-02 | Fingerprint stability post-normalization |
+| E2-C5-03 | Cross-path artifact consistency (normalized) |
+| E2-C5-04 | No hidden coupling — structural audit |
+| E2-C5-05 | E2-25–E2-28 + E2-C1–C4 + `wiring_stage=B` |
+
+##### C5.7 — Files
+
+| File | Expected change |
+|------|-----------------|
+| `e2_path_equivalence.h` / `.cpp` | **New** — comparison harness |
+| `evaluation_subscriber.h` / `.cpp` | **Modified** — test-only config seam only |
+| `tests/unit_tests.cpp` | **Modified** — E2-C5-01..05 + fixture helpers |
+| `external/basic_agent/CMakeLists.txt` | **Modified** — harness in `e2_eval_kernel` |
+| `docs/phases/PHASE_C_COMPLETE.md` | **New** — close-out |
+
+| Explicitly untouched | |
+|----------------------|--|
+| `episodic_evaluation_service.*`, `diagnostic_service.*`, `pipeline_telemetry_service.*`, `executive_controller.*`, `run_episodic_learning_benchmark.cpp` | |
+
+##### C5.8 — Execution lock checklist
+
+1. Config semantics = pinned evaluation equivalence, not object equality  
+2. Fixture scope = mapping-safe golden cases only initially  
+3. Config seam = test-only; production unchanged when unset  
+4. Mapping rule = Checkpoint 0 is mapping fidelity (prerequisite), not equivalence; mismatch → mapping analysis first  
+5. Test registry = E2-C5-01..05  
+6. C4 hardening = sink closure + E2-C4-03b green  
+
+##### C5.9 — Checkpoints
+
+| # | Work | Gate |
+|---|------|------|
+| **0** | **Mapping fidelity validation** — synthetic `episodeFromBenchmarkArms()`; round-trip vs benchmark arm observations (not `EpisodeCompleted` object); fixture scope report | Evaluator inputs preserved through mapping — prerequisite for equivalence proof |
+| 1 | Harness + test config seam | Build green; production default unchanged |
+| 2 | E2-C5-01..03 | Equivalence matrix on mapping-safe fixtures |
+| 3 | E2-C5-04..05 + manual real-goal run + `PHASE_C_COMPLETE.md` | Phase C close-out |
+
+**Time estimate:** ~4–5 h.
+
+**Status:** 🔒 **Phase C locked** (2026-07-05). E2-C5-01–05 green; `wiring_stage=B` SUCCESS; `PHASE_C_COMPLETE.md` written. **Paused before Phase D.**
+
+**Review note (C5-03):** E2-C5-03 aliases E2-C5-01; proof coverage unchanged via `diffPathEquivalence()`. Future cleanup may split C5-03 for traceability.
+
+---
+
+### D.0.0 — E2 Phase D (Evolution Tier)
+
+**Authority:** [`docs/D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) v1.0  
+**Prerequisite:** Phase C locked — [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md)
+
+**Goal:** Prove the architecture can **evolve** — more subscribers, replay, metrics/trace, live INTEGRATION connection — without changing Phase B evaluation semantics or Phase C path equivalence.
+
+**One sentence:** Grow passive consumers and operational modes while proving nothing important changed.
+
+##### D0 — Evolution boundary (informational — not coded)
+
+Phase B + Phase C contracts are **immutable dependencies**. Tweaking evaluation during evolution = protocol change (E2 v1.3+), not Phase D work.
+
+##### Three architectural modes (D0)
+
+| Mode | Role |
+|------|------|
+| **STRICT** | Authoritative — `wiring_stage=B` only |
+| **INTEGRATION** | Diagnostic — `official_scoring: false` |
+| **PRODUCTION** | Operational execution — evaluation observes, never decides |
+
+D4 **connects** INTEGRATION to production; it does not introduce INTEGRATION.
+
+##### Phase D Constitutional Rule
+
+> **Every new capability must satisfy: Observe, Record, Replay, Present — Never Decide.**
+
+If a component influences planning, retrieval, memory, evaluation, or benchmark outcomes — it does not belong in Phase D.
+
+##### Passive Consumer Law (all five required)
+
+1. Consumes immutable events  
+2. Cannot modify publisher state  
+3. Cannot influence execution ordering  
+4. Cannot become required for successful execution  
+5. Can be removed without changing benchmark results  
+
+##### GUI consequence (not a checkpoint)
+
+> GUI is not part of the evaluation architecture. GUI is merely another subscriber. Dependency is one-way: artifacts → display.
+
+##### Checkpoint sequence (implement in order)
+
+| Step | Work | Gate |
+|------|------|------|
+| **E2-D1** | Event channel fan-out — subscriber count invisible to Executive | 0 vs N subscribers → identical Executive work |
+| **E2-D2** | Replay subscriber — replay changes **time** | Passive Consumer Law; replay removal → benchmark unchanged |
+| **E2-D3** | Metrics + trace subscribers — observation changes, not time | Measure, don't interpret (C4 philosophy) |
+| **E2-D4** | Live INTEGRATION connection — wire diagnostic mode to production path | E2-06 contract; STRICT path uncontaminated |
+| **E2-D5** | Evolution trust proof — mirror C5 | C5 matrix + Phase B fingerprint + `PHASE_D_COMPLETE.md` |
+
+**Time estimate:** D1 **3–5 h**; D2 **3–4 h**; D3 **4–6 h**; D4 **3–5 h**; D5 **2–4 h**.
+
+##### Regression gates (every checkpoint)
+
+| Gate | Requirement |
+|------|-------------|
+| C5 equivalence | `THOTH_E2_C5=1` — golden fixtures MATCH |
+| STRICT benchmark | `THOTH_E2_WIRING_STAGE=B` — fingerprint `1ce31c6a…` stable |
+| Phase C regression | E2-C1..C5 green |
+| Constitutional Rule | Observe / Record / Replay / Present only |
+| Passive Consumer Law | All five conditions per new subscriber |
+
+**Status:** 🔒 **D0 locked** (2026-07-05). **Paused before D1.**
 
 ---
 

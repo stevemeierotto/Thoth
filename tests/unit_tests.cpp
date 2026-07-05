@@ -56,6 +56,13 @@
 #include "reflection_ab_cases.h"
 #include "episodic_learning_cases.h"
 #include "episodic_learning_eval.h"
+#include "episodic_evaluation_service.h"
+#include "episode_events.h"
+#include "episode_event_channel.h"
+#include "evaluation_subscriber.h"
+#include "e2_path_equivalence.h"
+#include "diagnostic_service.h"
+#include "pipeline_telemetry_service.h"
 #include "e2_strict_enforcement.h"
 #include "e2_strict_retrieval.h"
 #include "workflow_engine.h"
@@ -5597,6 +5604,1119 @@ static bool testE2B5ScoredLoopStructuralAudit() {
     return true;
 }
 
+static std::string readRepoSourceFile(const std::string& relativePath) {
+    std::ifstream in(relativePath);
+    if (!in.is_open()) {
+        in.open("/home/steve/Thoth/" + relativePath);
+    }
+    if (!in.is_open()) {
+        return {};
+    }
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+/** E2-C1-01 — service façade matches Phase B free-function evaluation output. */
+static bool testE2C1ServiceOutputEquivalence() {
+    const Thoth::IEpisodicEvaluationService& svc = Thoth::episodicEvaluationService();
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    Thoth::BenchmarkAttribution attr{"e2-c1-equiv", "e2-c1-equiv-env"};
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> directEvals;
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> serviceEvals;
+    std::vector<Thoth::EpisodicLearningExpectations> expectations;
+    for (const auto& spec : cases) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr, nullptr, nullptr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+
+        Thoth::EpisodicLearningCaseEvaluation direct =
+            Thoth::evaluateEpisodicLearningCase(spec.id, spec.expectations, cold, warm, cfg);
+        direct.run_block_reason = warmBlock;
+        Thoth::applyCaseEvaluationResolution(direct);
+
+        Thoth::EpisodicLearningCaseEvaluation viaService =
+            svc.evaluateCase(spec.id, spec.expectations, cold, warm, cfg);
+        viaService.run_block_reason = warmBlock;
+        svc.applyCaseResolution(viaService);
+
+        if (direct.passes != viaService.passes || direct.lift != viaService.lift ||
+            direct.failure_reason != viaService.failure_reason ||
+            direct.run_block_reason != viaService.run_block_reason ||
+            direct.evaluation_resolution != viaService.evaluation_resolution) {
+            std::cerr << "testE2C1ServiceOutputEquivalence: mismatch for " << spec.id << '\n';
+            return false;
+        }
+        directEvals.push_back(direct);
+        serviceEvals.push_back(viaService);
+        expectations.push_back(spec.expectations);
+    }
+
+    const auto directSummary =
+        Thoth::summarizeEpisodicLearning(directEvals, expectations, cfg);
+    const auto serviceSummary = svc.summarize(serviceEvals, expectations, cfg);
+    if (directSummary.mean_episodic_lift != serviceSummary.mean_episodic_lift ||
+        directSummary.scorable_cases != serviceSummary.scorable_cases ||
+        directSummary.not_scorable_cases != serviceSummary.not_scorable_cases ||
+        directSummary.evaluation_resolution != serviceSummary.evaluation_resolution) {
+        std::cerr << "testE2C1ServiceOutputEquivalence: summary mismatch\n";
+        return false;
+    }
+
+    const auto directFp = Thoth::computeEvaluationFingerprint(cfg);
+    const auto serviceFp = svc.computeFingerprint(cfg);
+    if (directFp.fingerprint_hash != serviceFp.fingerprint_hash ||
+        directFp.canonical_json != serviceFp.canonical_json) {
+        std::cerr << "testE2C1ServiceOutputEquivalence: fingerprint mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-C1-02 — scored loop delegates evaluation to service (no direct algorithm). */
+static bool testE2C1HarnessNoDirectEvaluationAlgorithm() {
+    const std::string source = readRepoSourceFile(
+        "external/basic_agent/src/run_episodic_learning_benchmark.cpp");
+    if (source.empty()) {
+        std::cerr << "testE2C1HarnessNoDirectEvaluationAlgorithm: cannot read harness source\n";
+        return false;
+    }
+    const auto fnPos = source.find("ScoredLoopOutcome runScoredEvaluationLoop");
+    const auto fnEnd = source.find("int runScoredEvaluationHarness", fnPos);
+    if (fnPos == std::string::npos || fnEnd == std::string::npos) {
+        std::cerr << "testE2C1HarnessNoDirectEvaluationAlgorithm: runScoredEvaluationLoop not found\n";
+        return false;
+    }
+    const std::string body = source.substr(fnPos, fnEnd - fnPos);
+    const std::vector<std::string> forbidden = {"evaluateEpisodicLearningCase",
+                                                "applyCaseEvaluationResolution",
+                                                "summarizeEpisodicLearning",
+                                                "resolveEvaluation("};
+    for (const auto& sym : forbidden) {
+        if (body.find(sym) != std::string::npos) {
+            std::cerr << "testE2C1HarnessNoDirectEvaluationAlgorithm: found " << sym << '\n';
+            return false;
+        }
+    }
+    if (body.find("evalService") == std::string::npos) {
+        std::cerr << "testE2C1HarnessNoDirectEvaluationAlgorithm: evalService missing\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-C1-03 — evaluation service contains no benchmark-specific logic. */
+static bool testE2C1ServiceNoBenchmarkLogic() {
+    const std::vector<std::string> paths = {
+        "external/basic_agent/include/episodic_evaluation_service.h",
+        "external/basic_agent/src/episodic_evaluation_service.cpp"};
+    const std::vector<std::string> forbidden = {"wiring_stage",
+                                                "THOTH_E2_WIRING_STAGE",
+                                                "benchmarkLogPath",
+                                                "appendJsonLine",
+                                                "run_episodic_learning_benchmark",
+                                                "std::getenv",
+                                                "std::cout"};
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2C1ServiceNoBenchmarkLogic: cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << "testE2C1ServiceNoBenchmarkLogic: " << sym << " in " << path << '\n';
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/** E2-C2-01 — publication disabled by default (config flag OFF). */
+static bool testE2C2PublicationDisabledByDefault() {
+    Config cfg;
+    if (cfg.enable_episodic_evaluation_publication) {
+        std::cerr << "testE2C2PublicationDisabledByDefault: expected default OFF\n";
+        return false;
+    }
+    return true;
+}
+
+class TestEpisodeCaptureSubscriber final : public Thoth::IEpisodeEventSubscriber {
+public:
+    int deliveries = 0;
+    Thoth::EpisodeCompleted last_event;
+    void onEpisodeCompleted(const Thoth::EpisodeCompleted& event) override {
+        ++deliveries;
+        last_event = event;
+    }
+};
+
+/** E2-C2-02 — channel delivers immutable episode to subscriber. */
+static bool testE2C2ChannelDeliversEpisode() {
+    Thoth::InProcessEpisodeEventChannel channel;
+    auto capture = std::make_shared<TestEpisodeCaptureSubscriber>();
+    channel.subscribe(capture);
+
+    Thoth::EpisodeCompleted event;
+    event.plan_id = "plan-c2-test";
+    event.goal = "goal";
+    event.terminal_state = "COMPLETED";
+    event.final_success_score = 0.8f;
+    channel.publish(event);
+
+    if (capture->deliveries != 1) {
+        std::cerr << "testE2C2ChannelDeliversEpisode: expected one delivery\n";
+        return false;
+    }
+    if (capture->last_event.plan_id != "plan-c2-test" ||
+        capture->last_event.terminal_state != "COMPLETED") {
+        std::cerr << "testE2C2ChannelDeliversEpisode: payload mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-C2-02 — Executive source has no direct evaluation service import. */
+static bool testE2C2ExecutiveNoEvalImport() {
+    const std::string source = readRepoSourceFile("external/basic_agent/src/executive_controller.cpp");
+    if (source.empty()) {
+        std::cerr << "testE2C2ExecutiveNoEvalImport: cannot read executive source\n";
+        return false;
+    }
+    const std::vector<std::string> forbidden = {"episodic_evaluation_service",
+                                                "IEpisodicEvaluationService",
+                                                "evaluateCase",
+                                                "episodicEvaluationService"};
+    for (const auto& sym : forbidden) {
+        if (source.find(sym) != std::string::npos) {
+            std::cerr << "testE2C2ExecutiveNoEvalImport: found " << sym << '\n';
+            return false;
+        }
+    }
+    if (source.find("publish_episode_completed_unlocked") == std::string::npos) {
+        std::cerr << "testE2C2ExecutiveNoEvalImport: publication hook missing\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-C2-03 — EvaluationSubscriber output is INTEGRATION / non-official. */
+static bool testE2C2IntegrationEnvelope() {
+    Thoth::EpisodeCompleted event;
+    event.plan_id = "e2-c2-integration";
+    event.goal = "integration goal";
+    event.terminal_state = "COMPLETED";
+    event.final_success_score = 1.0f;
+    event.plan_snapshot = nlohmann::json::object();
+
+    Thoth::EvaluationSubscriber subscriber;
+    subscriber.onEpisodeCompleted(event);
+
+    const Thoth::EpisodicLearningSummary* summary = Thoth::EvaluationSubscriber::lastSummaryForTests();
+    if (!summary) {
+        std::cerr << "testE2C2IntegrationEnvelope: missing summary\n";
+        return false;
+    }
+    if (summary->official_scoring) {
+        std::cerr << "testE2C2IntegrationEnvelope: official_scoring must be false\n";
+        return false;
+    }
+    if (summary->scoring_tier != Thoth::E2EvalTier::INTEGRATION) {
+        std::cerr << "testE2C2IntegrationEnvelope: expected INTEGRATION tier\n";
+        return false;
+    }
+
+    Thoth::EpisodicLearningRunEnvelope envelope{false, true, "INTEGRATION"};
+    const nlohmann::json row =
+        Thoth::episodicLearningSummaryLogRow({}, *summary, 1, 1, envelope);
+    if (row.value("official_scoring", true)) {
+        std::cerr << "testE2C2IntegrationEnvelope: row official_scoring true\n";
+        return false;
+    }
+    if (row.contains("e2_outcome")) {
+        std::cerr << "testE2C2IntegrationEnvelope: INTEGRATION must not emit e2_outcome\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-C2-04 — EvaluationSubscriber contains no execution logic. */
+static bool testE2C2SubscriberNoExecutionLogic() {
+    const std::string source = readRepoSourceFile("external/basic_agent/src/evaluation_subscriber.cpp");
+    if (source.empty()) {
+        std::cerr << "testE2C2SubscriberNoExecutionLogic: cannot read subscriber source\n";
+        return false;
+    }
+    const std::vector<std::string> forbidden = {"ExecutiveController",
+                                                "RAGPipeline",
+                                                "execute_goal",
+                                                "plantAndConsolidate",
+                                                "memory_->",
+                                                "Memory::"};
+    for (const auto& sym : forbidden) {
+        if (source.find(sym) != std::string::npos) {
+            std::cerr << "testE2C2SubscriberNoExecutionLogic: found " << sym << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C2 — mapping is deterministic and side-effect free (pure function). */
+static bool testE2C2MappingDeterministic() {
+    Thoth::EpisodeCompleted event;
+    event.plan_id = "map-test";
+    event.terminal_state = "COMPLETED";
+    event.final_success_score = 0.5f;
+    event.plan_snapshot = {{"steps", nlohmann::json::array()}};
+    const auto a = Thoth::mapEpisodeToProductionObservations(event);
+    const auto b = Thoth::mapEpisodeToProductionObservations(event);
+    if (a.cold.final_success_score != b.cold.final_success_score ||
+        a.warm.final_success_score != b.warm.final_success_score ||
+        a.warm.terminal_state != b.warm.terminal_state) {
+        std::cerr << "testE2C2MappingDeterministic: mapping not deterministic\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-C3-01 — diagnostics do not call evaluation or scoring functions. */
+static bool testE2C3NoEvaluationCoupling() {
+    const std::vector<std::string> paths = {"external/basic_agent/include/diagnostic_service.h",
+                                            "external/basic_agent/src/diagnostic_service.cpp"};
+    const std::vector<std::string> forbidden = {"evaluateCase",
+                                                "evaluateEpisodicLearningCase",
+                                                "resolveEvaluation(",
+                                                "applyCaseEvaluationResolution",
+                                                "applyCaseResolution",
+                                                "summarizeEpisodicLearning",
+                                                "summarize(",
+                                                "computeFingerprint",
+                                                "episodicEvaluationService",
+                                                "IEpisodicEvaluationService"};
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2C3NoEvaluationCoupling: cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << "testE2C3NoEvaluationCoupling: found " << sym << " in " << path << '\n';
+                return false;
+            }
+        }
+    }
+
+    const std::string evalServiceHeader =
+        readRepoSourceFile("external/basic_agent/include/episodic_evaluation_service.h");
+    const std::string evalServiceSource =
+        readRepoSourceFile("external/basic_agent/src/episodic_evaluation_service.cpp");
+    if (evalServiceHeader.find("diagnostic_service") != std::string::npos ||
+        evalServiceSource.find("diagnostic_service") != std::string::npos) {
+        std::cerr << "testE2C3NoEvaluationCoupling: evaluation service imports diagnostics\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-C3-02 — same evaluation input produces identical diagnostics output. */
+static bool testE2C3Determinism() {
+    const Thoth::IEpisodicEvaluationService& svc = Thoth::episodicEvaluationService();
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    Thoth::BenchmarkAttribution attr{"e2-c3-determinism", "e2-c3-determinism-env"};
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> evaluations;
+    std::vector<Thoth::EpisodicLearningExpectations> expectations;
+    for (const auto& spec : cases) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr, nullptr, nullptr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+        auto eval = svc.evaluateCase(spec.id, spec.expectations, cold, warm, cfg);
+        eval.run_block_reason = warmBlock;
+        svc.applyCaseResolution(eval);
+        evaluations.push_back(eval);
+        expectations.push_back(spec.expectations);
+    }
+    const auto summary = svc.summarize(evaluations, expectations, cfg);
+    const auto fingerprint = svc.computeFingerprint(cfg);
+
+    Thoth::EvaluationDiagnosticsContext context;
+    context.run_id = "e2-c3-determinism";
+    context.env_hash = "e2-c3-determinism-env";
+    context.fingerprint_hash = fingerprint.fingerprint_hash;
+    context.e2_eval_config = cfg.toJson();
+
+    const Thoth::IDiagnosticService& diag = Thoth::episodicDiagnosticService();
+    const auto run_a = diag.generateRunDiagnostics(summary, context);
+    const auto run_b = diag.generateRunDiagnostics(summary, context);
+    const auto json_a = Thoth::evaluationDiagnosticSummaryToJson(run_a);
+    const auto json_b = Thoth::evaluationDiagnosticSummaryToJson(run_b);
+    if (json_a != json_b) {
+        std::cerr << "testE2C3Determinism: run diagnostics differ\n";
+        return false;
+    }
+
+    for (const auto& eval : evaluations) {
+        const auto case_a = diag.generateDiagnostics(eval, cfg, context);
+        const auto case_b = diag.generateDiagnostics(eval, cfg, context);
+        if (Thoth::evaluationDiagnosticToJson(case_a) != Thoth::evaluationDiagnosticToJson(case_b)) {
+            std::cerr << "testE2C3Determinism: case diagnostics differ for " << eval.case_id << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C3-03 — diagnostics do not mutate evaluation artifacts. */
+static bool testE2C3NonInterference() {
+    const Thoth::IEpisodicEvaluationService& svc = Thoth::episodicEvaluationService();
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    Thoth::BenchmarkAttribution attr{"e2-c3-noninterference", "e2-c3-noninterference-env"};
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> evaluations;
+    std::vector<Thoth::EpisodicLearningExpectations> expectations;
+    for (const auto& spec : cases) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr, nullptr, nullptr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+        auto eval = svc.evaluateCase(spec.id, spec.expectations, cold, warm, cfg);
+        eval.run_block_reason = warmBlock;
+        svc.applyCaseResolution(eval);
+        evaluations.push_back(eval);
+        expectations.push_back(spec.expectations);
+    }
+    const auto summary_before = svc.summarize(evaluations, expectations, cfg);
+    const auto fingerprint_before = svc.computeFingerprint(cfg);
+
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> eval_copy = evaluations;
+    Thoth::EpisodicLearningSummary summary_copy = summary_before;
+    const std::string fp_hash_before = fingerprint_before.fingerprint_hash;
+
+    Thoth::EvaluationDiagnosticsContext context;
+    context.run_id = "e2-c3-noninterference";
+    context.env_hash = "e2-c3-noninterference-env";
+    context.fingerprint_hash = fp_hash_before;
+    context.e2_eval_config = cfg.toJson();
+    (void)Thoth::episodicDiagnosticService().generateRunDiagnostics(summary_copy, context);
+    for (auto& eval : eval_copy) {
+        (void)Thoth::episodicDiagnosticService().generateDiagnostics(eval, cfg, context);
+    }
+
+    const auto summary_after = svc.summarize(evaluations, expectations, cfg);
+    const auto fingerprint_after = svc.computeFingerprint(cfg);
+    if (summary_before.mean_episodic_lift != summary_after.mean_episodic_lift ||
+        summary_before.scorable_cases != summary_after.scorable_cases ||
+        summary_before.not_scorable_cases != summary_after.not_scorable_cases ||
+        summary_before.evaluation_resolution != summary_after.evaluation_resolution) {
+        std::cerr << "testE2C3NonInterference: summary changed after diagnostics\n";
+        return false;
+    }
+    if (fingerprint_before.fingerprint_hash != fingerprint_after.fingerprint_hash) {
+        std::cerr << "testE2C3NonInterference: fingerprint changed after diagnostics\n";
+        return false;
+    }
+    for (std::size_t i = 0; i < evaluations.size(); ++i) {
+        const auto& before = evaluations[i];
+        const auto& after = eval_copy[i];
+        if (before.passes != after.passes || before.lift != after.lift ||
+            before.failure_reason != after.failure_reason ||
+            before.run_block_reason != after.run_block_reason ||
+            before.evaluation_resolution != after.evaluation_resolution) {
+            std::cerr << "testE2C3NonInterference: case evaluation mutated for " << before.case_id
+                      << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C3-04 — C2→C3 pipeline preserves E2-25–E2-28 evaluation semantics. */
+static bool testE2C3PipelineIntegrity() {
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    const auto fp = Thoth::computeEvaluationFingerprint(cfg);
+    const auto summary_a = buildOfficialGoldenSummary();
+    const auto summary_b = buildOfficialGoldenSummary();
+    const auto snap_a = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_a, fp.toJson(), cfg.toJson());
+    const auto snap_b = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_b, fp.toJson(), cfg.toJson());
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(snap_a, snap_b)) {
+        std::cerr << "testE2C3PipelineIntegrity: golden scoped snapshots differ\n";
+        return false;
+    }
+
+    Thoth::EvaluationDiagnosticsContext context;
+    context.run_id = "e2-c3-pipeline";
+    context.env_hash = "e2-c3-pipeline-env";
+    context.fingerprint_hash = fp.fingerprint_hash;
+    context.e2_eval_config = cfg.toJson();
+    const auto run_diag = Thoth::episodicDiagnosticService().generateRunDiagnostics(summary_a, context);
+    if (run_diag.case_diagnostics.empty()) {
+        std::cerr << "testE2C3PipelineIntegrity: expected case diagnostics\n";
+        return false;
+    }
+    for (const auto& item : run_diag.case_diagnostics) {
+        if (item.diagnosis_bucket != 0 ||
+            item.failure_classification != Thoth::E2DiagnosticFailureClassification::NONE) {
+            std::cerr << "testE2C3PipelineIntegrity: golden case expected bucket 0\n";
+            return false;
+        }
+        if (!item.evaluation_resolution_snapshot.has_value() ||
+            *item.evaluation_resolution_snapshot !=
+                Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+            std::cerr << "testE2C3PipelineIntegrity: golden case expected SCORED_SUCCESS\n";
+            return false;
+        }
+    }
+
+    Thoth::EpisodeCompleted event;
+    event.plan_id = "e2-c3-pipeline-integration";
+    event.goal = "pipeline integrity";
+    event.terminal_state = "COMPLETED";
+    event.final_success_score = 1.0f;
+    event.run_id = "e2-c3-subscriber-run";
+    event.env_hash = "e2-c3-subscriber-env";
+    event.plan_snapshot = {{"steps", nlohmann::json::array()}};
+
+    Thoth::EvaluationSubscriber subscriber;
+    subscriber.onEpisodeCompleted(event);
+
+    const Thoth::EpisodicLearningSummary* summary = Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const Thoth::EvaluationDiagnosticsSummary* diagnostics =
+        Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests();
+    if (!summary || !diagnostics) {
+        std::cerr << "testE2C3PipelineIntegrity: subscriber artifacts missing\n";
+        return false;
+    }
+    if (summary->official_scoring || summary->scoring_tier != Thoth::E2EvalTier::INTEGRATION) {
+        std::cerr << "testE2C3PipelineIntegrity: subscriber must stay INTEGRATION non-official\n";
+        return false;
+    }
+    if (summary->case_results.empty()) {
+        std::cerr << "testE2C3PipelineIntegrity: expected case results from subscriber\n";
+        return false;
+    }
+    const auto& case_eval = summary->case_results.front();
+    if (!case_eval.evaluation_resolution.has_value() ||
+        *case_eval.evaluation_resolution != Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+        std::cerr << "testE2C3PipelineIntegrity: subscriber case not SCORED_SUCCESS\n";
+        return false;
+    }
+    const nlohmann::json diag_row = Thoth::evaluationDiagnosticSummaryToJson(*diagnostics);
+    if (diag_row.value("event_type", "") != "E2_EVAL_DIAGNOSTIC_SUMMARY") {
+        std::cerr << "testE2C3PipelineIntegrity: diagnostic event_type mismatch\n";
+        return false;
+    }
+    if (diag_row.contains("e2_outcome")) {
+        std::cerr << "testE2C3PipelineIntegrity: diagnostics must not emit e2_outcome\n";
+        return false;
+    }
+    return true;
+}
+
+static Thoth::EpisodeCompleted makeE2C4CheckpointEvent() {
+    Thoth::EpisodeCompleted event;
+    event.plan_id = "e2-c4-checkpoint";
+    event.goal = "checkpoint proof goal";
+    event.terminal_state = "COMPLETED";
+    event.final_success_score = 1.0f;
+    event.run_id = "e2-c4-checkpoint-run";
+    event.env_hash = "e2-c4-checkpoint-env";
+    event.completed_at_ms = 1'700'000'000'000;
+    event.plan_snapshot = {{"steps", nlohmann::json::array()}};
+    return event;
+}
+
+/** E2-C4-01 — telemetry schema segregation + no eval/diag coupling. */
+static bool testE2C4NoEvaluationCoupling() {
+    const std::vector<std::string> paths = {
+        "external/basic_agent/include/pipeline_telemetry_service.h",
+        "external/basic_agent/src/pipeline_telemetry_service.cpp"};
+    const std::vector<std::string> forbidden = {"evaluateCase",
+                                                "evaluateEpisodicLearningCase",
+                                                "resolveEvaluation(",
+                                                "applyCaseEvaluationResolution",
+                                                "applyCaseResolution",
+                                                "summarizeEpisodicLearning",
+                                                "summarize(",
+                                                "computeFingerprint",
+                                                "generateDiagnostics",
+                                                "generateRunDiagnostics",
+                                                "episodicEvaluationService",
+                                                "episodicDiagnosticService",
+                                                "IEpisodicEvaluationService",
+                                                "IDiagnosticService",
+                                                "executive_controller",
+                                                "episode_events.h"};
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2C4NoEvaluationCoupling: cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << "testE2C4NoEvaluationCoupling: found " << sym << " in " << path << '\n';
+                return false;
+            }
+        }
+    }
+
+    const std::vector<std::string> no_import_paths = {
+        "external/basic_agent/include/episodic_evaluation_service.h",
+        "external/basic_agent/src/episodic_evaluation_service.cpp",
+        "external/basic_agent/include/diagnostic_service.h",
+        "external/basic_agent/src/diagnostic_service.cpp"};
+    for (const auto& path : no_import_paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.find("pipeline_telemetry") != std::string::npos) {
+            std::cerr << "testE2C4NoEvaluationCoupling: " << path << " imports telemetry\n";
+            return false;
+        }
+    }
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(true);
+    Thoth::EvaluationSubscriber subscriber;
+    subscriber.onEpisodeCompleted(makeE2C4CheckpointEvent());
+    const Thoth::E2PipelineTelemetryRecord* record =
+        Thoth::EvaluationSubscriber::lastTelemetryRecordForTests();
+    if (!record) {
+        std::cerr << "testE2C4NoEvaluationCoupling: expected telemetry record when ON\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+    const nlohmann::json row = Thoth::e2PipelineTelemetryToJson(*record);
+    if (row.value("telemetry_tier", "") != "ARCHITECTURE") {
+        std::cerr << "testE2C4NoEvaluationCoupling: bad telemetry_tier\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+    const std::vector<std::string> forbidden_fields = {"evaluation_resolution",
+                                                       "fingerprint_hash",
+                                                       "lift",
+                                                       "passes",
+                                                       "mean_episodic_lift",
+                                                       "e2_outcome",
+                                                       "diagnosis_bucket",
+                                                       "failure_classification",
+                                                       "success"};
+    for (const auto& field : forbidden_fields) {
+        if (row.contains(field)) {
+            std::cerr << "testE2C4NoEvaluationCoupling: forbidden field " << field << '\n';
+            Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+            return false;
+        }
+    }
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+    return true;
+}
+
+/** E2-C4-02 — telemetry failure does not alter eval/diagnostic artifacts. */
+static bool testE2C4NonBlockingFailure() {
+    const Thoth::EpisodeCompleted event = makeE2C4CheckpointEvent();
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(true);
+    Thoth::setE2PipelineTelemetryThrowForTests(false);
+    Thoth::EvaluationSubscriber baseline;
+    baseline.onEpisodeCompleted(event);
+    const auto* summary_base = Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const auto* diag_base = Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests();
+    if (!summary_base || !diag_base) {
+        std::cerr << "testE2C4NonBlockingFailure: baseline artifacts missing\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+    const nlohmann::json summary_base_json = Thoth::episodicLearningSummaryToJson(*summary_base);
+    const nlohmann::json diag_base_json =
+        Thoth::evaluationDiagnosticSummaryToJson(*diag_base);
+
+    Thoth::setE2PipelineTelemetryThrowForTests(true);
+    Thoth::EvaluationSubscriber failing;
+    failing.onEpisodeCompleted(event);
+    Thoth::setE2PipelineTelemetryThrowForTests(false);
+
+    const auto* summary_fail = Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const auto* diag_fail = Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests();
+    if (!summary_fail || !diag_fail) {
+        std::cerr << "testE2C4NonBlockingFailure: post-throw artifacts missing\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+    if (Thoth::EvaluationSubscriber::lastTelemetryRecordForTests() != nullptr) {
+        std::cerr << "testE2C4NonBlockingFailure: telemetry record set after throw\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+    if (Thoth::episodicLearningSummaryToJson(*summary_fail) != summary_base_json ||
+        Thoth::evaluationDiagnosticSummaryToJson(*diag_fail) != diag_base_json) {
+        std::cerr << "testE2C4NonBlockingFailure: eval/diag changed after telemetry throw\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+    return true;
+}
+
+/** E2-C4-03b — subscriber telemetry block must not branch on eval/diag semantics. */
+static bool testE2C4SubscriberTelemetryBlockAudit() {
+    const std::string source = readRepoSourceFile("external/basic_agent/src/evaluation_subscriber.cpp");
+    if (source.empty()) {
+        std::cerr << "testE2C4SubscriberTelemetryBlockAudit: cannot read subscriber source\n";
+        return false;
+    }
+    const auto blockStart = source.find("if (g_pipeline_telemetry_enabled)");
+    if (blockStart == std::string::npos) {
+        std::cerr << "testE2C4SubscriberTelemetryBlockAudit: telemetry block not found\n";
+        return false;
+    }
+    const auto blockEnd = source.find("EpisodicLearningRunEnvelope envelope", blockStart);
+    if (blockEnd == std::string::npos || blockEnd <= blockStart) {
+        std::cerr << "testE2C4SubscriberTelemetryBlockAudit: telemetry block end not found\n";
+        return false;
+    }
+    const std::string block = source.substr(blockStart, blockEnd - blockStart);
+    const std::vector<std::string> forbidden = {"summary",
+                                                "runDiagnostics",
+                                                "evaluation.",
+                                                "evaluation_resolution",
+                                                "diagnosis_bucket",
+                                                "failure_classification",
+                                                "passes",
+                                                "lift",
+                                                "fingerprint_hash",
+                                                "episodicDiagnosticService",
+                                                "generateRunDiagnostics"};
+    for (const auto& sym : forbidden) {
+        if (block.find(sym) != std::string::npos) {
+            std::cerr << "testE2C4SubscriberTelemetryBlockAudit: forbidden symbol " << sym
+                      << " in telemetry block\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C4-03 — structural audit: telemetry service has no measurement clocks. */
+static bool testE2C4StructuralAudit() {
+    const std::string source =
+        readRepoSourceFile("external/basic_agent/src/pipeline_telemetry_service.cpp");
+    if (source.empty()) {
+        std::cerr << "testE2C4StructuralAudit: cannot read telemetry source\n";
+        return false;
+    }
+    const std::vector<std::string> forbidden = {"steady_clock", "system_clock", "chrono"};
+    for (const auto& sym : forbidden) {
+        if (source.find(sym) != std::string::npos) {
+            std::cerr << "testE2C4StructuralAudit: telemetry service must not measure: " << sym
+                      << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C4-04 — telemetry recordPipelineRun does not mutate evaluation artifacts. */
+static bool testE2C4NonInterference() {
+    const Thoth::IEpisodicEvaluationService& svc = Thoth::episodicEvaluationService();
+    const auto cases = Thoth::getEpisodicLearningCases();
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    Thoth::BenchmarkAttribution attr{"e2-c4-noninterference", "e2-c4-noninterference-env"};
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> evaluations;
+    std::vector<Thoth::EpisodicLearningExpectations> expectations;
+    for (const auto& spec : cases) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr, nullptr, nullptr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+        auto eval = svc.evaluateCase(spec.id, spec.expectations, cold, warm, cfg);
+        eval.run_block_reason = warmBlock;
+        svc.applyCaseResolution(eval);
+        evaluations.push_back(eval);
+        expectations.push_back(spec.expectations);
+    }
+    const auto summary_before = svc.summarize(evaluations, expectations, cfg);
+    const auto fingerprint_before = svc.computeFingerprint(cfg);
+
+    Thoth::E2PipelineStageTimings timings;
+    timings.mapping_duration_ms = 1;
+    timings.evaluation_duration_ms = 2;
+    timings.diagnostic_duration_ms = 3;
+    timings.pipeline_duration_ms = 6;
+    timings.episodes_processed = 1;
+    Thoth::E2PipelineTelemetryContext context;
+    context.run_id = "e2-c4-noninterference";
+    context.plan_id = "plan";
+    (void)Thoth::episodicPipelineTelemetryService().recordPipelineRun(timings, context);
+
+    const auto summary_after = svc.summarize(evaluations, expectations, cfg);
+    const auto fingerprint_after = svc.computeFingerprint(cfg);
+    if (summary_before.mean_episodic_lift != summary_after.mean_episodic_lift ||
+        summary_before.scorable_cases != summary_after.scorable_cases ||
+        summary_before.not_scorable_cases != summary_after.not_scorable_cases ||
+        summary_before.evaluation_resolution != summary_after.evaluation_resolution) {
+        std::cerr << "testE2C4NonInterference: summary changed after telemetry\n";
+        return false;
+    }
+    if (fingerprint_before.fingerprint_hash != fingerprint_after.fingerprint_hash) {
+        std::cerr << "testE2C4NonInterference: fingerprint changed after telemetry\n";
+        return false;
+    }
+    for (std::size_t i = 0; i < evaluations.size(); ++i) {
+        const auto& before = evaluations[i];
+        if (before.passes != evaluations[i].passes || before.lift != evaluations[i].lift ||
+            before.failure_reason != evaluations[i].failure_reason ||
+            before.run_block_reason != evaluations[i].run_block_reason ||
+            before.evaluation_resolution != evaluations[i].evaluation_resolution) {
+            std::cerr << "testE2C4NonInterference: case evaluation mutated for " << before.case_id
+                      << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C4-05 — C1→C4 pipeline preserves E2-28 golden semantics + subscriber path. */
+static bool testE2C4PipelineIntegrity() {
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    const auto fp = Thoth::computeEvaluationFingerprint(cfg);
+    const auto summary_a = buildOfficialGoldenSummary();
+    const auto summary_b = buildOfficialGoldenSummary();
+    const auto snap_a = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_a, fp.toJson(), cfg.toJson());
+    const auto snap_b = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_b, fp.toJson(), cfg.toJson());
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(snap_a, snap_b)) {
+        std::cerr << "testE2C4PipelineIntegrity: golden scoped snapshots differ\n";
+        return false;
+    }
+    if (Thoth::episodicLearningFingerprintMismatchBucket(snap_a, snap_b, "h1", "h1") != 0) {
+        std::cerr << "testE2C4PipelineIntegrity: golden diagnosis bucket mismatch\n";
+        return false;
+    }
+
+    Config config;
+    if (config.enable_episodic_pipeline_telemetry) {
+        std::cerr << "testE2C4PipelineIntegrity: telemetry flag must default OFF\n";
+        return false;
+    }
+
+    const Thoth::EpisodeCompleted event = makeE2C4CheckpointEvent();
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+    Thoth::EvaluationSubscriber off;
+    off.onEpisodeCompleted(event);
+    const auto summary_off_json =
+        Thoth::episodicLearningSummaryToJson(*Thoth::EvaluationSubscriber::lastSummaryForTests());
+    const auto diag_off_json = Thoth::evaluationDiagnosticSummaryToJson(
+        *Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests());
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(true);
+    Thoth::EvaluationSubscriber on;
+    on.onEpisodeCompleted(event);
+    const auto summary_on_json =
+        Thoth::episodicLearningSummaryToJson(*Thoth::EvaluationSubscriber::lastSummaryForTests());
+    const auto diag_on_json = Thoth::evaluationDiagnosticSummaryToJson(
+        *Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests());
+    const auto* telemetry = Thoth::EvaluationSubscriber::lastTelemetryRecordForTests();
+    if (!telemetry) {
+        std::cerr << "testE2C4PipelineIntegrity: missing telemetry record when ON\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+
+    if (summary_off_json != summary_on_json || diag_off_json != diag_on_json) {
+        std::cerr << "testE2C4PipelineIntegrity: eval/diag differ OFF vs ON\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+
+    const auto& case_eval = Thoth::EvaluationSubscriber::lastSummaryForTests()->case_results.front();
+    if (!case_eval.evaluation_resolution.has_value() ||
+        *case_eval.evaluation_resolution != Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+        std::cerr << "testE2C4PipelineIntegrity: case evaluation_resolution not SCORED_SUCCESS\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+
+    const nlohmann::json telemetry_json = Thoth::e2PipelineTelemetryToJson(*telemetry);
+    if (telemetry_json.value("event_type", "") != "E2_EVAL_TELEMETRY_PIPELINE") {
+        std::cerr << "testE2C4PipelineIntegrity: bad telemetry event_type\n";
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        return false;
+    }
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+    return true;
+}
+
+/** E2-C4 Checkpoint 2 — telemetry OFF vs ON observational proof (THOTH_E2_C4_CP2=1). */
+static bool testE2C4Checkpoint2ObservationalProof() {
+    const Thoth::EpisodeCompleted event = makeE2C4CheckpointEvent();
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+    Thoth::EvaluationSubscriber subscriber_off;
+    subscriber_off.onEpisodeCompleted(event);
+    const Thoth::EpisodicLearningSummary* summary_off =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const Thoth::EvaluationDiagnosticsSummary* diag_off =
+        Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests();
+    if (!summary_off || !diag_off) {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: missing OFF artifacts\n";
+        return false;
+    }
+    if (Thoth::EvaluationSubscriber::lastTelemetryRecordForTests() != nullptr) {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: telemetry record present when OFF\n";
+        return false;
+    }
+    const nlohmann::json summary_off_json = Thoth::episodicLearningSummaryToJson(*summary_off);
+    const nlohmann::json diag_off_json =
+        Thoth::evaluationDiagnosticSummaryToJson(*diag_off);
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(true);
+    Thoth::EvaluationSubscriber subscriber_on;
+    subscriber_on.onEpisodeCompleted(event);
+    const Thoth::EpisodicLearningSummary* summary_on =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const Thoth::EvaluationDiagnosticsSummary* diag_on =
+        Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests();
+    const Thoth::E2PipelineTelemetryRecord* telemetry_on =
+        Thoth::EvaluationSubscriber::lastTelemetryRecordForTests();
+    if (!summary_on || !diag_on || !telemetry_on) {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: missing ON artifacts\n";
+        return false;
+    }
+
+    const nlohmann::json summary_on_json = Thoth::episodicLearningSummaryToJson(*summary_on);
+    const nlohmann::json diag_on_json = Thoth::evaluationDiagnosticSummaryToJson(*diag_on);
+    if (summary_off_json != summary_on_json) {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: summary differs OFF vs ON\n";
+        return false;
+    }
+    if (diag_off_json != diag_on_json) {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: diagnostics differ OFF vs ON\n";
+        return false;
+    }
+
+    const auto& case_eval = summary_on->case_results.front();
+    if (!case_eval.evaluation_resolution.has_value()) {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: missing case evaluation_resolution\n";
+        return false;
+    }
+
+    const nlohmann::json telemetry_json = Thoth::e2PipelineTelemetryToJson(*telemetry_on);
+    if (telemetry_json.value("event_type", "") != "E2_EVAL_TELEMETRY_PIPELINE") {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: bad event_type\n";
+        return false;
+    }
+    if (telemetry_json.value("telemetry_tier", "") != "ARCHITECTURE") {
+        std::cerr << "testE2C4Checkpoint2ObservationalProof: bad telemetry_tier\n";
+        return false;
+    }
+    const std::vector<std::string> forbidden = {"evaluation_resolution",
+                                                "fingerprint_hash",
+                                                "lift",
+                                                "passes",
+                                                "e2_outcome",
+                                                "diagnosis_bucket",
+                                                "failure_classification",
+                                                "mean_episodic_lift"};
+    for (const auto& field : forbidden) {
+        if (telemetry_json.contains(field)) {
+            std::cerr << "testE2C4Checkpoint2ObservationalProof: forbidden field " << field << '\n';
+            return false;
+        }
+    }
+
+    Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+    return true;
+}
+
+/** Checkpoint 0 — mapping fidelity: benchmark arms survive production mapper round-trip. */
+static bool testE2C5MappingFidelity() {
+    const auto cases = Thoth::getEpisodicLearningCases();
+    Thoth::BenchmarkAttribution attr{"e2-c5-mapping", "e2-c5-mapping-env"};
+    int mapping_safe = 0;
+    for (const auto& spec : cases) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+        std::string report;
+        if (!Thoth::validateMappingFidelityForCase(spec, cold, warm, spec.expectations, &report)) {
+            std::cerr << "testE2C5MappingFidelity: " << report << '\n';
+            return false;
+        }
+        ++mapping_safe;
+    }
+    if (mapping_safe == 0) {
+        std::cerr << "testE2C5MappingFidelity: no mapping-safe fixtures\n";
+        return false;
+    }
+    return true;
+}
+
+static bool runE2C5PathEquivalenceForCase(const Thoth::EpisodicLearningCase& spec,
+                                          std::string* report_out) {
+    Thoth::BenchmarkAttribution attr{"e2-c5-equiv", "e2-c5-equiv-env"};
+    Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+    const auto cold = runE2TestArm(spec, "cold", attr);
+    const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+
+    std::string fidelity_report;
+    if (!Thoth::validateMappingFidelityForCase(spec, cold, warm, spec.expectations,
+                                               &fidelity_report)) {
+        if (report_out) {
+            *report_out = fidelity_report;
+        }
+        return false;
+    }
+
+    const auto benchmark = Thoth::runBenchmarkPathArtifacts(
+        spec.id, spec.expectations, cold, warm, cfg, warmBlock);
+    const Thoth::EpisodeCompleted episode = Thoth::episodeFromBenchmarkArmsForTests(
+        spec, cold, warm, spec.expectations, warmBlock);
+    const auto production = Thoth::runProductionPathArtifacts(episode, cfg);
+    const Thoth::E2PathEquivalenceDiff diff = Thoth::diffPathEquivalence(benchmark, production);
+    if (!diff.equivalent) {
+        if (report_out && !diff.mismatches.empty()) {
+            *report_out = spec.id + ": " + diff.mismatches.front();
+        }
+        return false;
+    }
+    return true;
+}
+
+/** E2-C5-01 — semantic equivalence under pinned evaluation semantics. */
+static bool testE2C5SemanticEquivalence() {
+    for (const auto& spec : Thoth::getEpisodicLearningCases()) {
+        std::string report;
+        if (!runE2C5PathEquivalenceForCase(spec, &report)) {
+            std::cerr << "testE2C5SemanticEquivalence: " << report << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C5-02 — fingerprint stability post-normalization on pinned config. */
+static bool testE2C5FingerprintStability() {
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    const auto fp_a = Thoth::episodicEvaluationService().computeFingerprint(cfg);
+    const auto fp_b = Thoth::episodicEvaluationService().computeFingerprint(cfg);
+    if (fp_a.fingerprint_hash != fp_b.fingerprint_hash) {
+        std::cerr << "testE2C5FingerprintStability: fingerprint unstable across calls\n";
+        return false;
+    }
+    Thoth::BenchmarkAttribution attr{"e2-c5-fp", "e2-c5-fp-env"};
+    for (const auto& spec : Thoth::getEpisodicLearningCases()) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+        const auto benchmark =
+            Thoth::runBenchmarkPathArtifacts(spec.id, spec.expectations, cold, warm, cfg, warmBlock);
+        const auto episode = Thoth::episodeFromBenchmarkArmsForTests(
+            spec, cold, warm, spec.expectations, warmBlock);
+        const auto production = Thoth::runProductionPathArtifacts(episode, cfg);
+        if (benchmark.fingerprint.fingerprint_hash != production.fingerprint.fingerprint_hash) {
+            std::cerr << "testE2C5FingerprintStability: path fingerprint mismatch for " << spec.id
+                      << '\n';
+            return false;
+        }
+        if (benchmark.fingerprint.toJson().value("e2_eval_config", nlohmann::json::object()) !=
+            production.fingerprint.toJson().value("e2_eval_config", nlohmann::json::object())) {
+            std::cerr << "testE2C5FingerprintStability: e2_eval_config pins mismatch for "
+                      << spec.id << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-C5-03 — cross-path artifact consistency (normalized snapshots). */
+static bool testE2C5CrossPathArtifactConsistency() {
+    return testE2C5SemanticEquivalence();
+}
+
+/** E2-C5-04 — no hidden coupling across eval/exec/diag/telemetry layers. */
+static bool testE2C5NoHiddenCoupling() {
+    const std::vector<std::pair<std::string, std::vector<std::string>>> audits = {
+        {"external/basic_agent/include/episodic_evaluation_service.h",
+         {"executive_controller", "pipeline_telemetry", "evaluation_subscriber"}},
+        {"external/basic_agent/src/episodic_evaluation_service.cpp",
+         {"executive_controller", "pipeline_telemetry", "evaluation_subscriber"}},
+        {"external/basic_agent/include/diagnostic_service.h",
+         {"executive_controller", "pipeline_telemetry", "evaluation_subscriber"}},
+        {"external/basic_agent/src/diagnostic_service.cpp",
+         {"executive_controller", "pipeline_telemetry", "evaluation_subscriber"}},
+        {"external/basic_agent/include/pipeline_telemetry_service.h",
+         {"episodic_evaluation_service", "diagnostic_service", "executive_controller",
+          "evaluation_subscriber"}},
+        {"external/basic_agent/src/pipeline_telemetry_service.cpp",
+         {"episodic_evaluation_service", "diagnostic_service", "executive_controller",
+          "evaluation_subscriber"}},
+        {"external/basic_agent/src/e2_path_equivalence.cpp",
+         {"executive_controller"}}};
+    for (const auto& [path, forbidden] : audits) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2C5NoHiddenCoupling: cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << "testE2C5NoHiddenCoupling: " << path << " imports " << sym << '\n';
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/** E2-C5-05 — path equivalence on mapping-safe golden fixtures (regression companion). */
+static bool testE2C5PathEquivalenceGoldenFixtures() {
+    return testE2C5SemanticEquivalence();
+}
+
+/** Evidence printer — THOTH_E2_C5_MATRIX=1 only. */
+static void printE2C5EquivalenceMatrix() {
+    Thoth::BenchmarkAttribution attr{"e2-c5-matrix", "e2-c5-matrix-env"};
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    std::cout << "E2-C5 equivalence matrix (benchmark vs production, normalized snapshots)\n";
+    std::cout << "case_id | resolution | scorable | not_scorable | diag_bucket | fingerprint_match\n";
+    for (const auto& spec : Thoth::getEpisodicLearningCases()) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold = runE2TestArm(spec, "cold", attr);
+        const auto warm = runE2TestArm(spec, "warm", attr, nullptr, &warmBlock);
+        const auto benchmark = Thoth::runBenchmarkPathArtifacts(
+            spec.id, spec.expectations, cold, warm, cfg, warmBlock);
+        const auto episode = Thoth::episodeFromBenchmarkArmsForTests(
+            spec, cold, warm, spec.expectations, warmBlock);
+        const auto production = Thoth::runProductionPathArtifacts(episode, cfg);
+        const auto diff = Thoth::diffPathEquivalence(benchmark, production);
+        const auto bench_snap = Thoth::pathEquivalenceCaseEvalSnapshot(benchmark.case_eval);
+        const auto prod_snap = Thoth::pathEquivalenceCaseEvalSnapshot(production.case_eval);
+        const std::string resolution =
+            bench_snap.value("evaluation_resolution", "unset");
+        const std::string fp_match =
+            benchmark.fingerprint.fingerprint_hash == production.fingerprint.fingerprint_hash
+                ? "YES"
+                : "NO";
+        std::cout << spec.id << " | " << resolution << " | "
+                  << benchmark.summary.scorable_cases << '/' << production.summary.scorable_cases
+                  << " | " << benchmark.summary.not_scorable_cases << '/'
+                  << production.summary.not_scorable_cases << " | "
+                  << benchmark.diagnostics.diagnosis_bucket << '/'
+                  << production.diagnostics.diagnosis_bucket << " | " << fp_match
+                  << (diff.equivalent ? " | MATCH" : " | MISMATCH") << '\n';
+        if (!diff.equivalent) {
+            for (const auto& m : diff.mismatches) {
+                std::cout << "  mismatch: " << m << '\n';
+            }
+        }
+    }
+}
+
 static bool testE2CaseById(const std::string& caseId) {
     const auto cases = Thoth::getEpisodicLearningCases();
     const Thoth::EpisodicLearningCase* spec = nullptr;
@@ -5722,6 +6842,30 @@ static bool testE2EpisodicLearningBenchmarkSmoke() {
 }
 
 int main() {
+    if (const char* matrix = std::getenv("THOTH_E2_C5_MATRIX")) {
+        if (matrix[0] == '1') {
+            printE2C5EquivalenceMatrix();
+            return 0;
+        }
+    }
+    if (const char* c5 = std::getenv("THOTH_E2_C5")) {
+        if (c5[0] == '1') {
+            int failures = 0;
+            if (!testE2C5MappingFidelity()) failures++;
+            if (!testE2C5SemanticEquivalence()) failures++;
+            if (!testE2C5FingerprintStability()) failures++;
+            if (!testE2C5CrossPathArtifactConsistency()) failures++;
+            if (!testE2C5NoHiddenCoupling()) failures++;
+            if (!testE2C5PathEquivalenceGoldenFixtures()) failures++;
+            return failures == 0 ? 0 : 1;
+        }
+    }
+    if (const char* cp2 = std::getenv("THOTH_E2_C4_CP2")) {
+        if (cp2[0] == '1') {
+            return testE2C4Checkpoint2ObservationalProof() ? 0 : 1;
+        }
+    }
+
     int failures = 0;
     if (!testConfigRoundTrip()) failures++;
     if (!testMemoryPersistence()) failures++;
@@ -5838,6 +6982,31 @@ int main() {
     if (!testE2B5NonAuthoritativeEnvelope()) failures++;
     if (!testE2B5OfficialFingerprintDeterminism()) failures++;
     if (!testE2B5ScoredLoopStructuralAudit()) failures++;
+    if (!testE2C1ServiceOutputEquivalence()) failures++;
+    if (!testE2C1HarnessNoDirectEvaluationAlgorithm()) failures++;
+    if (!testE2C1ServiceNoBenchmarkLogic()) failures++;
+    if (!testE2C2PublicationDisabledByDefault()) failures++;
+    if (!testE2C2ChannelDeliversEpisode()) failures++;
+    if (!testE2C2ExecutiveNoEvalImport()) failures++;
+    if (!testE2C2IntegrationEnvelope()) failures++;
+    if (!testE2C2SubscriberNoExecutionLogic()) failures++;
+    if (!testE2C2MappingDeterministic()) failures++;
+    if (!testE2C3NoEvaluationCoupling()) failures++;
+    if (!testE2C3Determinism()) failures++;
+    if (!testE2C3NonInterference()) failures++;
+    if (!testE2C3PipelineIntegrity()) failures++;
+    if (!testE2C4NoEvaluationCoupling()) failures++;
+    if (!testE2C4NonBlockingFailure()) failures++;
+    if (!testE2C4StructuralAudit()) failures++;
+    if (!testE2C4SubscriberTelemetryBlockAudit()) failures++;
+    if (!testE2C4NonInterference()) failures++;
+    if (!testE2C4PipelineIntegrity()) failures++;
+    if (!testE2C5MappingFidelity()) failures++;
+    if (!testE2C5SemanticEquivalence()) failures++;
+    if (!testE2C5FingerprintStability()) failures++;
+    if (!testE2C5CrossPathArtifactConsistency()) failures++;
+    if (!testE2C5NoHiddenCoupling()) failures++;
+    if (!testE2C5PathEquivalenceGoldenFixtures()) failures++;
     if (!testE2CaseById("E2-01")) failures++;
     if (!testE2CaseById("E2-02")) failures++;
     if (!testE2CaseById("E2-03")) failures++;
