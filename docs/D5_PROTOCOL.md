@@ -413,4 +413,4 @@ Per AGENTS.md Planning/Implementation Gate:
 **Status:** 🔒 **LOCKED**  
 **Review incorporated:** Meta-proof framing; evidence composition rule (not proof regeneration); five constitutional invariants (including preservation-not-promotion); anti-redundancy / coverage-gap rule; D4 evidence consumption; sub-gate model; `THOTH_E2_D5=1` semantics (meta-proofs only, not full historical re-run); evidence-generation reopening boundary; phase seal discipline.
 
-**Next:** Draft § D.5.0 implementation plan against locked protocol → explicit implementation approval.
+**Next:** Step 1 implementation (`THOTH_E2_D5_AUTHORITY=1`) per `cursor_list.md` § D.5.0 Step 1 — explicit approval required.

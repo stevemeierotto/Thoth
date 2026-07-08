@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D5 protocol locked** v0.1 — [`docs/D5_PROTOCOL.md`](D5_PROTOCOL.md))  
+**Last updated:** 2026-07-08 (E2 **D5 Step 1 plan locked** § D.5.0; protocol 🔒 v0.1)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D5 protocol locked** — draft § D.5.0 implementation plan against [`D5_PROTOCOL.md`](D5_PROTOCOL.md); await explicit implementation approval. D4 ✅ complete.
+**Active E2 work:** 🔒 **D5 Step 1 locked** (§ D.5.0 Step 1) — authority meta-proof `THOTH_E2_D5_AUTHORITY=1`; await explicit implementation approval. Protocol 🔒 · D4 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1586,35 +1586,223 @@ On green gate, `runE2D4Tests()` records:
 
 **Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — **D4 Step 4 ✅** — **D4 Step 5 ✅** — **D4 complete** — paused before **D5** protocol lock.
 
-#### D.5.0 — E2-D5 implementation plan (evolution trust proof — **await protocol lock**)
+#### D.5.0 — E2-D5 implementation plan (evolution trust proof — **v1 locked**)
 
-**Authority:** [`docs/D5_PROTOCOL.md`](D5_PROTOCOL.md) — D5 trust contract  
-**Prerequisites:** D1 ✅, D2 ✅, D3 ✅, D4 ✅ (`THOTH_E2_D4=1`)  
-**Estimate:** 2–4 h (orchestration + evidence only — no production changes)  
-**Status:** 📋 **Awaiting implementation plan** — protocol 🔒 locked v0.1 ([`D5_PROTOCOL.md`](D5_PROTOCOL.md)); draft § D.5.0 against locked protocol before implementation approval
+**Authority:** [`docs/D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒  
+**Prerequisites:** D1 ✅, D2 ✅, D3 ✅, D4 ✅ (`THOTH_E2_D4=1`, commit `d4216c8`)  
+**Estimate:** 2–4 h total (orchestration + evidence only — no production changes)  
+**Status:** 🔒 **v1 locked** (2026-07-08) — **Step 1 locked** — paused before Step 1 implementation (AGENTS.md gate)
 
-##### Mandatory order
+##### Proof obligation (what D5 must prove)
 
-1. Review / refine `D5_PROTOCOL.md` (draft)  
-2. **Lock** protocol (commit)  
-3. Draft / refine § D.5.0 implementation plan against locked protocol  
-4. Explicit implementation approval  
-5. Implement + verify `THOTH_E2_D5=1` and sub-gates  
+> **D5 proves that accumulated D-phase evolution preserves previously established authority boundaries, deterministic behavior, and benchmark equivalence — without re-proving every lower-level invariant.**
 
-**Do not implement until step 2 completes.**
+D5 is **evidence composition, not proof regeneration** ([`D5_PROTOCOL.md`](D5_PROTOCOL.md) § Evidence composition rule). D4 built the trust mechanisms; D5 proves they survived evolution.
 
-##### Proof obligation (summary — see protocol for full contract)
+##### One sentence
 
-> D5 proves accumulated D-phase evolution preserved authority boundaries, deterministic behavior, and benchmark equivalence — without re-proving every lower-level invariant.
+> **D5 is a meta-proof seal on Phase D — it verifies the composed proof surface coheres after D1–D4 evolution; it does not introduce runtime behavior or grant promotion authority.**
 
-| Invariant | Sub-gate | ID |
-|-----------|----------|-----|
-| Authority preservation | `THOTH_E2_D5_AUTHORITY=1` | E2-D5-03 |
-| Behavioral preservation | `THOTH_E2_D5_C5=1` | E2-D5-01 |
-| Determinism preservation | `THOTH_E2_D5_DETERMINISM=1` | E2-D5-02 |
-| Evidence completeness | `THOTH_E2_D5=1` | (closure) |
+##### D5 proof ladder (canonical — locked)
 
-**Full detail:** [`D5_PROTOCOL.md`](D5_PROTOCOL.md) — constitutional invariants, frozen surface, intentionally not re-proven, coverage-gap rule, reopening boundary.
+| Step | Proof type | Gate | Preregistered ID |
+|------|------------|------|------------------|
+| **1** | Authority preservation meta-proof | `THOTH_E2_D5_AUTHORITY=1` | E2-D5-03 |
+| **2** | Behavioral preservation meta-proof | `THOTH_E2_D5_C5=1` | E2-D5-01 |
+| **3** | Determinism preservation meta-proof | `THOTH_E2_D5_DETERMINISM=1` | E2-D5-02 |
+| **4** | Phase closure — evidence completeness + seal | `THOTH_E2_D5=1` | (orchestrator) |
+| **—** | Preservation, not promotion (interpretive) | — | Invariant 5 (no sub-gate) |
+
+**Verification scope:** Targeted env gates only. Full suite / G2 deferred to optional post-D5 hygiene ([`D5_PROTOCOL.md`](D5_PROTOCOL.md) § Optional post-D5 hygiene).
+
+##### Evidence composition rule (locked — all D5 steps)
+
+| D5 does | D5 does **not** |
+|---------|-----------------|
+| Consume D1–D4 close-out evidence by attestation | Re-run `runE2D4Tests()`, `runE2D3Tests()`, etc. by default |
+| Run D5-specific meta-proofs (Steps 1–3) | Build recursive proof tree D5 → D4 → D3 → D2 → D1 |
+| Record phase closure (Step 4) | Regenerate lower-phase behavioral suites |
+
+**Coverage-gap rule:** Lower-phase gates run only when a D5 sub-gate failure identifies a missing invariant **and** the plan is amended with justification.
+
+---
+
+##### D.5.0 Step 1 — authority preservation meta-proof (**v1 locked**)
+
+**Status:** 🔒 **LOCKED** (2026-07-08) — paused before implementation (AGENTS.md gate)
+
+###### Core invariant (why Step 1 exists)
+
+> **Did any D-phase change accidentally alter who has authority?**
+
+Step 1 is the **constitutional structural audit** at evolution close-out. It consumes D4 composition evidence for D4-specific authority claims and runs only the **narrow audit bundle** not covered by Steps 2–3 (C5 equivalence, Phase B determinism).
+
+###### Step 1 question (locked boundary)
+
+> **Step 1 answers: “After D1–D4 evolution, do authority boundaries still hold — without re-running full D4 composition?”**
+
+| Step 1 proves | Step 1 does **not** prove (deferred) |
+|---------------|--------------------------------------|
+| D4 composition evidence **attested** (reference only) | Full D4 composition re-run (`runE2D4Tests()`) |
+| D3 structural authority boundary (D3-03 bundle) | D3 behavioral suite (`runE2D3Tests()`) |
+| D4-02 isolation absence (single test) | Full D4-02 suite (`runE2D4_02Tests()`) |
+| D1 Executive structural invisibility (grep only) | D1-03 behavioral 0-vs-N audit (proven at D1 close-out) |
+| Passive Consumer Law structural surface | C5 equivalence (Step 2) |
+| | Phase B determinism (Step 3) |
+| | Promotion or INTEGRATION ≡ STRICT claims |
+
+###### Authority meta-proof contract (locked)
+
+**Consume D4 evidence (attestation only — no re-execution):**
+
+| Attested gate | Close-out reference |
+|---------------|---------------------|
+| `THOTH_E2_D4=1` | D4 composition proof green (2026-07-08, `d4216c8`) |
+| E2-D4-01 | Live INTEGRATION containment |
+| E2-D4-02 | STRICT authority preservation |
+| D4-I1..I7 | Structural + behavioral chain |
+
+**Run structural audit bundle (existing helpers — call, do not duplicate bodies):**
+
+| Helper | Role |
+|--------|------|
+| `e2D1ExecutiveInvisibilityStructuralAudit()` | Extract Executive grep from `testE2D1ExecutiveInvisibilityAudit()` — Passive Consumer Law §3 symbols only; **no** 0-vs-N behavioral run |
+| `runE2D3_03Tests()` | D3-03 structural authority boundary (7 existing tests) |
+| `testE2D4_02NoIntegrationLeakIntoStrictArtifacts()` | D4-02 isolation absence — single test, not full D4-02 orchestrator |
+
+**Refactor note:** Extract `e2D1ExecutiveInvisibilityStructuralAudit()` as shared static helper; `testE2D1ExecutiveInvisibilityAudit()` calls it then runs behavioral portion. **No new preregistered test ID** — extraction only.
+
+###### Step 1 forbidden (locked)
+
+- Re-run `runE2D4Tests()` or any full D-phase orchestrator  
+- Re-run `testE2D1ExecutiveInvisibilityAudit()` behavioral 0-vs-N portion (D1 close-out attestation sufficient)  
+- Re-run full `runE2D4_02Tests()`  
+- New preregistered test IDs  
+- Production code changes — Step 1 is harness-only  
+- INTEGRATION ≡ STRICT promotion claims  
+
+###### Proposed work (`THOTH_E2_D5_AUTHORITY=1`)
+
+| Work | Detail |
+|------|--------|
+| `e2D1ExecutiveInvisibilityStructuralAudit()` | Extract grep-only portion from D1-03 test (shared helper) |
+| `attestD4CompositionEvidence()` | Print/verify attestation constants (gate ID, date, commit ref) — **no** `runE2D4Tests()` call |
+| `runE2D5AuthorityMetaProof()` | Attest D4 → structural audit bundle → evidence artifact |
+| `main()` early-exit | `THOTH_E2_D5_AUTHORITY=1` → `runE2D5AuthorityMetaProof()` |
+
+**Orchestrator:** `runE2D5AuthorityMetaProof()` · gate `THOTH_E2_D5_AUTHORITY=1`.
+
+###### Step 1 implementation discipline
+
+- Harness-only — extract helper + orchestrator; no new proof logic  
+- **No production changes** expected  
+- Verification: `cmake --build --preset build-debug` + `THOTH_E2_D5_AUTHORITY=1` only  
+- Estimated wall time: **~seconds** (structural grep + D3-03 + single D4-02 isolation test)  
+- On failure: stop per AGENTS.md Build/Test Failure Rule  
+
+###### Step 1 evidence artifact
+
+On green gate, Step 1 records:
+
+1. D4 composition evidence attested (reference: `THOTH_E2_D4=1`, `d4216c8`)  
+2. `e2D1ExecutiveInvisibilityStructuralAudit()` pass  
+3. `runE2D3_03Tests()` pass  
+4. `testE2D4_02NoIntegrationLeakIntoStrictArtifacts()` pass  
+5. **Conclusion:** authority boundaries preserved post-evolution  
+6. **Deferred:** Step 2 behavioral preservation · Step 3 determinism · Step 4 closure  
+
+###### Step 1 exit criteria
+
+1. Plan locked in § D.5.0 Step 1 — committed before implementation  
+2. `THOTH_E2_D5_AUTHORITY=1` green after implementation approval  
+3. Build green  
+4. **Pause for review** before Step 2  
+
+###### Step 1 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | `e2D1ExecutiveInvisibilityStructuralAudit()` extract + `runE2D5AuthorityMetaProof()` + gate |
+| `external/basic_agent/*` | **None** |
+
+---
+
+##### D.5.0 Step 2 — behavioral preservation meta-proof (**outline — lock at Step 1 close**)
+
+**Purpose:** C5 equivalence re-pass at evolution close-out (E2-D5-01).
+
+| Work | Gate |
+|------|------|
+| `runE2D5C5Proof()` → `runE2C5RegressionGate()` | `THOTH_E2_D5_C5=1` |
+
+**Forbidden:** Full C1–C4 re-run. **No new test functions.**
+
+**Deferred detail:** Full step plan locked at Step 1 close-out.
+
+---
+
+##### D.5.0 Step 3 — determinism preservation meta-proof (**outline — lock at Step 2 close**)
+
+**Purpose:** Phase B two-run fingerprint gate at evolution close-out (E2-D5-02).
+
+| Work | Gate |
+|------|------|
+| `runE2D5DeterminismProof()` → `testE2B5OfficialFingerprintDeterminism()` | `THOTH_E2_D5_DETERMINISM=1` |
+
+**Forbidden:** Full Phase B suite; D4-02 determinism re-run. **No new test functions.**
+
+**Deferred detail:** Full step plan locked at Step 2 close-out.
+
+---
+
+##### D.5.0 Step 4 — phase closure (**outline — lock at Step 3 close**)
+
+**Purpose:** D5 closure orchestrator + `PHASE_D_COMPLETE.md` + Invariant 5 evidence wording.
+
+| Work | Gate |
+|------|------|
+| `runE2D5Tests()` | `THOTH_E2_D5=1` |
+| Attest D1–D4 close-out gates (reference only) | |
+| Run Steps 1–3 sub-gates sequentially | |
+| Emit preservation-not-promotion conclusion | |
+| `docs/phases/PHASE_D_COMPLETE.md` | Phase seal artifact |
+
+**`THOTH_E2_D5=1` semantics (locked):** All D5 meta-proofs passed against declared evidence sources. **Does not** mean every historical test suite was rerun.
+
+**Forbidden:** Re-run `runE2D4Tests()` inside closure orchestrator by default.
+
+**Deferred detail:** Full step plan locked at Step 3 close-out.
+
+---
+
+##### D5 forbidden (locked — all steps)
+
+- Proof regeneration (recursive D-phase re-run)  
+- New preregistered test IDs beyond E2-D5-01..03  
+- Production runtime changes  
+- Protocol semantics edits  
+- Promotion / INTEGRATION ≡ STRICT claims in evidence output  
+- Claiming Phase E complete  
+
+##### D5 exit criteria (phase complete)
+
+1. `THOTH_E2_D5_AUTHORITY=1`, `THOTH_E2_D5_C5=1`, `THOTH_E2_D5_DETERMINISM=1` green  
+2. `THOTH_E2_D5=1` green — closure orchestrator  
+3. `docs/phases/PHASE_D_COMPLETE.md` recorded  
+4. Invariant 5 preserved in evidence wording (**preservation only — not promotion**)  
+5. **Pause for review** before Phase E  
+
+##### Files (expected touch — full D5)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | D5 orchestrators + gates (Steps 1–4) |
+| `docs/phases/PHASE_D_COMPLETE.md` | Phase D close-out artifact (Step 4) |
+| `docs/cursor_list.md` | § D.5.0 (this section) |
+| `docs/D_PHASE_PROTOCOL.md` | D5 complete pointer |
+| `external/basic_agent/*` | **None** |
+
+**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 locked** — Steps 2–4 outline — paused before Step 1 implementation.
 
 ### Separation debt (acknowledged)
 
@@ -1934,7 +2122,7 @@ Done    E2 Phase D4 Step 2 — E2-D4-01 live plugin path (`THOTH_E2_D4_01=1`) �
 Done    E2 Phase D4 Step 3 — E2-D4-02 STRICT authority preservation (`THOTH_E2_D4_02=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D5** — draft § D.5.0 implementation plan ([`D5_PROTOCOL.md`](D5_PROTOCOL.md) 🔒 locked v0.1)
+Next 1  **E2 Phase D5 Step 1** — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`; § **D.5.0 Step 1** locked)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
