@@ -5,7 +5,7 @@
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** **D5 Step 1 ✅** — paused before Step 2 (`THOTH_E2_D5_C5=1`). Protocol 🔒 · D4 ✅.
+**Active E2 work:** 🔒 **D5 Step 2 locked** (§ D.5.0 Step 2) — behavioral preservation `THOTH_E2_D5_C5=1`; await explicit implementation approval. Step 1 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1729,17 +1729,110 @@ On green gate, Step 1 records:
 
 ---
 
-##### D.5.0 Step 2 — behavioral preservation meta-proof (**outline — lock at Step 1 close**)
+##### D.5.0 Step 2 — behavioral preservation meta-proof (**v1 locked**)
 
-**Purpose:** C5 equivalence re-pass at evolution close-out (E2-D5-01).
+**Status:** 🔒 **LOCKED** (2026-07-08) — paused before implementation (AGENTS.md gate)
 
-| Work | Gate |
-|------|------|
-| `runE2D5C5Proof()` → `runE2C5RegressionGate()` | `THOTH_E2_D5_C5=1` |
+###### Core invariant (why Step 2 exists)
 
-**Forbidden:** Full C1–C4 re-run. **No new test functions.**
+> **Did evolution preserve existing trusted outputs?**
 
-**Deferred detail:** Full step plan locked at Step 1 close-out.
+Step 1 proved authority boundaries held. Step 2 proves **behavioral equivalence** on the trusted C5 surface survived D1–D4 evolution — benchmark vs production paths still MATCH under pinned config.
+
+###### Step 2 question (locked boundary)
+
+> **Step 2 answers: “After D-phase evolution, does C5 equivalence still MATCH on mapping-safe fixtures under `makeE2StrictTestConfig()`?”**
+
+| Step 2 proves | Step 2 does **not** prove (deferred) |
+|---------------|--------------------------------------|
+| C5 mapping-safe equivalence MATCH (**E2-D5-01**) | Full Phase C suite (C1–C4) |
+| Path fingerprint stability on pinned config (within C5 gate) | Full D4 composition (`runE2D4Tests()`) |
+| Runtime semantic equivalence (`testE2C5SemanticEquivalence`) | Phase B two-run determinism (Step 3) |
+| C5 service-layer import coupling (`testE2C5NoHiddenCoupling` — **not** a repeat of Step 1 authority checks) | Executive/subscriber authority audit (Step 1 — attested) |
+| | INTEGRATION ≡ STRICT promotion claims |
+| | `THOTH_E2_C5_MATRIX=1` evidence printer (optional hygiene) |
+
+**`testE2C5NoHiddenCoupling()` scope (locked):** C5 **service-layer** import-boundary audit (eval/diag/telemetry/path-equivalence modules). Step 1 deferred **cross-layer service import coupling** here — it does **not** duplicate D5 authority preservation (Executive grep, D3 subscriber bundle, D4-02 isolation). Primary behavioral proof in Step 2 is `testE2C5SemanticEquivalence()` + `testE2C5FingerprintStability()`.
+
+###### Behavioral meta-proof contract (locked)
+
+**Consume prior evidence (attestation only — no re-execution):**
+
+| Attested | Reference |
+|----------|-----------|
+| Phase C C5 gate | `THOTH_E2_C5=1` — committed at Phase C close-out |
+| D4 backward-compat C5 pass | D4 Step 4 evidence chain |
+| D5 Step 1 authority | `THOTH_E2_D5_AUTHORITY=1` green (`0b4df02`) |
+
+**Run behavioral meta-proof (single orchestrator — call, do not duplicate):**
+
+| Helper | Role |
+|--------|------|
+| `runE2C5RegressionGate()` | **E2-D5-01** — existing C5 regression bundle (6 tests, unchanged) |
+
+**`runE2C5RegressionGate()` composition (existing — no change):**
+
+| Test | Proves |
+|------|--------|
+| `testE2C5MappingFidelity()` | Benchmark arms survive production mapper round-trip |
+| `testE2C5SemanticEquivalence()` | **Primary behavioral** — benchmark vs production MATCH |
+| `testE2C5FingerprintStability()` | Fingerprint stable on pinned config |
+| `testE2C5CrossPathArtifactConsistency()` | Cross-path artifact consistency |
+| `testE2C5NoHiddenCoupling()` | C5 service-layer import coupling (structural complement) |
+| `testE2C5PathEquivalenceGoldenFixtures()` | Golden fixture equivalence (E2-01..03) |
+
+###### Step 2 forbidden (locked)
+
+- Re-run full C1–C4 orchestrators  
+- Re-run `runE2D4Tests()`, `runE2D3Tests()`, or any D-phase suite  
+- Duplicate C5 test bodies into new `testE2D5_*` functions  
+- New preregistered test IDs  
+- Production code changes — Step 2 is harness-only  
+- Promotion / lift claims in evidence output  
+
+###### Proposed work (`THOTH_E2_D5_C5=1`)
+
+| Work | Detail |
+|------|--------|
+| `attestD5Step1Evidence()` | Print Step 1 + Phase C C5 attestation (reference only) |
+| `runE2D5C5Proof()` | Attest → `runE2C5RegressionGate()` → evidence artifact |
+| `main()` early-exit | `THOTH_E2_D5_C5=1` → `runE2D5C5Proof()` — after `THOTH_E2_D5_AUTHORITY`, before D4 gates |
+
+**Orchestrator:** `runE2D5C5Proof()` · gate `THOTH_E2_D5_C5=1` · preregistered **E2-D5-01**.
+
+###### Step 2 implementation discipline
+
+- Harness-only — thin wrapper + evidence printing  
+- **No production changes** expected  
+- Verification: `cmake --build --preset build-debug` + `THOTH_E2_D5_C5=1` only  
+- Estimated wall time: **~2–5 min** (semantic equivalence + fingerprint stability iterate episodic cases)  
+- On failure: stop per AGENTS.md Build/Test Failure Rule  
+
+###### Step 2 evidence artifact
+
+On green gate, Step 2 records:
+
+1. D5 Step 1 attested (`THOTH_E2_D5_AUTHORITY=1`, `0b4df02`)  
+2. Phase C C5 attested (consumed by reference)  
+3. `runE2C5RegressionGate()` pass — E2-D5-01  
+4. Mapping-safe fixtures MATCH (`testE2C5SemanticEquivalence`)  
+5. `testE2C5NoHiddenCoupling()` pass — C5 service-layer import coupling (not Step 1 authority duplicate)  
+6. **Conclusion:** behavioral equivalence preserved post-evolution (**preservation only — not promotion**)  
+7. **Deferred:** Step 3 determinism · Step 4 closure  
+
+###### Step 2 exit criteria
+
+1. Plan locked in § D.5.0 Step 2 — committed before implementation  
+2. `THOTH_E2_D5_C5=1` green after implementation approval  
+3. Build green  
+4. **Pause for review** before Step 3  
+
+###### Step 2 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | `attestD5Step1Evidence()` + `runE2D5C5Proof()` + gate |
+| `external/basic_agent/*` | **None** |
 
 ---
 
