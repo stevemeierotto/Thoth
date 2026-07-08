@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D5 Step 4 locked** — `THOTH_E2_D5=1` § D.5.0)  
+**Last updated:** 2026-07-08 (E2 **Phase D complete** — `THOTH_E2_D5=1` ✅ · `PHASE_D_COMPLETE.md`)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D5 Step 4 locked** (§ D.5.0 Step 4) — phase closure `THOTH_E2_D5=1`; await explicit implementation approval. Steps 1–3 ✅.
+**Active E2 work:** **Phase D ✅ complete** (2026-07-08) — evolution trust proof sealed. **Paused before Phase E.**
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1971,7 +1971,7 @@ On green gate, Step 3 records:
 
 ##### D.5.0 Step 4 — phase closure (**v1 locked**)
 
-**Status:** 🔒 **v1 locked** (2026-07-08) — paused before implementation (AGENTS.md gate).
+**Status:** 🔒 **v1 locked** (2026-07-08) — ✅ **Step 4 complete** (2026-07-08) — **Phase D complete** — paused before Phase E.
 
 ###### Core invariant (why Step 4 exists)
 
@@ -2166,7 +2166,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | `docs/D_PHASE_PROTOCOL.md` | D5 complete pointer |
 | `external/basic_agent/*` | **None** |
 
-**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 ✅** — **Step 4 locked** — paused before Step 4 implementation.
+**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 ✅** — **Step 4 ✅** — **Phase D complete** — paused before Phase E.
 
 ### Separation debt (acknowledged)
 
@@ -2489,7 +2489,8 @@ Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-0
 Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 3 — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D5 Step 4** — phase closure (`THOTH_E2_D5=1`; § **D.5.0 Step 4** locked)
+Done    E2 Phase D5 Step 4 — phase closure (`THOTH_E2_D5=1`) + `PHASE_D_COMPLETE.md` ✅ 2026-07-08
+Next 1  **Phase E** — scientific defense (planned)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus

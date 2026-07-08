@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-07 (E2 Phase D3 complete — observability proof suite)
+Last updated: 2026-07-08 (E2 Phase D complete — evolution trust proof sealed)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### E2 track — status at a glance
@@ -10,7 +10,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | **A** | Can execution be trusted? | ✅ Complete 2026-07-02 | A1–A5 checkpoints; E2-08–E2-11 |
 | **B** | Can measurement be trusted? | ✅ Complete 2026-07-04 | [`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md); fingerprint `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
 | **C** | Can trusted measurement become architecture? | ✅ Locked 2026-07-05 | [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) |
-| **D** | Can architecture evolve without losing trust? | 🔶 D1–D3 ✅ | D3 proof suite complete 2026-07-07; D4 next — [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) |
+| **D** | Can architecture evolve without losing trust? | ✅ Complete 2026-07-08 | [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md); D5 evolution trust proof |
 | **E** | Can we defend the results scientifically? | 📋 Planned | — |
 
 ### E2 Phase C — Integration tier ✅ locked (2026-07-05)
@@ -67,6 +67,27 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 **Key files:** `metrics_subscriber.*`, `trace_subscriber.*`, `basic_agent_plugin.cpp`, `config.h` / `config.cpp`, `tests/unit_tests.cpp`
 
 **Next:** D4 — paused for explicit authorization.
+
+### E2 Phase D — Evolution tier ✅ complete (2026-07-08)
+
+**Authority:** [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) · [`D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒  
+**Close-out:** [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md)
+
+**Governing question:** Can architecture evolve without losing trust?
+
+| Checkpoint | Deliverable | Gate |
+|------------|-------------|------|
+| **E2-D1** | Event channel fan-out — Executive invisibility | `THOTH_E2_D1=1` |
+| **E2-D2** | Episode replay + benchmark authority isolation | `THOTH_E2_D2=1` |
+| **E2-D3** | Observability without authority | `THOTH_E2_D3=1` |
+| **E2-D4** | Live INTEGRATION + STRICT authority preservation | `THOTH_E2_D4=1` |
+| **E2-D5** | Evolution trust meta-proof (authority + behavioral + determinism + closure) | `THOTH_E2_D5=1` |
+
+**D5 sub-gates:** `THOTH_E2_D5_AUTHORITY=1` (E2-D5-03), `THOTH_E2_D5_C5=1` (E2-D5-01), `THOTH_E2_D5_DETERMINISM=1` (E2-D5-02).
+
+**Closure (2026-07-08):** `THOTH_E2_D5=1` green (~4.3 min sequential). Phase seal recorded in `PHASE_D_COMPLETE.md`. Preservation only — not promotion.
+
+**Next:** Phase E — scientific defense (planned).
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
 
