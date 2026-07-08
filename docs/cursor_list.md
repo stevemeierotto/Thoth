@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D5 Step 2 complete** — `THOTH_E2_D5_C5=1` ✅)  
+**Last updated:** 2026-07-08 (E2 **D5 Step 3 locked** — `THOTH_E2_D5_DETERMINISM=1` § D.5.0)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** **D5 Step 2 ✅** — behavioral preservation `THOTH_E2_D5_C5=1` green (~2.5 min). **Paused before Step 3** (determinism meta-proof; § D.5.0 Step 3 outline).
+**Active E2 work:** 🔒 **D5 Step 3 locked** (§ D.5.0 Step 3) — determinism meta-proof `THOTH_E2_D5_DETERMINISM=1`; await explicit implementation approval. Steps 1–2 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1625,6 +1625,15 @@ D5 is **evidence composition, not proof regeneration** ([`D5_PROTOCOL.md`](D5_PR
 
 **Coverage-gap rule:** Lower-phase gates run only when a D5 sub-gate failure identifies a missing invariant **and** the plan is amended with justification.
 
+**Attestation helper naming (locked — all D5 steps):** Evidence printers use `attest*` names that encode **what** is attested, not **who runs** it. They print reference constants only — **never** call lower-step orchestrators (`runE2D5AuthorityMetaProof()`, `runE2D5C5Proof()`, etc.).
+
+| Pattern | Example | Role |
+|---------|---------|------|
+| `attestD5Step{N}{Domain}Evidence()` | `attestD5Step1AuthorityEvidence()`, `attestD5Step2BehavioralEvidence()` | D5 sub-step close-out attestation |
+| `attest{Phase}{ProofId}Evidence()` | `attestPhaseBE2_28Evidence()`, `attestD4CompositionEvidence()` | Prior-phase proof attestation |
+
+**Hygiene note (non-blocker):** Step 2 shipped `attestD5Step1Evidence()` — align to `attestD5Step1AuthorityEvidence()` when Step 3 lands (harness rename only; behavior unchanged). Step 4 closure should follow the same convention for Steps 1–3 attestations.
+
 ---
 
 ##### D.5.0 Step 1 — authority preservation meta-proof (**v1 locked**)
@@ -1731,7 +1740,7 @@ On green gate, Step 1 records:
 
 ##### D.5.0 Step 2 — behavioral preservation meta-proof (**v1 locked**)
 
-**Status:** 🔒 **LOCKED** (2026-07-08) — paused before implementation (AGENTS.md gate)
+**Status:** 🔒 **LOCKED** (2026-07-08) — ✅ **Step 2 complete** (2026-07-08, `f16664d`) — paused before Step 3.
 
 ###### Core invariant (why Step 2 exists)
 
@@ -1836,17 +1845,127 @@ On green gate, Step 2 records:
 
 ---
 
-##### D.5.0 Step 3 — determinism preservation meta-proof (**outline — lock at Step 2 close**)
+##### D.5.0 Step 3 — determinism preservation meta-proof (**v1 locked**)
 
-**Purpose:** Phase B two-run fingerprint gate at evolution close-out (E2-D5-02).
+**Status:** 🔒 **v1 locked** (2026-07-08) — paused before implementation (AGENTS.md gate).
 
-| Work | Gate |
-|------|------|
-| `runE2D5DeterminismProof()` → `testE2B5OfficialFingerprintDeterminism()` | `THOTH_E2_D5_DETERMINISM=1` |
+###### Core invariant (why Step 3 exists)
 
-**Forbidden:** Full Phase B suite; D4-02 determinism re-run. **No new test functions.**
+> **Did evolution preserve reproducibility of authoritative evaluation?**
 
-**Deferred detail:** Full step plan locked at Step 2 close-out.
+Steps 1–2 proved authority and behavioral equivalence held. Step 3 proves **deterministic trust** survived D1–D4 evolution — consecutive identical strict builds still produce equivalent scoped-equivalence snapshots under the canonical E2-28 contract.
+
+###### Step 3 question (locked boundary)
+
+> **Step 3 answers: “After D-phase evolution, do consecutive identical strict builds still produce equivalent scoped-equivalence snapshots per E2-28?”**
+
+| Step 3 proves | Step 3 does **not** prove (deferred) |
+|---------------|--------------------------------------|
+| Consecutive strict runs are reproducible (**E2-D5-02**) | Behavioral equivalence (Step 2 — attested) |
+| Scoped-equivalence snapshots are identical (E2-28) | Authority preservation (Step 1 — attested) |
+| Fingerprint stability across two identical builds | Phase closure / evidence completeness (Step 4) |
+| Diagnosis bucket stable on golden trio (bucket #0) | Full Phase B suite (`runE2B5Tests()` or B5 battery) |
+| Deterministic trust preservation | D4-02 determinism re-run (proven at D4 Step 3 close-out) |
+| | Production promotion or runtime correctness claims |
+| | INTEGRATION ≡ STRICT equivalence |
+
+###### Determinism meta-proof contract (locked)
+
+**Evidence composition rule:** Step 3 **attests** prior checkpoint evidence and **executes** only the E2-28 determinism helper. It does **not** recursively invoke Step 1 or Step 2 orchestrators.
+
+```
+runE2D5DeterminismProof()
+ ├─ attestD5Step1AuthorityEvidence()     [print only — no runE2D5AuthorityMetaProof()]
+ ├─ attestD5Step2BehavioralEvidence()     [print only — no runE2D5C5Proof()]
+ ├─ attestPhaseBE2_28Evidence()           [print only — Phase B E2-28 close-out ref]
+ └─ testE2B5OfficialFingerprintDeterminism()   [E2-D5-02 — existing helper, unchanged]
+```
+
+**Anti-pattern (forbidden):** `runE2D5DeterminismProof()` → `runE2D5C5Proof()` → `runE2D5AuthorityMetaProof()` — that is recursive orchestration, not evidence composition.
+
+**Consume prior evidence (attestation only — no re-execution):**
+
+| Attested | Reference |
+|----------|-----------|
+| D5 Step 1 authority | `THOTH_E2_D5_AUTHORITY=1` green (`0b4df02`) |
+| D5 Step 2 behavioral | `THOTH_E2_D5_C5=1` green (`f16664d`) |
+| Phase B E2-28 determinism | Phase B close-out — `testE2B5OfficialFingerprintDeterminism()` proven at B5; consumed by reference |
+
+**Run determinism meta-proof (single existing helper — call, do not duplicate):**
+
+| Helper | Role |
+|--------|------|
+| `testE2B5OfficialFingerprintDeterminism()` | **E2-D5-02** — E2-28 scoped equivalence: two `buildOfficialGoldenSummary()` passes → snapshot deep-equal + diagnosis bucket #0 |
+
+###### Gate contract — `THOTH_E2_D5_DETERMINISM=1` (locked)
+
+`THOTH_E2_D5_DETERMINISM=1` indicates that **deterministic evaluation behavior was preserved** across consecutive identical strict builds using the canonical E2-28 proof helper (`testE2B5OfficialFingerprintDeterminism()`). It is a **preservation proof only** — it does **not** imply broader behavioral equivalence (Step 2), authority boundary preservation (Step 1), phase closure (Step 4), or production promotion authority.
+
+On invocation: early-exit in `main()` after `THOTH_E2_D5_C5`, before `THOTH_E2_D5_AUTHORITY` and D4 gates → `runE2D5DeterminismProof()`.
+
+###### Step 3 forbidden (locked)
+
+- Re-run full Phase B suite or `runE2B5Tests()` battery  
+- Re-run D4-02 determinism tests (`testE2D4_02*` determinism helpers)  
+- Call `runE2D5AuthorityMetaProof()` or `runE2D5C5Proof()` inside Step 3 orchestrator  
+- Duplicate E2-28 test bodies into new `testE2D5_*` functions  
+- New preregistered test IDs  
+- Production code changes — Step 3 is harness-only  
+- Promotion / INTEGRATION ≡ STRICT claims in evidence output  
+
+###### Proposed work (`THOTH_E2_D5_DETERMINISM=1`)
+
+| Work | Detail |
+|------|--------|
+| `attestD5Step1AuthorityEvidence()` | Print Step 1 authority attestation (reference only) |
+| `attestD5Step2BehavioralEvidence()` | Print Step 2 behavioral attestation (reference only) |
+| `attestPhaseBE2_28Evidence()` | Print Phase B E2-28 close-out attestation (reference only) |
+| `runE2D5DeterminismProof()` | Flat attest trio → `testE2B5OfficialFingerprintDeterminism()` → evidence artifact |
+| `main()` early-exit | `THOTH_E2_D5_DETERMINISM=1` → `runE2D5DeterminismProof()` — after `THOTH_E2_D5_C5`, before `THOTH_E2_D5_AUTHORITY` |
+
+**Orchestrator:** `runE2D5DeterminismProof()` · gate `THOTH_E2_D5_DETERMINISM=1` · preregistered **E2-D5-02**.
+
+###### Step 3 implementation discipline
+
+- Harness-only — thin wrapper + flat attestation printers + evidence output  
+- **No production changes** expected  
+- Attestation helpers are **evidence printers only** — they must not invoke lower-step orchestrators  
+- Verification: `cmake --build --preset build-debug` + `THOTH_E2_D5_DETERMINISM=1` only  
+- Estimated wall time: **~30s–2 min** (`buildOfficialGoldenSummary()` × 2 dominates; snapshot compare is fast; no C5 regression gate)  
+- On failure: stop per AGENTS.md Build/Test Failure Rule  
+
+###### Step 3 evidence artifact
+
+On green gate, Step 3 records:
+
+1. D5 Step 1 authority attested (`THOTH_E2_D5_AUTHORITY=1`, `0b4df02`)  
+2. D5 Step 2 behavioral attested (`THOTH_E2_D5_C5=1`, `f16664d`)  
+3. Phase B E2-28 attested (consumed by reference)  
+4. `testE2B5OfficialFingerprintDeterminism()` pass — E2-D5-02  
+5. Scoped-equivalence snapshots deep-equal across consecutive builds  
+6. Diagnosis bucket #0 (equivalent)  
+7. **Conclusion:** deterministic trust preserved post-evolution (**preservation only — not promotion**)  
+8. **Deferred:** Step 4 closure  
+
+###### Step 3 exit criteria
+
+1. Plan locked in § D.5.0 Step 3 — committed before implementation  
+2. Existing E2-28 helper passes (`testE2B5OfficialFingerprintDeterminism()`)  
+3. Scoped-equivalence snapshots compare equal  
+4. Fingerprint matches across consecutive identical builds  
+5. Diagnosis bucket remains #0  
+6. Evidence artifact recorded (flat attestation chain — no recursive orchestration)  
+7. No new determinism logic introduced  
+8. `THOTH_E2_D5_DETERMINISM=1` green after implementation approval  
+9. Build green  
+10. **Pause for review** before Step 4  
+
+###### Step 3 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | Flat attest helpers + `runE2D5DeterminismProof()` + gate |
+| `external/basic_agent/*` | **None** |
 
 ---
 
@@ -1897,7 +2016,7 @@ On green gate, Step 2 records:
 | `docs/D_PHASE_PROTOCOL.md` | D5 complete pointer |
 | `external/basic_agent/*` | **None** |
 
-**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — Steps 3–4 outline — paused before Step 3 (determinism).
+**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 locked** — Step 4 outline — paused before Step 3 implementation.
 
 ### Separation debt (acknowledged)
 
@@ -2219,7 +2338,7 @@ Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1
 Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D5 Step 3** — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`; § **D.5.0 Step 3** outline — lock at Step 2 close)
+Next 1  **E2 Phase D5 Step 3** — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`; § **D.5.0 Step 3** locked)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
