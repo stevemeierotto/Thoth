@@ -354,6 +354,8 @@ Trace subscribers follow the same interpret boundary for timeline labels.
 
 **D3 Step 6 (umbrella proof-suite gate):** `THOTH_E2_D3=1` executes the complete D3 proof suite (Steps 1–5), then backward-compat gates (`THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`) and G2 `ctest` confirm D3 close-out. Each step establishes a different architectural invariant; the umbrella gate proves they hold together.
 
+**D4 (live INTEGRATION connection):** Plan locked in `cursor_list.md` § **D.4.0**; **Step 1** (production wiring seam confirmation) locked in § **D.4.0 Step 1** — structural audit only, `THOTH_E2_D4_STEP1=1`. Implementation paused pending explicit authorization (AGENTS.md gate). Plan commit is part of the proof chain.
+
 #### Storage (subscriber-owned)
 
 | Subscriber | Hot | Durable (optional) |

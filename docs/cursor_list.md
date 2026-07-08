@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-07 (E2 **D3 complete** — proof suite + Step 6 gate § D.3.0)  
+**Last updated:** 2026-07-07 (E2 **D4 Step 1 locked** § D.4.0 Step 1; D3 complete § D.3.0)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **D3 complete** (proof suite Steps 1–6) — **D4** next; await explicit implementation authorization.
+**Active E2 work:** 🔒 **D4 Step 1 locked** (§ D.4.0 Step 1) — production wiring seam confirmation; **await explicit implementation approval** (no code until approved). D3 ✅ complete.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -287,7 +287,7 @@ If a component influences planning, retrieval, memory, evaluation, or benchmark 
 | Constitutional Rule | Observe / Record / Replay / Present only |
 | Passive Consumer Law | All five conditions per new subscriber |
 
-**Status:** 🔒 **D0 locked** (2026-07-05). ✅ **E2-D1 complete** (2026-07-05). ✅ **D2 complete** + **D2-03 resolved** (2026-07-07). 🔒 **D3 plan locked** (§ **D.3.0**).
+**Status:** 🔒 **D0 locked** (2026-07-05). ✅ **E2-D1 complete** (2026-07-05). ✅ **D2 complete** + **D2-03 resolved** (2026-07-07). ✅ **D3 complete** (2026-07-07). 🔒 **D4 plan locked** (§ **D.4.0**).
 
 ---
 
@@ -859,7 +859,203 @@ Each step establishes a different architectural invariant; the umbrella gate pro
 | `executive_controller.*` | No subscriber-count or metrics/trace branching |
 | Phase B export / STRICT harness | Authority frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D3 complete** — proof suite Steps 1–6 green; paused before D4.
+**Status:** 🔒 **v1 locked** (2026-07-07). **D3 complete** — proof suite Steps 1–6 green; paused before D4 implementation.
+
+#### D.4.0 — E2-D4 implementation plan (live INTEGRATION connection — **v1 locked**)
+
+**Authority:** [`docs/D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) § D4, [`docs/E2_PROTOCOL.md`](E2_PROTOCOL.md) E2-06  
+**Prerequisites:** D1 ✅, D2 ✅, D3 ✅, G1/G2 ✅, Phase C locked  
+**Estimate:** 3–5 h  
+**Status:** 🔒 **v1 locked** (2026-07-07) — paused before implementation (AGENTS.md Planning/Implementation Gate)
+
+##### Proof obligation (what D4 must prove)
+
+> **D4 proves that the production subscriber can produce valid non-scoring INTEGRATION diagnostic envelopes while proving that no production-path execution can emit scoring authority artifacts.**
+
+D3 proved: observers can **observe**. D4 proves: observers can observe the **real system** without **becoming authority**. D4 is **containment**, not only presence.
+
+Prior tiers proved: C2 INTEGRATION envelope on **fixtures** · C5 equivalence under **test-pinned** config · D1–D3 passive consumers. D4 proves **live production wiring** under `integrationDefaults()` without contaminating STRICT benchmark authority.
+
+##### One sentence
+
+> **D4 connects INTEGRATION to production; it does not introduce INTEGRATION.** Prove valid E2-06 envelopes on the real subscriber/plugin path while STRICT remains the sole scoring authority.
+
+##### “Live production path” (scope boundary — locked)
+
+**“Live production path”** means the **production wiring path** exercised through the real subscriber/plugin registration path under `integrationDefaults()` — typically via integration tests that construct `BasicAgentPlugin` (or equivalent production registration) with publication enabled.
+
+| In scope | Out of scope |
+|----------|--------------|
+| Production code path + plugin registration seam | Deployed service traffic or external user runtime |
+| `integrationDefaults()` on `EvaluationSubscriber` (test seam unset) | Claiming INTEGRATION object equality with STRICT |
+| Organic warm tier, cross-session, heuristics per service config | Changing `resolveEvaluation()` or Phase B export |
+
+This prevents scope creep into “production ops” or deployment validation.
+
+##### What C + D3 proved vs what D4 must add
+
+| Already proven | D4 must add |
+|----------------|-------------|
+| C2: INTEGRATION envelope on fixture (`testE2C2IntegrationEnvelope`) | **Live** path: plugin/subscriber registration → goal or publication → INTEGRATION envelope |
+| C5: Equivalence under test-pinned config | Production defaults (`integrationDefaults()`) — C5 explicitly defers this |
+| D3: Metrics/trace observe without authority | Evaluation subscriber observes **real** execution without emitting scoring authority |
+| D0: INTEGRATION mode defined | INTEGRATION **connected** to operational execution path |
+
+**Code starting point:** `EvaluationSubscriber` uses `E2EvalConfig::integrationDefaults()` when test seam unset; `BasicAgentPlugin` registers on `enable_episodic_evaluation_publication`.
+
+##### E2-06 contract (required on every INTEGRATION artifact)
+
+| Required | Forbidden |
+|----------|-----------|
+| `scoring_tier`: `"INTEGRATION"` | `official_scoring: true` on production live path |
+| `official_scoring`: `false` | `e2_outcome` on diagnostic authority path |
+| Diagnostic trace fields only | INTEGRATION-vs-STRICT promotion comparisons |
+
+##### No protocol changes (locked — AGENTS.md Protocol Lock Rule)
+
+D4 **implements** locked E2 v1.2 INTEGRATION semantics — it does **not** revise them.
+
+| Forbidden during D4 | If ambiguity found |
+|---------------------|-------------------|
+| Silent edits to `E2_PROTOCOL.md`, `D_PHASE_PROTOCOL.md`, `C_PHASE_PROTOCOL.md` tier definitions | **Pause** — request explicit approval per AGENTS.md Planning/Implementation Gate |
+| Changes to `resolveEvaluation()`, Phase B export, or STRICT harness contract | Protocol bump (E2 v1.3+) + separate approval — not D4 scope |
+| Redefining INTEGRATION/STRICT modes in code without protocol alignment | Stop; fix plan or protocol first |
+
+Implementation may add tests and minimal wiring only; protocol documents change only with explicit human approval.
+
+##### Preregistered tests
+
+| ID | Proves |
+|----|--------|
+| **E2-D4-01** | Live INTEGRATION envelope — E2-06 contract on production-path output |
+| **E2-D4-02** | STRICT contamination audit — `wiring_stage=B` benchmark authority unchanged |
+
+##### Implementation order (pause between steps)
+
+| Step | Work | Gate (proposed) |
+|------|------|-----------------|
+| **1** | Production wiring seam confirmation — structural audit only (§ D.4.0 Step 1) | `THOTH_E2_D4_STEP1=1` |
+| **2** | **E2-D4-01** — live path: plugin/subscriber registration exercised; assert INTEGRATION envelope + **no scoring authority artifacts** | `THOTH_E2_D4_01=1` |
+| **3** | **E2-D4-02** — STRICT harness with D4 wiring present; fingerprint + authority fields unchanged | `THOTH_E2_D4_02=1` |
+| **4** | Targeted regressions — `THOTH_E2_D3=1`, `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1` | Backward compat |
+| **5** | Umbrella `THOTH_E2_D4=1` (full D4 proof suite) | D4 close-out |
+| **6** | **Pause for review** before D5 |
+
+**Verification scope (Steps 2–5):** Targeted env gates only — full suite / G2 deferred to **D5** unless explicitly requested (same discipline as D3).
+
+##### D.4.0 Step 1 — Production wiring seam confirmation (**v1 locked**)
+
+**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-07) — planning artifact complete; **no Step 1 code until explicit implementation approval** per AGENTS.md.
+
+**Planning artifact only:** Step 1 planning produces **no source modifications**. Repository working tree must remain unchanged until implementation approval. (D4 tests the governance process as well as the architecture.)
+
+###### Step 1 question (locked boundary)
+
+> **Step 1 answers: “Is INTEGRATION already wired the way D4 assumes?”**
+
+D4 is **not** “add integration support.” D4 is **prove existing integration support is correctly connected.**
+
+| Step 1 proves (structural) | Step 1 does **not** prove (deferred) |
+|----------------------------|--------------------------------------|
+| Production wiring seam exists and is flag-gated | E2-D4-01 live envelope on plugin path |
+| `integrationDefaults()` is the production subscriber config selection | Executive goal run with publication ON |
+| No authority confusion in production init paths | `wiring_stage=B` fingerprint / STRICT contamination |
+| Verified seam inventory for D5 evidence | INTEGRATION ≡ STRICT equivalence or promotion suitability |
+
+**Proof ladder:** Step 1 = *does the code select the expected config?* · Step 2 = *does the running path produce the expected envelope?*
+
+###### Step 1 forbidden (locked)
+
+- Establish **equivalence** between INTEGRATION and STRICT (scoring parity, ranking equivalence, promotion suitability, object equality claims) — C5 addressed equivalence under **controlled pinned config**; D4 Step 1 does **not** reopen that question  
+- Live-path behavioral envelope proof (Step 2)  
+- STRICT harness / fingerprint runs (Step 3)  
+- Protocol document edits without explicit approval  
+- Deployed-traffic or external-user “live ops” validation  
+- Any production subscriber initialization path may **implicitly select `strictDefaults()`** when operating under the integration production configuration (`integrationDefaults()` / test seam unset) — tests may legitimately use `strictDefaults()`; the prohibition is **authority confusion**, not the existence of the function  
+
+###### Proposed tests (`THOTH_E2_D4_STEP1=1`)
+
+| Test | Purpose |
+|------|---------|
+| `testE2D4Step1ConfigDefaultOff` | `enable_episodic_evaluation_publication` defaults OFF (may assert via `testE2C2PublicationDisabledByDefault`) |
+| `testE2D4Step1ConfigJsonRoundTrip` | Flag round-trips via `saveToJson` / `loadFromJson` |
+| `testE2D4Step1IntegrationDefaultsContract` | `integrationDefaults()` → `INTEGRATION` tier, `officialScoring()==false`, cross-session + heuristics enabled |
+| `testE2D4Step1PluginStructuralAudit` | Flag-gated `registerEvaluationSubscriber`; telemetry flag only when eval ON; no test config seam in plugin |
+| `testE2D4Step1ProductionOnlyRegistrationPath` | `registerEvaluationSubscriber` only in plugin + subscriber definition `.cpp` |
+| `testE2D4Step1SubscriberConfigurationSelectionAudit` | **Structural:** subscriber source selects `integrationDefaults()` when test seam unset; no production init path implicitly selects `strictDefaults()` under integration production configuration |
+| `testE2D4Step1ExecutivePublicationGate` | Executive publication gated on `enable_episodic_evaluation_publication` only |
+| `testE2D4Step1TestSeamIsolation` | `setEvaluationSubscriberEvalConfigForTests` not called from production init / plugin |
+
+**Regression dependency (call, do not duplicate):** `testE2C2IntegrationEnvelope()` — fixture E2-06 baseline.
+
+**Orchestrator:** `runE2D4Step1Tests()` · gate `THOTH_E2_D4_STEP1=1` in `main()`.
+
+###### Step 1 implementation discipline
+
+- Tests only unless structural audit finds a **real** violation  
+- No new plugin test seam required (deferred to Step 2)  
+- Verification: `cmake --build --preset build-debug` + `THOTH_E2_D4_STEP1=1` only  
+
+###### Step 1 evidence artifact (for D5 chain)
+
+On green gate, Step 1 produces:
+
+1. **D4 Step 1 gate result** — `THOTH_E2_D4_STEP1=1` pass  
+2. **Structural audit summary** — which greps/audits ran  
+3. **Verified seams list** — e.g. config flag, plugin registration, `integrationDefaults()` selection, Executive publication gate, test-seam isolation  
+4. **Deferred proof obligations** — explicitly listed for Steps 2–3 (live envelope, STRICT contamination)  
+
+###### Step 1 exit criteria
+
+1. Plan locked in `cursor_list.md` § D.4.0 Step 1 (this section) — committed before implementation  
+2. `THOTH_E2_D4_STEP1=1` green after implementation approval  
+3. Build green  
+4. Production wiring seam confirmed structurally (minimal production fix only if audit fails)  
+5. **Pause for review** before Step 2 (E2-D4-01)  
+
+###### Step 1 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | Step 1 tests + `runE2D4Step1Tests()` + gate |
+| `external/basic_agent/*` | **Only if audit finds violation** — default: none |
+
+##### D4 Step 5 exit criteria (umbrella gate)
+
+1. `THOTH_E2_D4=1` green — full D4 proof suite (Steps 1–4)  
+2. E2-D4-01: valid INTEGRATION envelope **and** no production-path scoring authority artifacts  
+3. E2-D4-02: STRICT path uncontaminated  
+4. Post–D3 regressions green with flags default OFF where applicable  
+5. **Pause for review** before D5
+
+##### Forbidden (D4)
+
+- `official_scoring: true` from production live subscriber path  
+- Emitting `e2_outcome` on INTEGRATION diagnostic authority path  
+- INTEGRATION-vs-STRICT promotion or lift claims  
+- D4 changes to `resolveEvaluation()` or Phase B export contract  
+- Protocol document changes without explicit approval (see **No protocol changes**)  
+- Deployed-traffic or external-user “live ops” validation  
+
+##### Files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | E2-D4-01..02 + `runE2D4Tests()` + gates |
+| `basic_agent_plugin.cpp` | Wiring audit only if gap found |
+| `evaluation_subscriber.*` | Minimal if envelope gap found |
+| `docs/cursor_list.md` | § D.4.0 (this section) |
+| `docs/D_PHASE_PROTOCOL.md` | Pointer to D.4.0 only if approved |
+
+| Untouched | |
+|-----------|--|
+| `E2_PROTOCOL.md` tier semantics | Locked v1.2 unless E2 v1.3+ approved |
+| `resolveEvaluation()`, Phase B export | Authority frozen |
+| STRICT harness / `wiring_stage=B` fingerprint | Must remain stable |
+| D3 subscribers | Contract frozen |
+
+**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 locked for implementation** (§ D.4.0 Step 1) — paused pending AGENTS.md approval. D3 complete.
+
 ### Separation debt (acknowledged)
 
 STRICT / INTEGRATION share eval types and schema → **behavioral separation**, not fully structural. Acceptable for v1.2; future hardening (kernel-only harness binary, versioned ABI) deferred post–Phase C.
@@ -1173,7 +1369,7 @@ Done    E2 Phase C — integration tier (C1–C5) ✅ 2026-07-05
 Done    E2 Phase D1 — event channel fan-out ✅ 2026-07-05
 Done    E2 Phase D2 — replay subscriber + D2-03/FLAKE-UT-02 ✅ 2026-07-07
 Done    E2 Phase D3 — observability proof suite (Steps 1–6, `THOTH_E2_D3=1`) ✅ 2026-07-07
-Next 1  **E2 Phase D4** — (§ D.4.0; await explicit implementation authorization)
+Next 1  **E2 Phase D4 Step 1** — production wiring seam confirmation (§ **D.4.0 Step 1** locked; await explicit implementation approval)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
