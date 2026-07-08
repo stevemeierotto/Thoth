@@ -354,7 +354,7 @@ Trace subscribers follow the same interpret boundary for timeline labels.
 
 **D3 Step 6 (umbrella proof-suite gate):** `THOTH_E2_D3=1` executes the complete D3 proof suite (Steps 1–5), then backward-compat gates (`THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`) and G2 `ctest` confirm D3 close-out. Each step establishes a different architectural invariant; the umbrella gate proves they hold together.
 
-**D4 (live INTEGRATION connection):** Plan locked in `cursor_list.md` § **D.4.0**; **Step 1** (production wiring seam confirmation) locked in § **D.4.0 Step 1** — structural audit only, `THOTH_E2_D4_STEP1=1`. Implementation paused pending explicit authorization (AGENTS.md gate). Plan commit is part of the proof chain.
+**D4 (live INTEGRATION connection):** Full protocol § **D4** below; detailed step plan in `cursor_list.md` § **D.4.0**. Step 1 complete (`THOTH_E2_D4_STEP1=1`); Steps 2–5 paused pending authorization.
 
 #### Storage (subscriber-owned)
 
@@ -405,27 +405,187 @@ D3 does not analyze performance, optimize execution, change scheduling, influenc
 
 ### D4 — Live INTEGRATION connection (operational mode wiring)
 
-**Question:** Can the production subscriber produce valid **non-scoring** INTEGRATION diagnostic envelopes under live `integrationDefaults()`?
+**Protocol status:** 🔒 **v1 locked** (2026-07-07) — Step 1 ✅; Steps 2–5 paused per AGENTS.md gate  
+**Checkpoint plan:** `cursor_list.md` § **D.4.0**  
+**Depends on:** E2 Protocol v1.2 (E2-06, INTEGRATION tier), Phase C locked, D1–D3 complete, D4 Step 1 green
 
-**Scope**
+#### Objective
 
-- **Connect** the INTEGRATION mode (defined at D0) to the production path — organic warm tier, cross-session, heuristics per service config
-- Enforce E2-06 at runtime: `official_scoring: false`, no `e2_outcome` on diagnostic authority path
-- STRICT path and `wiring_stage=B` harness remain untouched and authoritative
-- C5 equivalence under pinned config remains valid; D4 does not claim INTEGRATION object equality with STRICT
+Prove that the **existing** INTEGRATION diagnostic mode is correctly connected to the production wiring path under `integrationDefaults()`, and that this connection **cannot emit scoring authority artifacts**.
 
-#### Forbidden
+D4 is a **containment proof**, not a feature addition:
 
-- `official_scoring: true` from production live subscriber path
-- INTEGRATION-vs-STRICT promotion comparisons
-- D4 changes to `resolveEvaluation()` or Phase B export contract
+- **D3** proved observers can **observe** without becoming authority.
+- **D4** proves observers can observe the **real production wiring path** without **becoming** or **leaking** authority.
 
-#### Exit criteria
+D4 does **not** introduce INTEGRATION. D0 and Phase C defined it; D4 **connects and contains** it on the operational path.
 
-1. Live INTEGRATION envelope contract verified (E2-06 rules)
-2. Contamination audit: STRICT benchmark path unchanged
-3. E2-D4-01–E2-D4-02 green
-4. **Pause before D5**
+> **One sentence:** D4 connects INTEGRATION to production; it does not introduce INTEGRATION. Prove valid E2-06 envelopes on the real subscriber/plugin path while STRICT remains the sole scoring authority.
+
+#### Scope
+
+**In scope**
+
+| Area | Obligation |
+|------|------------|
+| Production wiring | Real subscriber/plugin registration under `enable_episodic_evaluation_publication` |
+| Configuration selection | Production subscriber operates under `integrationDefaults()` when test config seam unset |
+| E2-06 envelope | Valid non-scoring INTEGRATION diagnostic artifacts on the live production path |
+| Authority containment | No production-path emission of STRICT/scoring authority fields |
+| STRICT isolation | Benchmark authority (`wiring_stage=B`, Phase B fingerprint) unchanged by D4 wiring |
+| Structural confirmation | Production seam verified before behavioral proof (D4 Step 1) |
+
+**“Live production path” (locked definition)**
+
+**Live production path** means the production wiring path exercised through real subscriber/plugin registration under `integrationDefaults()` — typically via integration tests that construct the production plugin with publication enabled.
+
+It does **not** mean deployed service traffic, external user runtime, or production-ops validation.
+
+**Out of scope**
+
+| Item | Rationale |
+|------|-----------|
+| Deployed / external-user “live ops” | Architectural proof, not deployment validation |
+| INTEGRATION ≡ STRICT equivalence | C5 addressed equivalence under pinned config; D4 does not reopen |
+| INTEGRATION-vs-STRICT promotion or lift claims | Protocol violation |
+| Changes to `resolveEvaluation()` or Phase B export | Authority frozen |
+| Protocol tier redefinition | E2 v1.3+ and separate approval |
+| D5 trust re-proof | Separate checkpoint |
+
+#### Preconditions
+
+1. D1–D3 complete — channel, replay, observability proof suites green  
+2. Phase C locked — `EvaluationSubscriber`, event publication, diagnostic/telemetry tiers operational  
+3. G1/G2 green — unit-test CTest budget satisfied  
+4. **D4 Step 1 complete** — production wiring seam structurally confirmed (`THOTH_E2_D4_STEP1=1`)  
+5. E2 Protocol v1.2 locked — INTEGRATION tier and E2-06 rules authoritative  
+6. This D4 protocol section locked before Step 2+ implementation  
+
+#### Required invariants
+
+**Constitutional Rule (Phase D):** Every D4 capability must satisfy **Observe, Record, Replay, Present — Never Decide.**
+
+**Passive Consumer Law:** All D4-touching subscribers satisfy all five conditions (immutable consumption; no publisher mutation; no execution-order influence; not required for success; removable without benchmark change).
+
+**D4-specific invariants**
+
+| ID | Invariant |
+|----|-----------|
+| **D4-I1** | Production subscriber config selection uses `integrationDefaults()` when test seam unset |
+| **D4-I2** | `enable_episodic_evaluation_publication` defaults OFF; registration is flag-gated only |
+| **D4-I3** | Executive publication gated on config flag; Executive does not branch on eval tier or scoring state |
+| **D4-I4** | `registerEvaluationSubscriber` invoked only from production integration path (plugin + subscriber definition) |
+| **D4-I5** | Test config seam does not affect production when unset |
+| **D4-I6** | No production subscriber initialization path may implicitly select `strictDefaults()` under integration production configuration |
+| **D4-I7** | STRICT benchmark path and Phase B fingerprint remain stable regardless of D4 wiring state |
+
+**Note on D4-I6:** Tests may legitimately use `strictDefaults()`. The prohibition is **authority confusion** on the production integration path, not the existence of the function.
+
+#### Authority boundaries
+
+**INTEGRATION may:** emit diagnostic envelopes under E2-06; record observational fields; use organic warm tier, cross-session reads, and heuristics per `integrationDefaults()`; coexist with D2/D3 subscribers on the same channel.
+
+**INTEGRATION must not:** emit `official_scoring: true`; emit `e2_outcome` on the diagnostic authority path; influence planner, Executive, retrieval, memory, or benchmark outcomes; become a prerequisite for goal or benchmark success; be cited as benchmark evidence without the label **“non-scoring diagnostic mode”**.
+
+**STRICT authority (untouched):** `wiring_stage=B` harness remains sole official scoring path; Phase B fingerprint stable; C5 equivalence under pinned config remains valid; D4 does **not** claim INTEGRATION object equality with STRICT.
+
+**Containment vs presence:** D4 proof includes **presence** (valid E2-06 envelopes on live production path) and **containment** (no production-path scoring authority artifacts).
+
+#### E2-06 enforcement requirements
+
+Per `E2_PROTOCOL.md` test ID **E2-06** and INTEGRATION artifact fields.
+
+**Required on INTEGRATION artifacts**
+
+| Field / property | Requirement |
+|------------------|-------------|
+| `scoring_tier` | `"INTEGRATION"` |
+| `official_scoring` | `false` |
+| Diagnostic content | Trace/diagnostic fields only |
+| `e2_outcome` | **Must not be present** on diagnostic authority path |
+
+**Runtime contract**
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| Production path, test seam unset | Subscriber selects `integrationDefaults()` / `INTEGRATION` tier |
+| Summary or JSONL on live path | E2-06 field rules hold |
+| Pipeline telemetry (if enabled) | No authoritative scoring fields |
+| STRICT harness with D4 wiring present | Unchanged authority artifacts and fingerprint |
+
+E2-06 violations at test time → checkpoint FAIL. D4 does not define new violation taxonomies beyond E2 Protocol v1.2.
+
+#### Proof obligations
+
+D4 is organized as a **proof suite**. Each step establishes a distinct invariant; the umbrella gate proves they hold together.
+
+| Step | Proof obligation | Gate |
+|------|------------------|------|
+| **1** | Production wiring seam structurally correct — “Is INTEGRATION already wired the way D4 assumes?” | `THOTH_E2_D4_STEP1=1` |
+| **2** | **E2-D4-01** — Live path: valid E2-06 envelope **and** no scoring authority artifacts | `THOTH_E2_D4_01=1` |
+| **3** | **E2-D4-02** — STRICT contamination audit — benchmark authority unchanged | `THOTH_E2_D4_02=1` |
+| **4** | Backward-compat regressions (D3, D2, D1, C5) with applicable flags default OFF | Targeted gates |
+| **5** | Umbrella — full D4 proof suite | `THOTH_E2_D4=1` |
+
+**Step 1 vs Step 2 boundary (locked)**
+
+| Step 1 (structural) | Step 2 (behavioral) |
+|---------------------|---------------------|
+| Does the code select the expected config? | Does the running path produce the expected envelope? |
+
+**Step 1 forbidden:** establish INTEGRATION ≡ STRICT equivalence; scoring parity or promotion suitability claims; live-path envelope proof (deferred to Step 2).
+
+**Preregistered test IDs:** E2-D4-01 (live envelope + containment); E2-D4-02 (STRICT contamination).
+
+#### Forbidden changes
+
+**Protocol lock (AGENTS.md):** D4 implements locked E2 v1.2 INTEGRATION semantics — does not revise them. Silent protocol-document edits require explicit approval; `resolveEvaluation()` / Phase B changes require E2 v1.3+.
+
+**D4 forbidden**
+
+- `official_scoring: true` from production live subscriber path  
+- `e2_outcome` on INTEGRATION diagnostic authority path  
+- INTEGRATION-vs-STRICT promotion, lift, or equivalence claims  
+- Treating D4 as “add integration support” rather than prove existing wiring  
+- Executive branching on subscriber/eval state for correctness  
+- Deployed-traffic validation as D4 proof  
+- Mandatory full suite / G2 mid-D4 (deferred to D5 unless explicitly requested)  
+
+#### Required verification gates
+
+**Per-step (targeted only):** `THOTH_E2_D4_STEP1=1`, `THOTH_E2_D4_01=1`, `THOTH_E2_D4_02=1`, `THOTH_E2_D4=1`.
+
+**Regression (Steps 4–5):** `THOTH_E2_D3=1`, `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`.
+
+**Deferred to D5:** default full unit-test suite; G2 `ctest`; Phase B fingerprint two-run gate; C5 matrix re-pass.
+
+**Build:** `cmake --build --preset build-debug` green after each step that touches code.
+
+#### Exit criteria (D4 complete)
+
+1. Proof obligation satisfied — INTEGRATION connected with E2-06 containment  
+2. D4-I1..I7 verified (structural + behavioral)  
+3. E2-D4-01 green — valid envelope + no scoring authority artifacts on production path  
+4. E2-D4-02 green — STRICT path uncontaminated; `wiring_stage=B` fingerprint stable  
+5. `THOTH_E2_D4=1` green — full D4 proof suite (Steps 1–4)  
+6. Post-D3 regressions green with applicable flags default OFF  
+7. Evidence chain recorded for D5 (Step 1 artifact + Steps 2–3 behavioral proof)  
+8. **Pause before D5**
+
+#### Pause discipline
+
+Pause for review after each D4 step and after D4 umbrella gate. Build/test failure → stop per AGENTS.md Build/Test Failure Rule.
+
+#### Relationship to adjacent checkpoints
+
+| Checkpoint | Relationship |
+|------------|--------------|
+| **C2** | INTEGRATION envelope on fixtures; D4 extends to live production path |
+| **C5** | Equivalence under pinned config; D4 does not reopen |
+| **D3** | Observability without authority; D4 applies containment to eval/diagnostic path |
+| **D5** | Trust re-proof after all D changes |
+
+**Time estimate (D4):** 3–5 h (excludes D5).
 
 ---
 
@@ -510,7 +670,7 @@ D3 does not analyze performance, optimize execution, change scheduling, influenc
 | E2-D3-01 | D3 | Metrics sink-only — frozen aggregation ops; opaque `observed_final_success_score`; Metrics JSONL v1.0; eval-independence structural audit; backward compat with `enable_metrics_subscriber=false` |
 | E2-D3-02 | D3 | Failure isolation: exactly-once delivery for non-throwing subscribers; locked terminal outcome comparison (excludes metrics/trace/logs); mandatory ordering permutation; catch/log/continue |
 | E2-D3-03 | D3 | Structural audit — exclusive ownership; interpret + authority boundaries; publication-mechanism invariant; ordering/JSONL structural audits (narrow authority grep only) |
-| E2-D4-01 | D4 | Live INTEGRATION envelope — E2-06 contract |
+| E2-D4-01 | D4 | Live INTEGRATION envelope — E2-06 contract on production path; no scoring authority artifacts |
 | E2-D4-02 | D4 | STRICT path contamination audit — benchmark authority unchanged |
 | E2-D5-01 | D5 | C5 equivalence matrix re-pass |
 | E2-D5-02 | D5 | Phase B fingerprint two-run gate |
@@ -543,7 +703,7 @@ D3 does not analyze performance, optimize execution, change scheduling, influenc
 
 ## D0 lock record
 
-**Locked:** 2026-07-05 (D0); **D3 plan:** 2026-07-07 (§ `cursor_list.md` D.3.0); **D3 Step 2 plan:** 2026-07-07 (opaque score, frozen ops, JSONL v1.0, eval-independence audit, backward-compat exit)  
-**Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 as INTEGRATION connection; D5 as trust re-proof.
+**Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4 Step 1:** ✅ `THOTH_E2_D4_STEP1=1`  
+**Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 containment + live-path definition + protocol lock; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — **D3 Step 1 ✅** — **D3 Step 2 plan approved** — paused before Step 2 implementation.
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — paused before D4 Step 2.

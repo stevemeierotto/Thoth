@@ -7788,6 +7788,242 @@ static bool runE2D3Tests() {
     return true;
 }
 
+// --- E2-D4 Step 1: Production wiring seam confirmation (structural only) ---
+
+static bool testE2D4Step1ConfigDefaultOff() {
+    return testE2C2PublicationDisabledByDefault();
+}
+
+static bool testE2D4Step1ConfigJsonRoundTrip() {
+    const fs::path tempPath = makeTempPath("thoth_d4_eval_publication_config.json");
+
+    Config cfg;
+    cfg.enable_episodic_evaluation_publication = true;
+    cfg.enable_episodic_pipeline_telemetry = true;
+    if (!cfg.saveToJson(tempPath.string())) {
+        std::cerr << "testE2D4Step1ConfigJsonRoundTrip: failed to save config\n";
+        return false;
+    }
+
+    Config loaded;
+    if (!loaded.loadFromJson(tempPath.string())) {
+        std::cerr << "testE2D4Step1ConfigJsonRoundTrip: failed to load config\n";
+        fs::remove(tempPath);
+        return false;
+    }
+
+    const bool ok = loaded.enable_episodic_evaluation_publication &&
+        loaded.enable_episodic_pipeline_telemetry;
+    fs::remove(tempPath);
+    if (!ok) {
+        std::cerr << "testE2D4Step1ConfigJsonRoundTrip: flag mismatch after round-trip\n";
+    }
+    return ok;
+}
+
+static bool testE2D4Step1IntegrationDefaultsContract() {
+    const Thoth::E2EvalConfig integration = Thoth::E2EvalConfig::integrationDefaults();
+    if (integration.tier != Thoth::E2EvalTier::INTEGRATION) {
+        std::cerr << "testE2D4Step1IntegrationDefaultsContract: expected INTEGRATION tier\n";
+        return false;
+    }
+    if (integration.officialScoring()) {
+        std::cerr << "testE2D4Step1IntegrationDefaultsContract: officialScoring must be false\n";
+        return false;
+    }
+    if (!integration.crossSessionEnabled() || !integration.heuristicsAllowed()) {
+        std::cerr << "testE2D4Step1IntegrationDefaultsContract: integration flags mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4Step1PluginStructuralAudit() {
+    const std::string plugin =
+        readRepoSourceFile("external/basic_agent/src/basic_agent_plugin.cpp");
+    if (plugin.empty()) {
+        std::cerr << "testE2D4Step1PluginStructuralAudit: cannot read basic_agent_plugin.cpp\n";
+        return false;
+    }
+    if (plugin.find("config.enable_episodic_evaluation_publication && episode_event_channel_") ==
+            std::string::npos ||
+        plugin.find("Thoth::registerEvaluationSubscriber(*episode_event_channel_)") ==
+            std::string::npos ||
+        plugin.find("Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(") ==
+            std::string::npos) {
+        std::cerr << "testE2D4Step1PluginStructuralAudit: flag-gated eval registration missing\n";
+        return false;
+    }
+    if (plugin.find("setEvaluationSubscriberEvalConfigForTests") != std::string::npos) {
+        std::cerr << "testE2D4Step1PluginStructuralAudit: test config seam in plugin\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4Step1ProductionOnlyRegistrationPath() {
+    const std::vector<std::string> allowEval = {
+        "external/basic_agent/src/basic_agent_plugin.cpp",
+        "external/basic_agent/src/evaluation_subscriber.cpp"};
+
+    FileHandler fh;
+    const fs::path srcRoot = fs::path(fh.getProjectRoot()) / "external/basic_agent/src";
+    if (!fs::is_directory(srcRoot)) {
+        std::cerr << "testE2D4Step1ProductionOnlyRegistrationPath: missing src directory\n";
+        return false;
+    }
+
+    for (const auto& entry : fs::directory_iterator(srcRoot)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".cpp") {
+            continue;
+        }
+        const std::string rel = "external/basic_agent/src/" + entry.path().filename().string();
+        const std::string source = readRepoSourceFile(rel);
+        if (source.empty()) {
+            std::cerr << "testE2D4Step1ProductionOnlyRegistrationPath: cannot read " << rel
+                      << '\n';
+            return false;
+        }
+        if (source.find("registerEvaluationSubscriber") != std::string::npos &&
+            std::find(allowEval.begin(), allowEval.end(), rel) == allowEval.end()) {
+            std::cerr << "testE2D4Step1ProductionOnlyRegistrationPath: unexpected registration in "
+                      << rel << '\n';
+            return false;
+        }
+    }
+
+    const std::string plugin =
+        readRepoSourceFile("external/basic_agent/src/basic_agent_plugin.cpp");
+    if (plugin.find("registerEvaluationSubscriber") == std::string::npos) {
+        std::cerr << "testE2D4Step1ProductionOnlyRegistrationPath: plugin missing registration\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4Step1SubscriberConfigurationSelectionAudit() {
+    const std::string source =
+        readRepoSourceFile("external/basic_agent/src/evaluation_subscriber.cpp");
+    if (source.empty()) {
+        std::cerr << "testE2D4Step1SubscriberConfigurationSelectionAudit: cannot read subscriber "
+                     "source\n";
+        return false;
+    }
+    if (source.find("integrationDefaults()") == std::string::npos ||
+        source.find("g_eval_config_for_tests.value_or(E2EvalConfig::integrationDefaults())") ==
+            std::string::npos ||
+        source.find("!g_eval_config_for_tests.has_value()") == std::string::npos ||
+        source.find("config.tier = E2EvalTier::INTEGRATION") == std::string::npos) {
+        std::cerr << "testE2D4Step1SubscriberConfigurationSelectionAudit: integration config "
+                     "selection missing\n";
+        return false;
+    }
+    if (source.find("strictDefaults()") != std::string::npos) {
+        std::cerr << "testE2D4Step1SubscriberConfigurationSelectionAudit: strictDefaults in "
+                     "subscriber production source\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4Step1ExecutivePublicationGate() {
+    const std::string executive =
+        readRepoSourceFile("external/basic_agent/src/executive_controller.cpp");
+    if (executive.empty()) {
+        std::cerr << "testE2D4Step1ExecutivePublicationGate: cannot read executive_controller.cpp\n";
+        return false;
+    }
+    if (executive.find("!config_->enable_episodic_evaluation_publication") ==
+        std::string::npos) {
+        std::cerr << "testE2D4Step1ExecutivePublicationGate: publication flag gate missing\n";
+        return false;
+    }
+    const std::vector<std::string> forbidden = {"official_scoring",
+                                                "E2EvalTier::STRICT",
+                                                "strictDefaults(",
+                                                "registerEvaluationSubscriber",
+                                                "integrationDefaults(",
+                                                "scoring_tier"};
+    for (const auto& sym : forbidden) {
+        if (executive.find(sym) != std::string::npos) {
+            std::cerr << "testE2D4Step1ExecutivePublicationGate: Executive references " << sym
+                      << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool testE2D4Step1TestSeamIsolation() {
+    const std::vector<std::string> paths = {
+        "external/basic_agent/src/basic_agent_plugin.cpp",
+        "external/basic_agent/src/executive_controller.cpp"};
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2D4Step1TestSeamIsolation: cannot read " << path << '\n';
+            return false;
+        }
+        if (source.find("setEvaluationSubscriberEvalConfigForTests") != std::string::npos) {
+            std::cerr << "testE2D4Step1TestSeamIsolation: test seam in production init " << path
+                      << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool runE2D4Step1Tests() {
+    if (!testE2D4Step1ConfigDefaultOff()) {
+        std::cerr << "E2-D4-Step1 config default OFF failed\n";
+        return false;
+    }
+    if (!testE2D4Step1ConfigJsonRoundTrip()) {
+        std::cerr << "E2-D4-Step1 config JSON round-trip failed\n";
+        return false;
+    }
+    if (!testE2D4Step1IntegrationDefaultsContract()) {
+        std::cerr << "E2-D4-Step1 integrationDefaults contract failed\n";
+        return false;
+    }
+    if (!testE2D4Step1PluginStructuralAudit()) {
+        std::cerr << "E2-D4-Step1 plugin structural audit failed\n";
+        return false;
+    }
+    if (!testE2D4Step1ProductionOnlyRegistrationPath()) {
+        std::cerr << "E2-D4-Step1 production-only registration path failed\n";
+        return false;
+    }
+    if (!testE2D4Step1SubscriberConfigurationSelectionAudit()) {
+        std::cerr << "E2-D4-Step1 subscriber configuration selection audit failed\n";
+        return false;
+    }
+    if (!testE2D4Step1ExecutivePublicationGate()) {
+        std::cerr << "E2-D4-Step1 executive publication gate failed\n";
+        return false;
+    }
+    if (!testE2D4Step1TestSeamIsolation()) {
+        std::cerr << "E2-D4-Step1 test seam isolation failed\n";
+        return false;
+    }
+    if (!testE2C2IntegrationEnvelope()) {
+        std::cerr << "E2-D4-Step1 C2 integration envelope regression failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D4-Step1 production wiring seam confirmation green\n";
+    std::cout << "E2-D4-Step1 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D4_STEP1 structural audits green\n";
+    std::cout << "  verified seams: enable_episodic_evaluation_publication default OFF; JSON "
+                 "round-trip; integrationDefaults() contract; plugin flag-gated "
+                 "registerEvaluationSubscriber; production-only registration; subscriber "
+                 "configuration selection (integrationDefaults when test seam unset); executive "
+                 "publication gate; test seam isolation from plugin/executive\n";
+    std::cout << "  deferred: Step 2 E2-D4-01 live INTEGRATION envelope on production path; "
+                 "Step 3 E2-D4-02 STRICT contamination audit\n";
+    return true;
+}
+
 /** E2-C3-01 — diagnostics do not call evaluation or scoring functions. */
 static bool testE2C3NoEvaluationCoupling() {
     const std::vector<std::string> paths = {"external/basic_agent/include/diagnostic_service.h",
@@ -8752,6 +8988,16 @@ int main() {
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* d4_step1 = std::getenv("THOTH_E2_D4_STEP1")) {
+        if (d4_step1[0] != '0' && std::string(d4_step1) != "false") {
+            if (!runE2D4Step1Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D4-Step1 gate passed.\n";
+            return 0;
         }
     }
 

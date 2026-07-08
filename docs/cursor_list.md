@@ -5,7 +5,7 @@
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D4 Step 1 locked** (§ D.4.0 Step 1) — production wiring seam confirmation; **await explicit implementation approval** (no code until approved). D3 ✅ complete.
+**Active E2 work:** ✅ **D4 Step 1 complete** — **Step 2** (E2-D4-01 live envelope) next; await explicit implementation authorization. D3 ✅ complete.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -945,7 +945,7 @@ Implementation may add tests and minimal wiring only; protocol documents change 
 
 ##### D.4.0 Step 1 — Production wiring seam confirmation (**v1 locked**)
 
-**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-07) — planning artifact complete; **no Step 1 code until explicit implementation approval** per AGENTS.md.
+**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-07) — ✅ **Step 1 complete** (2026-07-07) — paused before Step 2 (E2-D4-01).
 
 **Planning artifact only:** Step 1 planning produces **no source modifications**. Repository working tree must remain unchanged until implementation approval. (D4 tests the governance process as well as the architecture.)
 
@@ -1369,7 +1369,8 @@ Done    E2 Phase C — integration tier (C1–C5) ✅ 2026-07-05
 Done    E2 Phase D1 — event channel fan-out ✅ 2026-07-05
 Done    E2 Phase D2 — replay subscriber + D2-03/FLAKE-UT-02 ✅ 2026-07-07
 Done    E2 Phase D3 — observability proof suite (Steps 1–6, `THOTH_E2_D3=1`) ✅ 2026-07-07
-Next 1  **E2 Phase D4 Step 1** — production wiring seam confirmation (§ **D.4.0 Step 1** locked; await explicit implementation approval)
+Done    E2 Phase D4 Step 1 — production wiring seam confirmation (`THOTH_E2_D4_STEP1=1`) ✅ 2026-07-07
+Next 1  **E2 Phase D4 Step 2** — E2-D4-01 live INTEGRATION envelope (§ D.4.0; await explicit implementation authorization)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
