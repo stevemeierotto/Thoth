@@ -9365,6 +9365,97 @@ static bool testE2C5PathEquivalenceGoldenFixtures() {
     return testE2C5SemanticEquivalence();
 }
 
+static bool runE2C5RegressionGate() {
+    if (!testE2C5MappingFidelity()) {
+        std::cerr << "runE2C5RegressionGate: mapping fidelity failed\n";
+        return false;
+    }
+    if (!testE2C5SemanticEquivalence()) {
+        std::cerr << "runE2C5RegressionGate: semantic equivalence failed\n";
+        return false;
+    }
+    if (!testE2C5FingerprintStability()) {
+        std::cerr << "runE2C5RegressionGate: fingerprint stability failed\n";
+        return false;
+    }
+    if (!testE2C5CrossPathArtifactConsistency()) {
+        std::cerr << "runE2C5RegressionGate: cross-path artifact consistency failed\n";
+        return false;
+    }
+    if (!testE2C5NoHiddenCoupling()) {
+        std::cerr << "runE2C5RegressionGate: hidden coupling audit failed\n";
+        return false;
+    }
+    if (!testE2C5PathEquivalenceGoldenFixtures()) {
+        std::cerr << "runE2C5RegressionGate: golden fixture equivalence failed\n";
+        return false;
+    }
+    return true;
+}
+
+// --- E2-D4 Step 4: backward-compat regressions (orchestration only) ---
+
+static bool verifyD4Step4DefaultFlagContract() {
+    Config cfg;
+    if (cfg.enable_episodic_evaluation_publication) {
+        std::cerr << "verifyD4Step4DefaultFlagContract: eval publication must default OFF\n";
+        return false;
+    }
+    if (cfg.enable_episodic_pipeline_telemetry) {
+        std::cerr << "verifyD4Step4DefaultFlagContract: pipeline telemetry must default OFF\n";
+        return false;
+    }
+    if (cfg.enable_episode_replay_subscriber) {
+        std::cerr << "verifyD4Step4DefaultFlagContract: replay subscriber must default OFF\n";
+        return false;
+    }
+    if (cfg.enable_metrics_subscriber) {
+        std::cerr << "verifyD4Step4DefaultFlagContract: metrics subscriber must default OFF\n";
+        return false;
+    }
+    if (cfg.enable_trace_subscriber) {
+        std::cerr << "verifyD4Step4DefaultFlagContract: trace subscriber must default OFF\n";
+        return false;
+    }
+    return true;
+}
+
+static bool runE2D4Step4Tests() {
+    if (!verifyD4Step4DefaultFlagContract()) {
+        std::cerr << "E2-D4-Step4 default flag contract failed\n";
+        return false;
+    }
+
+    if (!runE2D3Tests()) {
+        std::cerr << "E2-D4-Step4 THOTH_E2_D3 regression failed\n";
+        return false;
+    }
+    if (!runE2D2Tests()) {
+        std::cerr << "E2-D4-Step4 THOTH_E2_D2 regression failed\n";
+        return false;
+    }
+    if (!runE2D1Tests()) {
+        std::cerr << "E2-D4-Step4 THOTH_E2_D1 regression failed\n";
+        return false;
+    }
+    if (!runE2C5RegressionGate()) {
+        std::cerr << "E2-D4-Step4 THOTH_E2_C5 regression failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D4-Step4 backward-compat regression green\n";
+    std::cout << "E2-D4-Step4 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D4_STEP4\n";
+    std::cout << "  THOTH_E2_D3=1 pass\n";
+    std::cout << "  THOTH_E2_D2=1 pass\n";
+    std::cout << "  THOTH_E2_D1=1 pass\n";
+    std::cout << "  THOTH_E2_C5=1 pass\n";
+    std::cout << "  default flag contract verified (no D4 workspace harness with eval ON)\n";
+    std::cout << "  conclusion: no backward-compat regression detected\n";
+    std::cout << "  deferred: Step 5 umbrella THOTH_E2_D4=1\n";
+    return true;
+}
+
 /** Evidence printer — THOTH_E2_C5_MATRIX=1 only. */
 static void printE2C5EquivalenceMatrix() {
     Thoth::BenchmarkAttribution attr{"e2-c5-matrix", "e2-c5-matrix-env"};
@@ -9535,6 +9626,16 @@ int main() {
         }
     }
 
+    if (const char* d4_step4 = std::getenv("THOTH_E2_D4_STEP4")) {
+        if (d4_step4[0] != '0' && std::string(d4_step4) != "false") {
+            if (!runE2D4Step4Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D4-Step4 gate passed.\n";
+            return 0;
+        }
+    }
+
     if (const char* d4_02 = std::getenv("THOTH_E2_D4_02")) {
         if (d4_02[0] != '0' && std::string(d4_02) != "false") {
             if (!runE2D4_02Tests()) {
@@ -9653,14 +9754,7 @@ int main() {
     }
     if (const char* c5 = std::getenv("THOTH_E2_C5")) {
         if (c5[0] == '1') {
-            int failures = 0;
-            if (!testE2C5MappingFidelity()) failures++;
-            if (!testE2C5SemanticEquivalence()) failures++;
-            if (!testE2C5FingerprintStability()) failures++;
-            if (!testE2C5CrossPathArtifactConsistency()) failures++;
-            if (!testE2C5NoHiddenCoupling()) failures++;
-            if (!testE2C5PathEquivalenceGoldenFixtures()) failures++;
-            return failures == 0 ? 0 : 1;
+            return runE2C5RegressionGate() ? 0 : 1;
         }
     }
     if (const char* cp2 = std::getenv("THOTH_E2_C4_CP2")) {
@@ -9807,12 +9901,7 @@ int main() {
     if (!testE2C4SubscriberTelemetryBlockAudit()) failures++;
     if (!testE2C4NonInterference()) failures++;
     if (!testE2C4PipelineIntegrity()) failures++;
-    if (!testE2C5MappingFidelity()) failures++;
-    if (!testE2C5SemanticEquivalence()) failures++;
-    if (!testE2C5FingerprintStability()) failures++;
-    if (!testE2C5CrossPathArtifactConsistency()) failures++;
-    if (!testE2C5NoHiddenCoupling()) failures++;
-    if (!testE2C5PathEquivalenceGoldenFixtures()) failures++;
+    if (!runE2C5RegressionGate()) failures++;
     if (!testE2CaseById("E2-01")) failures++;
     if (!testE2CaseById("E2-02")) failures++;
     if (!testE2CaseById("E2-03")) failures++;
