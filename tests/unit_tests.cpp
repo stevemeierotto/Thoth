@@ -6288,23 +6288,29 @@ static bool testE2D1ExecutiveFailureIsolation() {
  * Passive Consumer Law §3: structural audit ensures subscribers cannot influence
  * execution ordering (no subscriber-count / consumer-identity branching in Executive).
  */
-static bool testE2D1ExecutiveInvisibilityAudit() {
+static bool e2D1ExecutiveInvisibilityStructuralAudit() {
     const std::string source = readRepoSourceFile("external/basic_agent/src/executive_controller.cpp");
     if (source.empty()) {
-        std::cerr << "testE2D1ExecutiveInvisibilityAudit: cannot read executive source\n";
+        std::cerr << "e2D1ExecutiveInvisibilityStructuralAudit: cannot read executive source\n";
         return false;
     }
-    // Passive Consumer Law §3 traceability: Executive must not branch on subscriber registry.
     const std::vector<std::string> forbidden = {"subscriberCount", "subscriber_count", "subscribers_"};
     for (const auto& sym : forbidden) {
         if (source.find(sym) != std::string::npos) {
-            std::cerr << "testE2D1ExecutiveInvisibilityAudit: found forbidden symbol " << sym
+            std::cerr << "e2D1ExecutiveInvisibilityStructuralAudit: found forbidden symbol " << sym
                       << " (Passive Consumer Law §3)\n";
             return false;
         }
     }
     if (source.find("publish_episode_completed_unlocked") == std::string::npos) {
-        std::cerr << "testE2D1ExecutiveInvisibilityAudit: publication hook missing\n";
+        std::cerr << "e2D1ExecutiveInvisibilityStructuralAudit: publication hook missing\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D1ExecutiveInvisibilityAudit() {
+    if (!e2D1ExecutiveInvisibilityStructuralAudit()) {
         return false;
     }
 
@@ -9486,6 +9492,52 @@ static bool runE2D4Tests() {
     return true;
 }
 
+// --- E2-D5 Step 1: authority preservation meta-proof (E2-D5-03) ---
+
+static bool attestD4CompositionEvidence() {
+    std::cout << "E2-D5 authority: D4 composition evidence attested (reference only)\n";
+    std::cout << "  gate: THOTH_E2_D4=1\n";
+    std::cout << "  close-out: 2026-07-08 commit d4216c8\n";
+    std::cout << "  E2-D4-01: live INTEGRATION containment (consumed by reference)\n";
+    std::cout << "  E2-D4-02: STRICT authority preservation (consumed by reference)\n";
+    std::cout << "  D4-I1..I7: structural + behavioral chain (consumed by reference)\n";
+    std::cout << "  D2 replay authority: consumed via D4 Step 4 backward-compat attestation\n";
+    std::cout << "  cross-layer coupling: deferred to Step 2 THOTH_E2_D5_C5\n";
+    return true;
+}
+
+static bool runE2D5AuthorityMetaProof() {
+    if (!attestD4CompositionEvidence()) {
+        std::cerr << "E2-D5-Step1 D4 composition attestation failed\n";
+        return false;
+    }
+    if (!e2D1ExecutiveInvisibilityStructuralAudit()) {
+        std::cerr << "E2-D5-Step1 D1 Executive structural invisibility failed\n";
+        return false;
+    }
+    if (!runE2D3_03Tests()) {
+        std::cerr << "E2-D5-Step1 D3-03 structural authority boundary failed\n";
+        return false;
+    }
+    if (!testE2D4_02NoIntegrationLeakIntoStrictArtifacts()) {
+        std::cerr << "E2-D5-Step1 D4-02 isolation absence failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D5-Step1 authority preservation meta-proof green\n";
+    std::cout << "E2-D5-Step1 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D5_AUTHORITY\n";
+    std::cout << "  preregistered: E2-D5-03\n";
+    std::cout << "  D4 composition evidence attested (THOTH_E2_D4=1, d4216c8)\n";
+    std::cout << "  e2D1ExecutiveInvisibilityStructuralAudit pass\n";
+    std::cout << "  runE2D3_03Tests pass (includes D3-01 spot-check via authority boundary)\n";
+    std::cout << "  testE2D4_02NoIntegrationLeakIntoStrictArtifacts pass\n";
+    std::cout << "  D2 replay authority: consumed by reference\n";
+    std::cout << "  conclusion: authority boundaries preserved post-evolution\n";
+    std::cout << "  deferred: Step 2 behavioral preservation · Step 3 determinism · Step 4 closure\n";
+    return true;
+}
+
 /** Evidence printer — THOTH_E2_C5_MATRIX=1 only. */
 static void printE2C5EquivalenceMatrix() {
     Thoth::BenchmarkAttribution attr{"e2-c5-matrix", "e2-c5-matrix-env"};
@@ -9653,6 +9705,16 @@ int main() {
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* d5_authority = std::getenv("THOTH_E2_D5_AUTHORITY")) {
+        if (d5_authority[0] != '0' && std::string(d5_authority) != "false") {
+            if (!runE2D5AuthorityMetaProof()) {
+                return 1;
+            }
+            std::cout << "E2-D5-Step1 authority gate passed.\n";
+            return 0;
         }
     }
 

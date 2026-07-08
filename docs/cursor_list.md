@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D5 Step 1 plan locked** § D.5.0; protocol 🔒 v0.1)  
+**Last updated:** 2026-07-08 (E2 **D5 Step 1 complete** — `THOTH_E2_D5_AUTHORITY=1` ✅)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D5 Step 1 locked** (§ D.5.0 Step 1) — authority meta-proof `THOTH_E2_D5_AUTHORITY=1`; await explicit implementation approval. Protocol 🔒 · D4 ✅.
+**Active E2 work:** **D5 Step 1 ✅** — paused before Step 2 (`THOTH_E2_D5_C5=1`). Protocol 🔒 · D4 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1629,7 +1629,7 @@ D5 is **evidence composition, not proof regeneration** ([`D5_PROTOCOL.md`](D5_PR
 
 ##### D.5.0 Step 1 — authority preservation meta-proof (**v1 locked**)
 
-**Status:** 🔒 **LOCKED** (2026-07-08) — paused before implementation (AGENTS.md gate)
+**Status:** 🔒 **v1 locked** (2026-07-08) — ✅ **Step 1 complete** (2026-07-08) — paused before Step 2.
 
 ###### Core invariant (why Step 1 exists)
 
@@ -1708,7 +1708,7 @@ On green gate, Step 1 records:
 
 1. D4 composition evidence attested (reference: `THOTH_E2_D4=1`, `d4216c8`)  
 2. `e2D1ExecutiveInvisibilityStructuralAudit()` pass  
-3. `runE2D3_03Tests()` pass  
+3. `runE2D3_03Tests()` pass (includes D3-01 metrics sink-only spot-check via authority boundary)  
 4. `testE2D4_02NoIntegrationLeakIntoStrictArtifacts()` pass  
 5. **Conclusion:** authority boundaries preserved post-evolution  
 6. **Deferred:** Step 2 behavioral preservation · Step 3 determinism · Step 4 closure  
@@ -2124,7 +2124,8 @@ Done    E2 Phase D4 Step 2 — E2-D4-01 live plugin path (`THOTH_E2_D4_01=1`) �
 Done    E2 Phase D4 Step 3 — E2-D4-02 STRICT authority preservation (`THOTH_E2_D4_02=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D5 Step 1** — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`; § **D.5.0 Step 1** locked)
+Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) ✅ 2026-07-08
+Next 1  **E2 Phase D5 Step 2** — behavioral preservation (`THOTH_E2_D5_C5=1`; § D.5.0 Step 2 outline)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
