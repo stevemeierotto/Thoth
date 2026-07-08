@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D5 Step 3 locked** — `THOTH_E2_D5_DETERMINISM=1` § D.5.0)  
+**Last updated:** 2026-07-08 (E2 **D5 Step 3 complete** — `THOTH_E2_D5_DETERMINISM=1` ✅)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D5 Step 3 locked** (§ D.5.0 Step 3) — determinism meta-proof `THOTH_E2_D5_DETERMINISM=1`; await explicit implementation approval. Steps 1–2 ✅.
+**Active E2 work:** **D5 Step 3 ✅** — determinism meta-proof `THOTH_E2_D5_DETERMINISM=1` green (~65s). **Paused before Step 4** (phase closure; § D.5.0 Step 4 outline).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1803,7 +1803,7 @@ Step 1 proved authority boundaries held. Step 2 proves **behavioral equivalence*
 
 | Work | Detail |
 |------|--------|
-| `attestD5Step1Evidence()` | Print Step 1 + Phase C C5 attestation (reference only) |
+| `attestD5Step1AuthorityEvidence()` | Print Step 1 authority attestation (reference only) — shared with Step 2 |
 | `runE2D5C5Proof()` | Attest → `runE2C5RegressionGate()` → evidence artifact |
 | `main()` early-exit | `THOTH_E2_D5_C5=1` → `runE2D5C5Proof()` — after `THOTH_E2_D5_AUTHORITY`, before D4 gates |
 
@@ -1840,14 +1840,14 @@ On green gate, Step 2 records:
 
 | File | Change |
 |------|--------|
-| `tests/unit_tests.cpp` | `attestD5Step1Evidence()` + `runE2D5C5Proof()` + gate |
+| `tests/unit_tests.cpp` | `attestD5Step1AuthorityEvidence()` + `runE2D5C5Proof()` + gate |
 | `external/basic_agent/*` | **None** |
 
 ---
 
 ##### D.5.0 Step 3 — determinism preservation meta-proof (**v1 locked**)
 
-**Status:** 🔒 **v1 locked** (2026-07-08) — paused before implementation (AGENTS.md gate).
+**Status:** 🔒 **v1 locked** (2026-07-08) — ✅ **Step 3 complete** (2026-07-08) — paused before Step 4.
 
 ###### Core invariant (why Step 3 exists)
 
@@ -1964,7 +1964,7 @@ On green gate, Step 3 records:
 
 | File | Change |
 |------|--------|
-| `tests/unit_tests.cpp` | Flat attest helpers + `runE2D5DeterminismProof()` + gate |
+| `tests/unit_tests.cpp` | `attestD5Step1AuthorityEvidence()` + `attestD5Step2BehavioralEvidence()` + `attestPhaseBE2_28Evidence()` + `runE2D5DeterminismProof()` + gate |
 | `external/basic_agent/*` | **None** |
 
 ---
@@ -2016,7 +2016,7 @@ On green gate, Step 3 records:
 | `docs/D_PHASE_PROTOCOL.md` | D5 complete pointer |
 | `external/basic_agent/*` | **None** |
 
-**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 locked** — Step 4 outline — paused before Step 3 implementation.
+**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 ✅** — Step 4 outline — paused before Step 4 (closure).
 
 ### Separation debt (acknowledged)
 
@@ -2338,7 +2338,8 @@ Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1
 Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D5 Step 3** — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`; § **D.5.0 Step 3** locked)
+Done    E2 Phase D5 Step 3 — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`) ✅ 2026-07-08
+Next 1  **E2 Phase D5 Step 4** — phase closure (`THOTH_E2_D5=1`; § **D.5.0 Step 4** outline — lock at Step 3 close)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus

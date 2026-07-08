@@ -9541,19 +9541,20 @@ static bool runE2D5AuthorityMetaProof() {
 
 // --- E2-D5 Step 2: behavioral preservation meta-proof (E2-D5-01) ---
 
-static bool attestD5Step1Evidence() {
-    std::cout << "E2-D5 behavioral: prior evidence attested (reference only)\n";
+static bool attestD5Step1AuthorityEvidence() {
+    std::cout << "E2-D5 authority: Step 1 evidence attested (reference only)\n";
     std::cout << "  D5 Step 1: THOTH_E2_D5_AUTHORITY=1 (commit 0b4df02)\n";
-    std::cout << "  Phase C: THOTH_E2_C5=1 (consumed by reference)\n";
-    std::cout << "  D4 Step 4: C5 backward-compat pass (consumed by reference)\n";
     return true;
 }
 
 static bool runE2D5C5Proof() {
-    if (!attestD5Step1Evidence()) {
+    if (!attestD5Step1AuthorityEvidence()) {
         std::cerr << "E2-D5-Step2 prior evidence attestation failed\n";
         return false;
     }
+    std::cout << "E2-D5 behavioral: prior evidence attested (reference only)\n";
+    std::cout << "  Phase C: THOTH_E2_C5=1 (consumed by reference)\n";
+    std::cout << "  D4 Step 4: C5 backward-compat pass (consumed by reference)\n";
     if (!runE2C5RegressionGate()) {
         std::cerr << "E2-D5-Step2 C5 regression gate failed\n";
         return false;
@@ -9571,6 +9572,55 @@ static bool runE2D5C5Proof() {
     std::cout << "  conclusion: behavioral equivalence preserved post-evolution "
                  "(preservation only — not promotion)\n";
     std::cout << "  deferred: Step 3 determinism · Step 4 closure\n";
+    return true;
+}
+
+// --- E2-D5 Step 3: determinism preservation meta-proof (E2-D5-02) ---
+
+static bool attestD5Step2BehavioralEvidence() {
+    std::cout << "E2-D5 behavioral: Step 2 evidence attested (reference only)\n";
+    std::cout << "  D5 Step 2: THOTH_E2_D5_C5=1 (commit f16664d)\n";
+    return true;
+}
+
+static bool attestPhaseBE2_28Evidence() {
+    std::cout << "E2-D5 determinism: Phase B E2-28 evidence attested (reference only)\n";
+    std::cout << "  Phase B close-out: testE2B5OfficialFingerprintDeterminism() (E2-28)\n";
+    std::cout << "  consumed by reference — not re-running full Phase B suite\n";
+    return true;
+}
+
+static bool runE2D5DeterminismProof() {
+    if (!attestD5Step1AuthorityEvidence()) {
+        std::cerr << "E2-D5-Step3 Step 1 authority attestation failed\n";
+        return false;
+    }
+    if (!attestD5Step2BehavioralEvidence()) {
+        std::cerr << "E2-D5-Step3 Step 2 behavioral attestation failed\n";
+        return false;
+    }
+    if (!attestPhaseBE2_28Evidence()) {
+        std::cerr << "E2-D5-Step3 Phase B E2-28 attestation failed\n";
+        return false;
+    }
+    if (!testE2B5OfficialFingerprintDeterminism()) {
+        std::cerr << "E2-D5-Step3 E2-28 determinism helper failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D5-Step3 determinism preservation meta-proof green\n";
+    std::cout << "E2-D5-Step3 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D5_DETERMINISM\n";
+    std::cout << "  preregistered: E2-D5-02\n";
+    std::cout << "  D5 Step 1 authority attested (THOTH_E2_D5_AUTHORITY=1, 0b4df02)\n";
+    std::cout << "  D5 Step 2 behavioral attested (THOTH_E2_D5_C5=1, f16664d)\n";
+    std::cout << "  Phase B E2-28 attested (consumed by reference)\n";
+    std::cout << "  testE2B5OfficialFingerprintDeterminism pass\n";
+    std::cout << "  scoped-equivalence snapshots: deep-equal across consecutive builds\n";
+    std::cout << "  diagnosis bucket: #0 (equivalent)\n";
+    std::cout << "  conclusion: deterministic trust preserved post-evolution "
+                 "(preservation only — not promotion)\n";
+    std::cout << "  deferred: Step 4 closure\n";
     return true;
 }
 
@@ -9750,6 +9800,16 @@ int main() {
                 return 1;
             }
             std::cout << "E2-D5-Step2 behavioral gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* d5_determinism = std::getenv("THOTH_E2_D5_DETERMINISM")) {
+        if (d5_determinism[0] != '0' && std::string(d5_determinism) != "false") {
+            if (!runE2D5DeterminismProof()) {
+                return 1;
+            }
+            std::cout << "E2-D5-Step3 determinism gate passed.\n";
             return 0;
         }
     }
