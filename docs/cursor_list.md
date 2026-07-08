@@ -1647,7 +1647,9 @@ Step 1 is the **constitutional structural audit** at evolution close-out. It con
 | D3 structural authority boundary (D3-03 bundle) | D3 behavioral suite (`runE2D3Tests()`) |
 | D4-02 isolation absence (single test) | Full D4-02 suite (`runE2D4_02Tests()`) |
 | D1 Executive structural invisibility (grep only) | D1-03 behavioral 0-vs-N audit (proven at D1 close-out) |
-| Passive Consumer Law structural surface | C5 equivalence (Step 2) |
+| Passive Consumer Law structural surface (+ D3-01 spot-check via D3-03 authority boundary) | C5 equivalence (Step 2) |
+| D2 replay authority — **consumed by reference** (D4 Step 4 attestation) | D2 behavioral re-run (`THOTH_E2_D2=1`) |
+| | Cross-layer hidden coupling (`testE2C5NoHiddenCoupling` — Step 2) |
 | | Phase B determinism (Step 3) |
 | | Promotion or INTEGRATION ≡ STRICT claims |
 
@@ -1667,8 +1669,8 @@ Step 1 is the **constitutional structural audit** at evolution close-out. It con
 | Helper | Role |
 |--------|------|
 | `e2D1ExecutiveInvisibilityStructuralAudit()` | Extract Executive grep from `testE2D1ExecutiveInvisibilityAudit()` — Passive Consumer Law §3 symbols only; **no** 0-vs-N behavioral run |
-| `runE2D3_03Tests()` | D3-03 structural authority boundary (7 existing tests) |
-| `testE2D4_02NoIntegrationLeakIntoStrictArtifacts()` | D4-02 isolation absence — single test, not full D4-02 orchestrator |
+| `runE2D3_03Tests()` | D3-03 structural authority boundary (7 tests). **Includes** `testE2D3_01MetricsSinkOnly()` via `testE2D3_03AuthorityBoundary()` — lightweight spot-check by design, not full D3 suite |
+| `testE2D4_02NoIntegrationLeakIntoStrictArtifacts()` | D4-02 isolation absence — single harness test (dominates wall time), not full D4-02 orchestrator |
 
 **Refactor note:** Extract `e2D1ExecutiveInvisibilityStructuralAudit()` as shared static helper; `testE2D1ExecutiveInvisibilityAudit()` calls it then runs behavioral portion. **No new preregistered test ID** — extraction only.
 
@@ -1697,7 +1699,7 @@ Step 1 is the **constitutional structural audit** at evolution close-out. It con
 - Harness-only — extract helper + orchestrator; no new proof logic  
 - **No production changes** expected  
 - Verification: `cmake --build --preset build-debug` + `THOTH_E2_D5_AUTHORITY=1` only  
-- Estimated wall time: **~seconds** (structural grep + D3-03 + single D4-02 isolation test)  
+- Estimated wall time: **~1–3 min** (D4-02 isolation harness dominates; D3-03 includes D3-01 spot-check; Executive grep is fast)  
 - On failure: stop per AGENTS.md Build/Test Failure Rule  
 
 ###### Step 1 evidence artifact
