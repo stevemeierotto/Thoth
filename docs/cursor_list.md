@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D5 Step 1 complete** — `THOTH_E2_D5_AUTHORITY=1` ✅)  
+**Last updated:** 2026-07-08 (E2 **D5 Step 2 complete** — `THOTH_E2_D5_C5=1` ✅)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D5 Step 2 locked** (§ D.5.0 Step 2) — behavioral preservation `THOTH_E2_D5_C5=1`; await explicit implementation approval. Step 1 ✅.
+**Active E2 work:** **D5 Step 2 ✅** — behavioral preservation `THOTH_E2_D5_C5=1` green (~2.5 min). **Paused before Step 3** (determinism meta-proof; § D.5.0 Step 3 outline).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1649,7 +1649,7 @@ Step 1 is the **constitutional structural audit** at evolution close-out. It con
 | D1 Executive structural invisibility (grep only) | D1-03 behavioral 0-vs-N audit (proven at D1 close-out) |
 | Passive Consumer Law structural surface (+ D3-01 spot-check via D3-03 authority boundary) | C5 equivalence (Step 2) |
 | D2 replay authority — **consumed by reference** (D4 Step 4 attestation) | D2 behavioral re-run (`THOTH_E2_D2=1`) |
-| | Cross-layer hidden coupling (`testE2C5NoHiddenCoupling` — Step 2) |
+| | Cross-layer **service import** coupling (`testE2C5NoHiddenCoupling` in Step 2 — C5 layer audit, not Step 1 authority duplicate) |
 | | Phase B determinism (Step 3) |
 | | Promotion or INTEGRATION ≡ STRICT claims |
 
@@ -1897,7 +1897,7 @@ On green gate, Step 2 records:
 | `docs/D_PHASE_PROTOCOL.md` | D5 complete pointer |
 | `external/basic_agent/*` | **None** |
 
-**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 locked** — Steps 2–4 outline — paused before Step 1 implementation.
+**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — Steps 3–4 outline — paused before Step 3 (determinism).
 
 ### Separation debt (acknowledged)
 
@@ -2218,7 +2218,8 @@ Done    E2 Phase D4 Step 3 — E2-D4-02 STRICT authority preservation (`THOTH_E2
 Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D5 Step 2** — behavioral preservation (`THOTH_E2_D5_C5=1`; § D.5.0 Step 2 outline)
+Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
+Next 1  **E2 Phase D5 Step 3** — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`; § **D.5.0 Step 3** outline — lock at Step 2 close)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus

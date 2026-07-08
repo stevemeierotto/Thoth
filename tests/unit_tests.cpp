@@ -9502,7 +9502,8 @@ static bool attestD4CompositionEvidence() {
     std::cout << "  E2-D4-02: STRICT authority preservation (consumed by reference)\n";
     std::cout << "  D4-I1..I7: structural + behavioral chain (consumed by reference)\n";
     std::cout << "  D2 replay authority: consumed via D4 Step 4 backward-compat attestation\n";
-    std::cout << "  cross-layer coupling: deferred to Step 2 THOTH_E2_D5_C5\n";
+    std::cout << "  cross-layer service import coupling: deferred to Step 2 THOTH_E2_D5_C5 "
+                 "(testE2C5NoHiddenCoupling — C5 layer audit)\n";
     return true;
 }
 
@@ -9535,6 +9536,41 @@ static bool runE2D5AuthorityMetaProof() {
     std::cout << "  D2 replay authority: consumed by reference\n";
     std::cout << "  conclusion: authority boundaries preserved post-evolution\n";
     std::cout << "  deferred: Step 2 behavioral preservation · Step 3 determinism · Step 4 closure\n";
+    return true;
+}
+
+// --- E2-D5 Step 2: behavioral preservation meta-proof (E2-D5-01) ---
+
+static bool attestD5Step1Evidence() {
+    std::cout << "E2-D5 behavioral: prior evidence attested (reference only)\n";
+    std::cout << "  D5 Step 1: THOTH_E2_D5_AUTHORITY=1 (commit 0b4df02)\n";
+    std::cout << "  Phase C: THOTH_E2_C5=1 (consumed by reference)\n";
+    std::cout << "  D4 Step 4: C5 backward-compat pass (consumed by reference)\n";
+    return true;
+}
+
+static bool runE2D5C5Proof() {
+    if (!attestD5Step1Evidence()) {
+        std::cerr << "E2-D5-Step2 prior evidence attestation failed\n";
+        return false;
+    }
+    if (!runE2C5RegressionGate()) {
+        std::cerr << "E2-D5-Step2 C5 regression gate failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D5-Step2 behavioral preservation meta-proof green\n";
+    std::cout << "E2-D5-Step2 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D5_C5\n";
+    std::cout << "  preregistered: E2-D5-01\n";
+    std::cout << "  D5 Step 1 attested (THOTH_E2_D5_AUTHORITY=1, 0b4df02)\n";
+    std::cout << "  runE2C5RegressionGate pass\n";
+    std::cout << "  testE2C5SemanticEquivalence: mapping-safe fixtures MATCH\n";
+    std::cout << "  testE2C5NoHiddenCoupling: C5 service-layer import coupling "
+                 "(not Step 1 authority duplicate)\n";
+    std::cout << "  conclusion: behavioral equivalence preserved post-evolution "
+                 "(preservation only — not promotion)\n";
+    std::cout << "  deferred: Step 3 determinism · Step 4 closure\n";
     return true;
 }
 
@@ -9705,6 +9741,16 @@ int main() {
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* d5_c5 = std::getenv("THOTH_E2_D5_C5")) {
+        if (d5_c5[0] != '0' && std::string(d5_c5) != "false") {
+            if (!runE2D5C5Proof()) {
+                return 1;
+            }
+            std::cout << "E2-D5-Step2 behavioral gate passed.\n";
+            return 0;
         }
     }
 
