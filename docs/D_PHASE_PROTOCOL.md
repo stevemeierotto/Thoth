@@ -354,7 +354,7 @@ Trace subscribers follow the same interpret boundary for timeline labels.
 
 **D3 Step 6 (umbrella proof-suite gate):** `THOTH_E2_D3=1` executes the complete D3 proof suite (Steps 1–5), then backward-compat gates (`THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`) and G2 `ctest` confirm D3 close-out. Each step establishes a different architectural invariant; the umbrella gate proves they hold together.
 
-**D4 (live INTEGRATION connection):** Full protocol § **D4** below; detailed step plan in `cursor_list.md` § **D.4.0**. Steps 1–3 complete (`THOTH_E2_D4_STEP1=1`, `THOTH_E2_D4_01=1`, `THOTH_E2_D4_02=1`); Steps 4–5 paused pending authorization.
+**D4 (live INTEGRATION connection):** Full protocol § **D4** below; detailed step plan in `cursor_list.md` § **D.4.0**. Steps 1–3 complete; **Step 4 locked**; Step 5 paused pending authorization.
 
 #### Storage (subscriber-owned)
 
@@ -559,8 +559,8 @@ D4 is organized as a **proof suite**. Each step establishes a distinct invariant
 | **1** | Production wiring seam structurally correct — “Is INTEGRATION already wired the way D4 assumes?” | `THOTH_E2_D4_STEP1=1` |
 | **2** | **E2-D4-01** — Live plugin path: E2-06 presence + containment contract + `integrationDefaults()` behavioral negative proof | `THOTH_E2_D4_01=1` |
 | **3** | **E2-D4-02** — STRICT authority preservation audit — benchmark authority unchanged | `THOTH_E2_D4_02=1` |
-| **4** | Backward-compat regressions (D3, D2, D1, C5) with applicable flags default OFF | Targeted gates |
-| **5** | Umbrella — full D4 proof suite | `THOTH_E2_D4=1` |
+| **4** | Backward-compat regressions — D3, D2, D1, C5 with flags default OFF | `THOTH_E2_D4_STEP4=1` |
+| **5** | Umbrella — full D4 proof suite (Steps 1–4) | `THOTH_E2_D4=1` |
 
 **Step 1 vs Step 2 boundary (locked)**
 
@@ -588,9 +588,9 @@ D4 is organized as a **proof suite**. Each step establishes a distinct invariant
 
 #### Required verification gates
 
-**Per-step (targeted only):** `THOTH_E2_D4_STEP1=1`, `THOTH_E2_D4_01=1`, `THOTH_E2_D4_02=1`, `THOTH_E2_D4=1`.
+**Per-step (targeted only):** `THOTH_E2_D4_STEP1=1`, `THOTH_E2_D4_01=1`, `THOTH_E2_D4_02=1`, `THOTH_E2_D4_STEP4=1`, `THOTH_E2_D4=1`.
 
-**Regression (Steps 4–5):** `THOTH_E2_D3=1`, `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`.
+**Regression (Step 4):** `THOTH_E2_D3=1`, `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1` — orchestrated by `runE2D4Step4Tests()`; flags default OFF; Step 3 not re-run (authority already proven at Step 3 checkpoint); no new test IDs. See `cursor_list.md` § D.4.0 Step 4.
 
 **Deferred to D5:** default full unit-test suite; G2 `ctest`; Phase B fingerprint two-run gate; C5 matrix re-pass.
 
@@ -741,4 +741,4 @@ Pause for review after each D4 step and after D4 umbrella gate. Build/test failu
 **Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4 Step 1:** ✅ `THOTH_E2_D4_STEP1=1`; **D4 Step 2:** ✅ `THOTH_E2_D4_01=1`; **D4 Step 3:** ✅ `THOTH_E2_D4_02=1`  
 **Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 containment + live-path definition + protocol lock; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — D4 Step 2 ✅ — **D4 Step 3 ✅** — paused before Step 4.
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Steps 1–3 ✅ — **D4 Step 4 locked** — paused before Step 4 implementation.
