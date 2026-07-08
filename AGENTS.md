@@ -9,6 +9,91 @@ This document describes the architecture, conventions, and critical rules for th
 
 ---
 
+## Planning / Implementation Gate (Mandatory)
+
+This repository follows a strict human approval workflow. This gate applies to
+**all** work in this repo — features, checkpoints (E2 Phase A–E, C, D, ...),
+refactors, bug fixes, protocol steps, and documentation changes that affect
+protocol files (`E2_PROTOCOL.md`, `C_PHASE_PROTOCOL.md`, `D_PHASE_PROTOCOL.md`, etc.).
+
+### Phase 1 — Planning Mode
+
+When asked to implement a feature, checkpoint, refactor, bug fix, or protocol step:
+
+- Analyze the request.
+- Inspect the repository as needed.
+- Produce a complete implementation plan.
+- Identify assumptions, risks, edge cases, and affected files.
+- Suggest improvements if appropriate.
+- **STOP.**
+
+Do not modify any source files. Do not generate patches. Do not run write
+operations. Do not begin implementation.
+
+End your response with: STATUS: WAITING FOR IMPLEMENTATION APPROVAL
+
+Wait until the human explicitly responds with one of the following (or equivalent):
+
+- "Implement"
+- "Proceed with implementation"
+- "Go ahead"
+- "Approved"
+
+No other wording should be interpreted as implementation approval.
+
+### Phase 2 — Implementation Mode
+
+Only after explicit approval:
+
+- Implement exactly the approved plan.
+- If new architectural issues are discovered mid-implementation, **pause and
+  explain them** instead of silently changing the design.
+- Do not expand scope beyond the approved plan without approval.
+- Keep changes consistent with repository protocols and existing architecture.
+
+### Protocol Lock Rule
+
+Once a protocol (Phase B, Phase C, Phase D, an E2 checkpoint, etc.) has been
+**approved and locked**, do not silently revise the protocol during
+implementation. If implementation reveals that the protocol itself should
+change, stop and request approval before modifying either the protocol
+documents (e.g. `E2_PROTOCOL.md`, `C_PHASE_PROTOCOL.md`) or the code that
+depends on it. This preserves the same discipline used throughout the E2
+checkpoint history: **Plan → Review → Refine → Lock → Implement → Verify.**
+A locked protocol is not a draft — treat protocol-document edits post-lock as
+implementation work requiring the same approval gate as code.
+
+### Build / Test Failure Rule
+
+If a build, test suite, benchmark, regression, or validation step fails:
+
+1. Stop immediately.
+2. Do not begin fixing the failure automatically.
+3. Diagnose the failure.
+4. Explain:
+   - probable root cause,
+   - files likely involved,
+   - proposed repair,
+   - expected risks.
+5. **STOP.**
+
+End with: STATUS: BUILD FAILURE — WAITING FOR REPAIR APPROVAL
+
+Do not modify code until explicit approval is given.
+
+### Scope Control
+
+Never treat "analyze", "review", "refine", "critique", "investigate", or
+"explain" as permission to edit code. Planning and implementation are separate
+phases. If there is any ambiguity about whether implementation is authorized,
+**assume it is not.**
+
+### Repository Principle
+
+Human approval is the implementation gate. Planning is free. Implementation
+always requires explicit authorization.
+
+---
 ## Project Overview
 
 **Thoth** is a C++ GUI application that provides an interface to an AI agent powered by a hybrid memory system and **GRAG (Goal-Relative Adaptive Graph Retrieval)** pipeline. The system implements a full cognitive architecture with dynamic planning, execution control, experience-guided reasoning, and self-correction capabilities.
@@ -430,6 +515,12 @@ Abstracts the model backend. Currently supports Ollama local models.
 
 ## Critical Rules — What AI Agents Should NOT Do
 
+### 🚫 DO NOT skip the Planning / Implementation Gate
+
+See **"Planning / Implementation Gate (Mandatory)"** above. Every change —
+including checkpoint work on E2 Phase A–E, C, D, etc — requires an approved plan
+and explicit go-ahead before any file is touched.
+
 ### 🚫 DO NOT modify `agent_workspace/` files directly
 
 The memory system manages these files. Manual edits will corrupt the agent's state.
@@ -464,6 +555,8 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 ---
 
 ## Development Workflow
+
+"This workflow assumes the Planning/Implementation Gate above has already been satisfied for the change in question."
 
 ### Before Making Changes
 
@@ -500,7 +593,8 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 2. Run unit tests: `./tests/unit_tests` (or via CTest)
 3. Test the GUI application to verify integration
 4. Update `docs/completed_improvements_log.md` if completing a planned improvement
-5. Preserve MIT license headers in all modified files
+5. If the completed work corresponds to a phase/step in `docs/improvements.md`, update that entry's status marker (✅ / 🔶 / 📋) and add a one-line pointer to the `completed_improvements_log.md` entry or date — e.g. "✅ 2026-07-05 — see `completed_improvements_log.md`". Do not delete the original spec text; the status marker + pointer is enough. `improvements.md` should always reflect current reality, not just plans.
+6. Preserve MIT license headers in all modified files
 
 ---
 

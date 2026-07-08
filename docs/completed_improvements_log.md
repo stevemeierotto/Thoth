@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-05 (E2 Phase C — integration tier complete; Phase D D0 locked)
+Last updated: 2026-07-07 (E2 Phase D3 complete — observability proof suite)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### E2 track — status at a glance
@@ -10,7 +10,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | **A** | Can execution be trusted? | ✅ Complete 2026-07-02 | A1–A5 checkpoints; E2-08–E2-11 |
 | **B** | Can measurement be trusted? | ✅ Complete 2026-07-04 | [`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md); fingerprint `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
 | **C** | Can trusted measurement become architecture? | ✅ Locked 2026-07-05 | [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) |
-| **D** | Can architecture evolve without losing trust? | 🔒 D0 locked | [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) v1.0 — paused before D1 |
+| **D** | Can architecture evolve without losing trust? | 🔶 D1–D3 ✅ | D3 proof suite complete 2026-07-07; D4 next — [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) |
 | **E** | Can we defend the results scientifically? | 📋 Planned | — |
 
 ### E2 Phase C — Integration tier ✅ locked (2026-07-05)
@@ -44,7 +44,29 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 **Review note:** E2-C5-03 aliases E2-C5-01; proof coverage unchanged via `diffPathEquivalence()`.
 
-**Next:** Phase D D0 locked — [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md). Constitutional rule: Observe, Record, Replay, Present — Never Decide.
+**Next:** Phase D4 — [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md). Constitutional rule: Observe, Record, Replay, Present — Never Decide.
+
+### E2 Phase D3 — Observability without influence ✅ complete (2026-07-07)
+
+**Authority:** [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) § D3, [`cursor_list.md`](cursor_list.md) § D.3.0  
+**Proof obligation:** Operational observability (metrics + trace) without reverse dependency or decision influence on the cognitive pipeline.
+
+| Step | Invariant | Gate |
+|------|-----------|------|
+| 1 | Subscriber skeleton + coexistence | `THOTH_E2_D3_STEP1=1` |
+| 2 | Metrics sink-only (E2-D3-01) | `THOTH_E2_D3_01=1` |
+| 3 | Failure isolation (E2-D3-02) | `THOTH_E2_D3_02=1` |
+| 4 | Structural audit (E2-D3-03) | `THOTH_E2_D3_03=1` |
+| 5 | Plugin/config integration proof | `THOTH_E2_D3_05=1` |
+| 6 | Umbrella proof-suite regression | `THOTH_E2_D3=1` |
+
+**Umbrella gate:** `THOTH_E2_D3=1` executes the complete D3 proof suite (Steps 1–5). Each step establishes a different architectural invariant.
+
+**Step 6 close-out (2026-07-07):** `THOTH_E2_D3=1`, `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1` green; full unit suite green (~15 min); G2 `ctest -R thoth-unit-tests` **993.5s** (within 1800s budget).
+
+**Key files:** `metrics_subscriber.*`, `trace_subscriber.*`, `basic_agent_plugin.cpp`, `config.h` / `config.cpp`, `tests/unit_tests.cpp`
+
+**Next:** D4 — paused for explicit authorization.
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
 

@@ -66,7 +66,7 @@ Before making any changes:
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
 | **E1** | Benchmark environment pinning | ✅ | Checkpoints A–E complete 2026-07-01 — spec `docs/benchmark_environment.md`; sidecar + JSONL + harness attribution; Step 7 double-bind mismatch; `compare_benchmark_env.py`; `check_baseline.py --require-env` (opt-in) |
-| **E2** | Episodic memory learning eval | 🔶 | Protocol v1.2 + eval kernel ✅; harness wiring pending — **`cursor_list.md` § E2** + **`docs/E2_PROTOCOL.md`** |
+| **E2** | Episodic memory learning eval | 🔶 | Protocol v1.2 + eval kernel ✅; **D1–D3 ✅ 2026-07-07** (see `completed_improvements_log.md`) — D4 next; **`cursor_list.md` § E2** + **`docs/E2_PROTOCOL.md`** |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI |
 
 **E1 close-out:** All harnesses (D1–D5) emit `run_id` + `env_hash` + `index_hash`; cognitive metrics attribution on D1–D3; retrieval-only harnesses D4–D5 emit 0 metrics rows. Unblocks **B1** and **V3** under pinned environment.

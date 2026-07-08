@@ -186,10 +186,11 @@ This is stronger than “Executive unchanged” — it is a provable isolation p
 #### Exit criteria
 
 1. Multi-subscriber delivery proven; failures isolated (logged only)
-2. Executive work identical with 0 vs N subscribers (structural + behavioral audit)
-3. C5 path equivalence unchanged on golden fixtures
-4. E2-D1-01–E2-D1-03 green
-5. **Pause before D2**
+2. Throwing subscriber does not alter Executive goal completion or terminal state (E2-D1-02 — **mandatory Executive-path run**, not channel-only)
+3. Executive terminal outcome identical with 0 vs N subscribers — not merely identical emitted payload (E2-D1-03)
+4. C5 path equivalence unchanged on golden fixtures
+5. E2-D1-01–E2-D1-03 green
+6. **Pause before D2**
 
 ---
 
@@ -199,24 +200,67 @@ This is stronger than “Executive unchanged” — it is a provable isolation p
 
 **Scope**
 
-- `ReplaySubscriber` — read-only consumer; **replay changes time** (re-observation of sealed or published episodes)
+- `ReplaySubscriber` — read-only consumer; **replay changes time** (re-observation of captured `EpisodeCompleted` snapshots)
 - Replay produces diagnostic or observational artifacts only; no `official_scoring: true`
 - Replay state is subscriber-owned; `EvaluationService` remains stateless
+- **Live capture** is mandatory; **JSONL persistence** is optional and purely observational
 
 **Why separate from D3:** Replay and metrics are different architectural proofs. Replay changes **time**; metrics change **observation**.
 
+#### Replay path (not channel republication)
+
+Replay **never** republishes `EpisodeCompleted` into `IEpisodeEventChannel`. Replay is internal to `ReplaySubscriber`:
+
+```
+Executive
+    │ publish EpisodeCompleted (live, fire-and-forget)
+    ▼
+Event Channel
+    ├── EvaluationSubscriber
+    └── ReplaySubscriber
+            │ live: append immutable copy (append-only FIFO)
+            │ replay: ReplaySink / replay callback only
+            ▼
+        (never publish() back into Event Channel)
+```
+
+Do **not** describe replay as “re-emitting” into the channel — that invites replay recursion.
+
 #### Forbidden
 
+- **`ReplaySubscriber` must never call `publish()` on `IEpisodeEventChannel`**
 - Replay mutating `EpisodeCompleted` or publisher state
 - Replay as a prerequisite for benchmark or goal success
-- Replay path emitting STRICT authority fields
+- Replay path emitting STRICT authority fields (`official_scoring: true`, `e2_outcome`, `evaluation_resolution`)
+- Replay calling `EvaluationService` for scoring
+- Shared/static replay state visible to Executive or eval kernel
+- Blocking channel delivery on replay buffer flush failure
+- `replayAll()` or keyed-by-`plan_id` indexing in D2 (defer to later)
 
 #### Exit criteria
 
-1. Replay idempotent on sealed input; Passive Consumer Law satisfied
-2. Phase B fingerprint unchanged on consecutive `wiring_stage=B` runs
-3. E2-D2-01–E2-D2-02 green
-4. **Pause before D3**
+1. Replay idempotent on captured input; Passive Consumer Law satisfied
+2. **Replay idempotence invariant:** replaying an episode **must not increase** `ReplaySubscriber`'s stored episode count
+3. Phase B fingerprint unchanged on consecutive `wiring_stage=B` runs
+4. E2-D2-01–E2-D2-02 green (coexistence with `EvaluationSubscriber` asserted inside E2-D2-01 — no E2-D2-03 replay checkpoint)
+5. Production wiring registered behind `enable_episode_replay_subscriber=false` (default OFF)
+6. **D2-03 / FLAKE-UT-02 resolved** — reliability close-out complete (see below); separate from replay architectural proof
+7. **Pause before D3**
+
+#### D2-03 — FLAKE-UT-02 reliability close-out (complete — 2026-07-07)
+
+**Not** an E2-D2 replay test checkpoint. Separate reliability investigation triggered by intermittent `nlohmann::json` string invariant assert during G2 (`ctest` @ ~386s). GRAG benchmark stdout was a **crash marker** only.
+
+| Item | Record |
+|------|--------|
+| **Root cause** | `SQLiteMemoryRepository::consolidateSessionBatch()` — `SQLITE_STATIC` bound to temporary `metadata.dump().c_str()`; heap-use-after-free confirmed by ASan in `testMemoryPruning` (~37s) |
+| **Classification** | Delayed heap corruption (object lifetime); **not** `nlohmann::json` ownership; GRAG path ruled out |
+| **Fix** | Named `metadataJson` string preserving buffer through `sqlite3_step()`; no behavioral or persistence semantic change |
+| **Commits** | `basic_agent` **`27192fd`**; Thoth **`2993fb3`** |
+| **Verification** | ASan full suite clean; G2 ×3 consecutive pass (excluding resource-contention timeout); `THOTH_FLAKE_UT02_STRESS=100` green |
+| **Instrumentation** | Removed from production `main`; retained on `wip/flake-ut02-instrumentation` branches only |
+
+Full execution record: `docs/cursor_list.md` § **D.2.1**.
 
 ---
 
@@ -224,46 +268,136 @@ This is stronger than “Executive unchanged” — it is a provable isolation p
 
 **Question:** Can architecture-level metrics and traces be collected without becoming decision inputs?
 
+**Proof obligation:** D3 proves that operational observability (metrics and trace) can be added to the architecture **without introducing any reverse dependency or decision influence** on the cognitive pipeline.
+
 **Scope**
 
-- `MetricsSubscriber` — aggregates pipeline counters/latencies from telemetry/diagnostic envelopes
-- `TraceSubscriber` — correlates `run_id` / `plan_id` across decision_trace + E2 streams
+- `MetricsSubscriber` — counters, durations, queue depths, rates, histograms (subscriber-owned aggregates)
+- `TraceSubscriber` — correlation, chronology, causal links, run timeline (no statistics/scoring)
 - Same philosophy as C4: **measure, don't interpret**
+- **Implementation plan:** `docs/cursor_list.md` § **D.3.0** (v1 locked)
+
+#### Subscriber ownership (no overlap)
+
+| Subscriber | Owns | Does NOT own |
+|------------|------|--------------|
+| `MetricsSubscriber` | Counters, durations, queue depths, rates, histograms | Event ordering, evaluation semantics, timelines |
+| `TraceSubscriber` | Correlation, chronology, causal links, run timeline | Statistics, scoring, aggregation |
+
+#### Event contract (immutable fan-out)
+
+`EpisodeCompleted` delivers to Evaluation, Replay, Metrics, and Trace subscribers.
+
+**Ordering invariant:** Subscriber ordering is **not architecturally significant** — any subscriber may run before or after another without changing system behavior; ordering affects log timestamps only.
+
+**Immutable payload:** Subscribers receive a **`const` event view**. No subscriber may modify `EpisodeCompleted` or any shared payload visible to sibling subscribers. Immutability is **contractual**.
+
+New channel event types are **out of scope** for D3.
+
+#### Failure isolation (E2-D3-02)
+
+Per subscriber: `try { deliver } catch { log; continue }`.
+
+| Invariant | Requirement |
+|-----------|-------------|
+| Siblings | One failure must not suppress another subscriber |
+| Executive | One failure must not suppress the Executive |
+| Publication | `publish()` completes; fan-out failures do not roll back publication |
+| Delivery | Each non-throwing subscriber receives **exactly one** delivery per publish — no duplicates, no skips |
+
+**Terminal outcome equality (locked):** Compare Executive state, plan status, goal/plan success-failure, and outcome-carrying fields only. **Exclude** metrics emitted, trace records, structured log contents, and subscriber-local state.
+
+**Ordering (mandatory in E2-D3-02):** At least two registration permutations must yield identical delivery and terminal outcome.
+
+Structured logs are evidence of isolation, not the property under test.
+
+#### Trace records (D3 v1)
+
+- **Mandatory:** `EpisodeCompleted` via channel  
+- **Read-only correlation:** `decision_trace.jsonl`, E2/telemetry JSONL by ID join  
+- **Optional:** `replay_observed` via replay sink seam — not channel republication  
+- **Not in D3:** `EpisodeStarted`, `ReplayStarted`, live DecisionTrace subscription  
+
+Required IDs: `run_id`, `goal_id`, `plan_id`, `episode_id`; optional `replay_id`, `parent_run_id`.
+
+#### Metrics timestamp sources (locked)
+
+- **Episode-scoped:** from `EpisodeCompleted` only  
+- **Pipeline-scoped:** from C4 telemetry envelopes only — no eval/diag semantics  
 
 #### D3 measurement boundary
 
-Metrics and trace subscribers **may consume:**
+`MetricsSubscriber` may record **raw** values from allowed inputs but shall **never** derive classifications, pass/fail state, lift interpretation, benchmark authority, or planner decisions from those values.
 
-| Allowed inputs |
-|----------------|
-| Timestamps |
-| Durations |
-| Counts |
-| IDs (`run_id`, `plan_id`, `goal_id`) |
-| Pipeline state labels (stage names, queue depth) |
+**Interpretation (forbidden):** pass/fail; success/warning/failure classification; evaluation scoring; benchmark comparison; policy decisions; recommendation generation. Subscribers may **only record facts**.
 
-Metrics and trace subscribers **may never consume for scoring meaning:**
+**Authority boundary:** Metrics and trace outputs are observational artifacts only — never inputs to evaluation or Executive decision-making.
 
-| Forbidden interpretation |
-|--------------------------|
-| Evaluation score meaning |
-| Benchmark authority (`official_scoring`, `e2_outcome`) |
-| Pass/fail logic (`evaluation_resolution`, lift, case expectations) |
+**Opaque score rule:** `final_success_score` may be stored only as `observed_final_success_score` — an uninterpreted float observation. No thresholds, bucketing, or success semantics may be derived from it.
 
-> **They can measure. They cannot interpret.**
+**Exclusive ownership:** `MetricsSubscriber` is the sole owner of metric aggregation semantics; `TraceSubscriber` is the sole owner of chronological tracing semantics — no overlap.
+
+**Frozen aggregation operations (MetricsSubscriber v1):** `counter_increment`, `counter_add`, `gauge_set`, `histogram_observe`, `duration_observe_ms` only. No rolling-window classification, success/failure rates, or composite scores.
+
+Trace subscribers follow the same interpret boundary for timeline labels.
+
+**Publication-mechanism rule:** D3 subscribers own no publication mechanism (no channel handles, no `publish`, no publisher abstractions).
+
+#### Configuration (defaults OFF)
+
+| Flag | Default |
+|------|---------|
+| `enable_metrics_subscriber` | `false` |
+| `enable_trace_subscriber` | `false` |
+
+**D3 Step 5 (plugin/config integration proof):** After Steps 2–4, prove production `BasicAgentPlugin` wiring, config JSON round-trip, independent flags, subscriber identity on the production channel, and default-OFF safety — not subscriber semantics (see `cursor_list.md` § D.3.0 Step 5). Exit criterion: the production integration path is proven to be the only registration path for observability subscribers.
+
+**D3 Step 6 (umbrella proof-suite gate):** `THOTH_E2_D3=1` executes the complete D3 proof suite (Steps 1–5), then backward-compat gates (`THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`) and G2 `ctest` confirm D3 close-out. Each step establishes a different architectural invariant; the umbrella gate proves they hold together.
+
+#### Storage (subscriber-owned)
+
+| Subscriber | Hot | Durable (optional) |
+|------------|-----|-------------------|
+| Metrics | In-memory aggregates by `run_id` | `logs/e2_metrics.jsonl` (`metrics_schema_version: "1.0"`) |
+| Trace | Ring buffer (recent N) | `logs/e2_trace.jsonl` |
+
+**Metrics JSONL v1.0 (frozen):** one object per line; `record_type` ∈ `episode_observation` \| `pipeline_observation`; `observations` holds counter/gauge/histogram samples only; pipeline records carry C4 telemetry fields in `pipeline`. Forbidden on metrics path: `official_scoring`, `e2_outcome`, `evaluation_resolution`, lift, pass/fail authority fields.
+
+#### D3 Step 2 — E2-D3-01 refinements (approved)
+
+Step 2 implements metrics sink-only behavior per `cursor_list.md` § D.3.0 Step 2 plan:
+
+- Opaque `final_success_score` observation only  
+- Frozen aggregation operations (see measurement boundary)  
+- Frozen Metrics JSONL schema v1.0  
+- Structural audit: `MetricsSubscriber` independent of evaluation implementation (no eval service headers, symbols, or calls)  
+- Backward compatibility: `enable_metrics_subscriber=false` → identical runtime behavior and architectural fingerprints; `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1` unchanged
+
+**Implementation discipline:** Build only what E2-D3-01 requires. Defer helpers, abstractions, and optimizations not needed for the Step 2 proof. Do not add future-facing infrastructure because later checkpoints will need it — each step introduces only what its proof requires.
+
+**Verification scope:** Run only checkpoint-targeted env gates (`THOTH_E2_D3_01=1` plus backward-compat `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`). Do not run the full unit-test suite during Step 2 — full regression is Step 6.
+
+#### Non-goals
+
+D3 does not analyze performance, optimize execution, change scheduling, influence planner/Executive, alter evaluation/replay/benchmark semantics, or require subscribers for goal success.
 
 #### Forbidden
 
+- Merging metrics + trace into one subscriber
 - Metrics subscriber calling private eval/scoring helpers
 - Trace correlation feeding back into Executive or planner
-- Blocking upstream layers on metrics flush failure
+- Blocking upstream layers on metrics/trace flush failure
+- Mutating `EpisodeCompleted` or shared payloads visible to siblings
+- Depending on subscriber registration order for correctness
 
 #### Exit criteria
 
-1. Sink-only audits pass (same discipline as E2-C4-03b)
-2. Subscriber failures non-blocking
-3. E2-D3-01–E2-D3-03 green
-4. **Pause before D4**
+1. Proof obligation satisfied; ownership + immutability invariants enforced
+2. Sink-only audits pass (E2-C4-03b discipline)
+3. Subscriber failures non-blocking (E2-D3-02)
+4. E2-D3-01–E2-D3-03 green
+5. Both config flags registered default OFF
+6. **Pause before D4**
 
 ---
 
@@ -366,14 +500,14 @@ Metrics and trace subscribers **may never consume for scoring meaning:**
 
 | ID | Checkpoint | Asserts |
 |----|------------|---------|
-| E2-D1-01 | D1 | Multi-subscriber delivery; all receive identical immutable event |
-| E2-D1-02 | D1 | Subscriber failure isolated — Executive / goal outcome unchanged |
-| E2-D1-03 | D1 | Executive work identical with 0 vs N subscribers (invisibility audit) |
-| E2-D2-01 | D2 | Replay idempotent; Passive Consumer Law satisfied |
-| E2-D2-02 | D2 | Replay removal does not change `wiring_stage=B` results |
-| E2-D3-01 | D3 | Metrics subscriber sink-only — no eval score meaning consumed |
-| E2-D3-02 | D3 | Trace subscriber failure non-blocking |
-| E2-D3-03 | D3 | Structural audit — measure, don't interpret |
+| E2-D1-01 | D1 | Multi-subscriber delivery; all receive identical immutable event (byte-identical cross-subscriber comparison) |
+| E2-D1-02 | D1 | **Mandatory Executive-path:** one goal run to completion with throwing subscriber registered; `PLAN_COMPLETED` / terminal state identical to baseline; healthy subscriber still delivered; Passive Consumer Law §4 |
+| E2-D1-03 | D1 | Invisibility audit: structural (no subscriber-count branching; **Passive Consumer Law §3**) + behavioral: Executive terminal outcome identical at 0 vs N; published outcome fields identical; same-publish immutability via byte-identical subscriber copies |
+| E2-D2-01 | D2 | Replay idempotent on captured input; three-part idempotence (storage size, stored object, replay payload); append-only after replays; coexistence — no observable change in EvaluationSubscriber outputs; structural audit — no `publish`, no channel member; never `IEpisodeEventChannel::publish` |
+| E2-D2-02 | D2 | Replay subscriber registered or removed — `wiring_stage=B` results unchanged (Passive Consumer Law §5); no STRICT authority from replay path |
+| E2-D3-01 | D3 | Metrics sink-only — frozen aggregation ops; opaque `observed_final_success_score`; Metrics JSONL v1.0; eval-independence structural audit; backward compat with `enable_metrics_subscriber=false` |
+| E2-D3-02 | D3 | Failure isolation: exactly-once delivery for non-throwing subscribers; locked terminal outcome comparison (excludes metrics/trace/logs); mandatory ordering permutation; catch/log/continue |
+| E2-D3-03 | D3 | Structural audit — exclusive ownership; interpret + authority boundaries; publication-mechanism invariant; ordering/JSONL structural audits (narrow authority grep only) |
 | E2-D4-01 | D4 | Live INTEGRATION envelope — E2-06 contract |
 | E2-D4-02 | D4 | STRICT path contamination audit — benchmark authority unchanged |
 | E2-D5-01 | D5 | C5 equivalence matrix re-pass |
@@ -407,7 +541,7 @@ Metrics and trace subscribers **may never consume for scoring meaning:**
 
 ## D0 lock record
 
-**Locked:** 2026-07-05  
-**Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary; D4 as INTEGRATION connection; D5 as trust re-proof.
+**Locked:** 2026-07-05 (D0); **D3 plan:** 2026-07-07 (§ `cursor_list.md` D.3.0); **D3 Step 2 plan:** 2026-07-07 (opaque score, frozen ops, JSONL v1.0, eval-independence audit, backward-compat exit)  
+**Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 as INTEGRATION connection; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — **paused before D1.**
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — **D3 Step 1 ✅** — **D3 Step 2 plan approved** — paused before Step 2 implementation.

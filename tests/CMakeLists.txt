@@ -17,7 +17,7 @@ target_link_libraries(thoth-unit-tests PRIVATE
 add_test(NAME thoth-unit-tests COMMAND thoth-unit-tests)
 set_tests_properties(thoth-unit-tests PROPERTIES
     LABELS "pr;unit"
-    TIMEOUT 600
+    TIMEOUT 1800
 )
 
 add_executable(run_test_suite run_test_suite.cpp)

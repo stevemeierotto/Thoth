@@ -1,11 +1,13 @@
 #include <atomic>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -60,6 +62,9 @@
 #include "episode_events.h"
 #include "episode_event_channel.h"
 #include "evaluation_subscriber.h"
+#include "replay_subscriber.h"
+#include "metrics_subscriber.h"
+#include "trace_subscriber.h"
 #include "e2_path_equivalence.h"
 #include "diagnostic_service.h"
 #include "pipeline_telemetry_service.h"
@@ -1796,12 +1801,35 @@ public:
     Plan revise_plan(const Plan& p, const nlohmann::json&) override { return p; }
 };
 
+static const char* controllerStateName(Thoth::ControllerState state) {
+    using S = Thoth::ControllerState;
+    switch (state) {
+        case S::IDLE: return "IDLE";
+        case S::PLANNING: return "PLANNING";
+        case S::EXECUTING_STEP: return "EXECUTING_STEP";
+        case S::OBSERVING_RESULT: return "OBSERVING_RESULT";
+        case S::REVISING_PLAN: return "REVISING_PLAN";
+        case S::SCIENTIFIC_MODE: return "SCIENTIFIC_MODE";
+        case S::COMPLETED: return "COMPLETED";
+        case S::ABORTED: return "ABORTED";
+        case S::FAILED: return "FAILED";
+    }
+    return "UNKNOWN";
+}
+
+static bool isPlanTerminalState(Thoth::ControllerState state) {
+    return state == Thoth::ControllerState::COMPLETED ||
+           state == Thoth::ControllerState::FAILED ||
+           state == Thoth::ControllerState::ABORTED;
+}
+
 static bool testParallelRetrieval() {
     setenv("THOTH_MOCK_LLM", "true", 1);
     Config cfg;
     cfg.database_path = makeTempPath("thoth_parallel_retrieval_test.db").string();
     cfg.enable_retrieval_prefetch = true;
     cfg.max_parallel_retrieval = 4;
+    cfg.max_reflections = 0;
 
     auto memory = std::make_shared<Memory>(cfg);
     auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
@@ -1825,6 +1853,7 @@ static bool testParallelRetrieval() {
 
     Thoth::ExecutiveController controller(planner, registry, rag, memory);
     controller.set_config(&cfg);
+    controller.set_max_reflections(0);
 
     std::atomic<int> active_retrievals{0};
     std::atomic<int> max_concurrent{0};
@@ -1848,21 +1877,38 @@ static bool testParallelRetrieval() {
 
     controller.execute_goal("Parallel retrieval test");
 
-    int timeout = 100;
-    while (!completed.load() && timeout > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        --timeout;
+    constexpr int kStepMs = 50;
+    constexpr int kTimeoutMs = 60000;
+    bool terminal_ok = false;
+    for (int waited = 0; waited < kTimeoutMs; waited += kStepMs) {
+        if (isPlanTerminalState(controller.get_state())) {
+            terminal_ok = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kStepMs));
     }
 
-    const bool ok = completed.load() && max_concurrent.load() >= 2;
-    if (!ok) {
-        std::cerr << "testParallelRetrieval: expected concurrent retrievals (max="
-                  << max_concurrent.load() << ", completed=" << completed.load() << ")\n";
+    const int maxObserved = max_concurrent.load();
+    const bool concurrency_ok = maxObserved >= 2;
+    const bool event_completed = completed.load();
+
+    if (!terminal_ok || !concurrency_ok) {
+        std::cerr << "testParallelRetrieval: terminal=" << (terminal_ok ? "true" : "false")
+                  << " state=" << controllerStateName(controller.get_state())
+                  << " max_concurrent=" << maxObserved
+                  << " completed=" << (event_completed ? "true" : "false");
+        if (!terminal_ok) {
+            std::cerr << " (completion regression)";
+        }
+        if (!concurrency_ok) {
+            std::cerr << " (concurrency regression)";
+        }
+        std::cerr << "\n";
     }
 
     fs::remove(cfg.database_path);
     unsetenv("THOTH_MOCK_LLM");
-    return ok;
+    return terminal_ok && concurrency_ok;
 }
 
 static bool testReflectionLoop() {
@@ -2107,11 +2153,13 @@ static bool testProblemStatePersistence() {
         Thoth::MemoryRepository::ProblemStateRecord rec;
         rec.problem_id = s.problem_id;
         rec.goal_id = s.goal_id;
-        rec.state_json = s.to_json().dump();
         rec.iteration_count = s.iteration_count;
         rec.confidence_score = s.confidence_score;
         rec.created_at = s.created_at;
         rec.updated_at = s.updated_at;
+
+        const nlohmann::json stateJson = s.to_json();
+        rec.state_json = stateJson.dump();
 
         if (!memory.saveProblemState(rec)) {
             std::cerr << "testProblemStatePersistence: save failed\n";
@@ -2128,7 +2176,8 @@ static bool testProblemStatePersistence() {
         return false;
     }
 
-    auto s2 = Thoth::ProblemState::from_json(nlohmann::json::parse(optRec->state_json));
+    const nlohmann::json parsed = nlohmann::json::parse(optRec->state_json);
+    auto s2 = Thoth::ProblemState::from_json(parsed);
     
     const bool ok = s2.problem_id == "prob-123"
         && s2.hypotheses.size() == 2
@@ -3819,12 +3868,22 @@ static Thoth::E2EvalConfig makeE2StrictTestConfig() {
     return cfg;
 }
 
+/** Optional episode-channel wiring for D2-02 harness runs (publication + optional replay). */
+struct E2EpisodeChannelHarness {
+    std::shared_ptr<Thoth::InProcessEpisodeEventChannel> channel;
+    std::shared_ptr<Thoth::ReplaySubscriber> replay;
+    bool enable_episode_publication = false;
+    bool register_replay_subscriber = false;
+    bool wired = false;
+};
+
 static Thoth::EpisodicLearningArmObservation runE2TestArm(
     const Thoth::EpisodicLearningCase& spec,
     const std::string& armLabel,
     const Thoth::BenchmarkAttribution& attribution,
     Thoth::SealedEpisodeInjectionLog* sealedLogOut = nullptr,
-    Thoth::E2RunBlockReason* runBlockReasonOut = nullptr) {
+    Thoth::E2RunBlockReason* runBlockReasonOut = nullptr,
+    E2EpisodeChannelHarness* channelHarness = nullptr) {
     setenv("THOTH_MOCK_EPISODIC", "1", 1);
     setenv("THOTH_MOCK_LLM", "true", 1);
 
@@ -3864,6 +3923,23 @@ static Thoth::EpisodicLearningArmObservation runE2TestArm(
     controller.set_max_reflections(0);
     controller.set_e2_strict_eval_context(&sealedLog, &strictConfig);
     memory->setActiveSessionId(spec.id + "-" + armLabel + "-goal");
+
+    if (channelHarness && channelHarness->enable_episode_publication) {
+        if (!channelHarness->channel) {
+            channelHarness->channel = std::make_shared<Thoth::InProcessEpisodeEventChannel>();
+        }
+        if (!channelHarness->wired) {
+            channelHarness->channel->subscribe(std::make_shared<Thoth::EvaluationSubscriber>());
+            if (channelHarness->register_replay_subscriber) {
+                channelHarness->replay = std::make_shared<Thoth::ReplaySubscriber>();
+                channelHarness->channel->subscribe(channelHarness->replay);
+            }
+            channelHarness->wired = true;
+        }
+        cfg.enable_episodic_evaluation_publication = true;
+        controller.set_config(&cfg);
+        controller.set_episode_event_channel(channelHarness->channel.get());
+    }
 
     std::atomic<bool> terminal{false};
     controller.set_event_callback([&](const ControllerEvent& ev) {
@@ -5493,6 +5569,133 @@ static Thoth::EpisodicLearningSummary buildOfficialGoldenSummary() {
     return Thoth::summarizeEpisodicLearning(evaluations, expectations, cfg);
 }
 
+static Thoth::EpisodicLearningSummary buildOfficialGoldenSummaryWithChannelHarness(
+    bool registerReplaySubscriber) {
+    const auto cases = Thoth::getEpisodicLearningCases();
+    Thoth::BenchmarkAttribution attr{"e2-d2-02", "e2-d2-02-env"};
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    E2EpisodeChannelHarness harness;
+    harness.enable_episode_publication = true;
+    harness.register_replay_subscriber = registerReplaySubscriber;
+
+    std::vector<Thoth::EpisodicLearningCaseEvaluation> evaluations;
+    std::vector<Thoth::EpisodicLearningExpectations> expectations;
+    for (const auto& spec : cases) {
+        Thoth::E2RunBlockReason warmBlock = Thoth::E2RunBlockReason::NONE;
+        const auto cold =
+            runE2TestArm(spec, "cold", attr, nullptr, nullptr, &harness);
+        const auto warm =
+            runE2TestArm(spec, "warm", attr, nullptr, &warmBlock, &harness);
+        auto eval = Thoth::evaluateEpisodicLearningCase(
+            spec.id, spec.expectations, cold, warm, cfg);
+        eval.run_block_reason = warmBlock;
+        Thoth::applyCaseEvaluationResolution(eval);
+        evaluations.push_back(eval);
+        expectations.push_back(spec.expectations);
+    }
+    return Thoth::summarizeEpisodicLearning(evaluations, expectations, cfg);
+}
+
+static nlohmann::json episodicLearningScopedBSnapshot(
+    const Thoth::EpisodicLearningSummary& summary) {
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    const auto fingerprint = Thoth::computeEvaluationFingerprint(cfg);
+    return Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary, fingerprint.toJson(), cfg.toJson());
+}
+
+static bool episodeJsonLacksStrictAuthorityFields(const nlohmann::json& row) {
+    return !row.contains("official_scoring") && !row.contains("e2_outcome") &&
+           !row.contains("evaluation_resolution");
+}
+
+/** E2-D2-02 — replay registration/removal does not change wiring_stage=B harness outcomes. */
+static bool testE2D2BenchmarkAuthorityIsolation() {
+    setenv("THOTH_E2_WIRING_STAGE", "B", 1);
+
+    const auto baselineSummary = buildOfficialGoldenSummary();
+    const auto baselineSnap = episodicLearningScopedBSnapshot(baselineSummary);
+
+    const auto noReplaySummary = buildOfficialGoldenSummaryWithChannelHarness(false);
+    const auto noReplaySnap = episodicLearningScopedBSnapshot(noReplaySummary);
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(baselineSnap, noReplaySnap)) {
+        std::cerr << "testE2D2BenchmarkAuthorityIsolation: publication-only harness differs "
+                     "from baseline\n";
+        return false;
+    }
+
+    const auto withReplaySummary = buildOfficialGoldenSummaryWithChannelHarness(true);
+    const auto withReplaySnap = episodicLearningScopedBSnapshot(withReplaySummary);
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(baselineSnap, withReplaySnap)) {
+        std::cerr << "testE2D2BenchmarkAuthorityIsolation: replay-registered harness differs "
+                     "from baseline\n";
+        return false;
+    }
+
+    const auto removalSummary = buildOfficialGoldenSummaryWithChannelHarness(false);
+    const auto removalSnap = episodicLearningScopedBSnapshot(removalSummary);
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(baselineSnap, removalSnap)) {
+        std::cerr << "testE2D2BenchmarkAuthorityIsolation: post-removal harness differs from "
+                     "baseline\n";
+        return false;
+    }
+
+    Thoth::EpisodicLearningRunEnvelope envelope{true, true, "B"};
+    const nlohmann::json officialRow = Thoth::episodicLearningSummaryLogRow(
+        {}, withReplaySummary, static_cast<int>(withReplaySummary.case_results.size()),
+        withReplaySummary.case_results.size(), envelope);
+    if (officialRow.value("wiring_stage", "") != "B" ||
+        officialRow.value("official_scoring", false) != true) {
+        std::cerr << "testE2D2BenchmarkAuthorityIsolation: wiring_stage=B envelope mismatch\n";
+        return false;
+    }
+
+    E2EpisodeChannelHarness replayHarness;
+    replayHarness.enable_episode_publication = true;
+    replayHarness.register_replay_subscriber = true;
+    const auto cases = Thoth::getEpisodicLearningCases();
+    if (!cases.empty()) {
+        Thoth::BenchmarkAttribution attr{"e2-d2-02-auth", "e2-d2-02-auth-env"};
+        (void)runE2TestArm(cases.front(), "warm", attr, nullptr, nullptr, &replayHarness);
+    }
+    if (!replayHarness.replay || replayHarness.replay->captureCount() == 0) {
+        std::cerr << "testE2D2BenchmarkAuthorityIsolation: replay subscriber did not capture "
+                     "episodes\n";
+        return false;
+    }
+
+    for (std::size_t i = 0; i < replayHarness.replay->captureCount(); ++i) {
+        const Thoth::EpisodeCompleted* captured = replayHarness.replay->capturedAtForTests(i);
+        if (!captured ||
+            !episodeJsonLacksStrictAuthorityFields(captured->toJson())) {
+            std::cerr << "testE2D2BenchmarkAuthorityIsolation: captured episode has authority "
+                         "fields\n";
+            return false;
+        }
+    }
+
+    std::vector<nlohmann::json> replaySinkRows;
+    replayHarness.replay->setReplaySinkForTests([&](const Thoth::EpisodeCompleted& replayed) {
+        replaySinkRows.push_back(replayed.toJson());
+    });
+    for (std::size_t i = 0; i < replayHarness.replay->captureCount(); ++i) {
+        if (!replayHarness.replay->replayCaptured(i)) {
+            std::cerr << "testE2D2BenchmarkAuthorityIsolation: replayCaptured failed\n";
+            return false;
+        }
+    }
+    for (const auto& row : replaySinkRows) {
+        if (!episodeJsonLacksStrictAuthorityFields(row)) {
+            std::cerr << "testE2D2BenchmarkAuthorityIsolation: replay sink emitted authority "
+                         "fields\n";
+            return false;
+        }
+    }
+
+    unsetenv("THOTH_E2_WIRING_STAGE");
+    return true;
+}
+
 /** E2-25 — B5 official harness envelope on summary JSONL. */
 static bool testE2B5OfficialHarnessEnvelope() {
     const auto summary = buildOfficialGoldenSummary();
@@ -5878,6 +6081,1710 @@ static bool testE2C2MappingDeterministic() {
         std::cerr << "testE2C2MappingDeterministic: mapping not deterministic\n";
         return false;
     }
+    return true;
+}
+
+// --- E2-D1: Event channel maturity (fan-out without coupling) ---
+
+static bool episodeCompletedFieldsEqual(const Thoth::EpisodeCompleted& a,
+                                        const Thoth::EpisodeCompleted& b) {
+    return a.plan_id == b.plan_id && a.goal == b.goal && a.terminal_state == b.terminal_state &&
+           a.final_success_score == b.final_success_score && a.run_id == b.run_id &&
+           a.env_hash == b.env_hash && a.plan_snapshot == b.plan_snapshot &&
+           a.trajectory_snapshot == b.trajectory_snapshot;
+}
+
+/** Cross-run comparison: outcome-carrying fields only (snapshots may vary between executions). */
+static bool episodeCompletedOutcomeEqual(const Thoth::EpisodeCompleted& a,
+                                         const Thoth::EpisodeCompleted& b) {
+    return a.plan_id == b.plan_id && a.goal == b.goal && a.terminal_state == b.terminal_state &&
+           a.final_success_score == b.final_success_score && a.run_id == b.run_id &&
+           a.env_hash == b.env_hash;
+}
+
+class TestThrowingEpisodeSubscriber final : public Thoth::IEpisodeEventSubscriber {
+public:
+    int deliveries = 0;
+    void onEpisodeCompleted(const Thoth::EpisodeCompleted&) override {
+        ++deliveries;
+        throw std::runtime_error("E2-D1 injected subscriber failure");
+    }
+};
+
+class TestFifoOrderSubscriber final : public Thoth::IEpisodeEventSubscriber {
+public:
+    int id = 0;
+    std::vector<int>* order = nullptr;
+    void onEpisodeCompleted(const Thoth::EpisodeCompleted&) override {
+        if (order) {
+            order->push_back(id);
+        }
+    }
+};
+
+struct ExecutiveD1TestBed {
+    Config cfg;
+    std::shared_ptr<Memory> memory;
+    std::unique_ptr<EmbeddingEngine> engine;
+    IndexManager* idx = nullptr;
+    std::shared_ptr<RAGPipeline> rag;
+    std::shared_ptr<MockSingleLlmPlanner> planner;
+    std::shared_ptr<ToolRegistry> registry;
+    std::shared_ptr<Thoth::InProcessEpisodeEventChannel> channel;
+    std::unique_ptr<Thoth::ExecutiveController> controller;
+
+    explicit ExecutiveD1TestBed(const std::string& dbSuffix) {
+        cfg.database_path = makeTempPath("thoth_e2_d1_" + dbSuffix + ".db").string();
+        cfg.enable_episodic_evaluation_publication = true;
+        memory = std::make_shared<Memory>(cfg);
+        engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+        idx = new IndexManager(engine.get());
+        rag = std::make_shared<RAGPipeline>(std::move(engine), idx);
+        planner = std::make_shared<MockSingleLlmPlanner>();
+        registry = std::make_shared<ToolRegistry>();
+        channel = std::make_shared<Thoth::InProcessEpisodeEventChannel>();
+        controller = std::make_unique<Thoth::ExecutiveController>(planner, registry, rag, memory);
+        controller->set_config(&cfg);
+        controller->set_episode_event_channel(channel.get());
+    }
+
+    ~ExecutiveD1TestBed() { fs::remove(cfg.database_path); }
+
+    bool runGoalToTerminal(const std::string& goal) {
+        controller->execute_goal(goal);
+        return waitForPlanTerminal(*controller);
+    }
+};
+
+static bool executiveOutcomeEqual(const Thoth::ExecutiveController& a,
+                                  const Thoth::ExecutiveController& b) {
+    if (a.get_state() != b.get_state()) {
+        return false;
+    }
+    const Plan planA = a.get_current_plan();
+    const Plan planB = b.get_current_plan();
+    return planA.goal == planB.goal && planA.status == planB.status &&
+           planA.plan_id == planB.plan_id;
+}
+
+/** E2-D1-01 — multi-subscriber delivery; byte-identical immutable event. */
+static bool testE2D1MultiSubscriberDelivery() {
+    Thoth::InProcessEpisodeEventChannel channel;
+    auto captureA = std::make_shared<TestEpisodeCaptureSubscriber>();
+    auto captureB = std::make_shared<TestEpisodeCaptureSubscriber>();
+    auto captureC = std::make_shared<TestEpisodeCaptureSubscriber>();
+    channel.subscribe(captureA);
+    channel.subscribe(captureB);
+    channel.subscribe(captureC);
+
+    if (channel.subscriberCountForTests() != 3) {
+        std::cerr << "testE2D1MultiSubscriberDelivery: expected 3 subscribers\n";
+        return false;
+    }
+
+    Thoth::EpisodeCompleted event;
+    event.plan_id = "plan-d1-01";
+    event.goal = "d1 fan-out goal";
+    event.terminal_state = "COMPLETED";
+    event.final_success_score = 0.75f;
+    event.run_id = "run-d1-01";
+    event.env_hash = "env-d1-01";
+    event.plan_snapshot = {{"steps", nlohmann::json::array({{{"step_id", "s1"}}})}};
+    event.trajectory_snapshot = {{"entries", nlohmann::json::array()}};
+    channel.publish(event);
+
+    const std::array<std::shared_ptr<TestEpisodeCaptureSubscriber>, 3> captures = {
+        captureA, captureB, captureC};
+    for (const auto& capture : captures) {
+        if (capture->deliveries != 1) {
+            std::cerr << "testE2D1MultiSubscriberDelivery: expected one delivery per subscriber\n";
+            return false;
+        }
+        if (!episodeCompletedFieldsEqual(capture->last_event, event)) {
+            std::cerr << "testE2D1MultiSubscriberDelivery: payload mismatch across subscribers\n";
+            return false;
+        }
+    }
+    if (!captureB->last_event.plan_snapshot.contains("steps")) {
+        std::cerr << "testE2D1MultiSubscriberDelivery: snapshot not preserved\n";
+        return false;
+    }
+
+    std::vector<int> fifoOrder;
+    Thoth::InProcessEpisodeEventChannel fifoChannel;
+    auto first = std::make_shared<TestFifoOrderSubscriber>();
+    auto second = std::make_shared<TestFifoOrderSubscriber>();
+    auto third = std::make_shared<TestFifoOrderSubscriber>();
+    first->id = 1;
+    second->id = 2;
+    third->id = 3;
+    first->order = &fifoOrder;
+    second->order = &fifoOrder;
+    third->order = &fifoOrder;
+    fifoChannel.subscribe(first);
+    fifoChannel.subscribe(second);
+    fifoChannel.subscribe(third);
+    Thoth::EpisodeCompleted fifoEvent;
+    fifoEvent.plan_id = "fifo";
+    fifoChannel.publish(fifoEvent);
+    if (fifoOrder != std::vector<int>({1, 2, 3})) {
+        std::cerr << "testE2D1MultiSubscriberDelivery: FIFO delivery order mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-D1-02 — mandatory Executive-path failure isolation (Passive Consumer Law §4). */
+static bool testE2D1ExecutiveFailureIsolation() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    const std::string goal = "E2-D1 executive failure isolation goal";
+
+    ExecutiveD1TestBed baseline("d1_02_baseline");
+    auto baselineCapture = std::make_shared<TestEpisodeCaptureSubscriber>();
+    baseline.channel->subscribe(baselineCapture);
+    if (!baseline.runGoalToTerminal(goal)) {
+        std::cerr << "testE2D1ExecutiveFailureIsolation: baseline goal did not reach terminal\n";
+        return false;
+    }
+    const auto baselineState = baseline.controller->get_state();
+    const Plan baselinePlan = baseline.controller->get_current_plan();
+
+    ExecutiveD1TestBed throwingRun("d1_02_throwing");
+    auto throwing = std::make_shared<TestThrowingEpisodeSubscriber>();
+    auto healthyCapture = std::make_shared<TestEpisodeCaptureSubscriber>();
+    throwingRun.channel->subscribe(throwing);
+    throwingRun.channel->subscribe(healthyCapture);
+    if (!throwingRun.runGoalToTerminal(goal)) {
+        std::cerr << "testE2D1ExecutiveFailureIsolation: throwing run did not reach terminal\n";
+        return false;
+    }
+
+    if (throwing->deliveries != 1) {
+        std::cerr << "testE2D1ExecutiveFailureIsolation: throwing subscriber not invoked\n";
+        return false;
+    }
+    if (healthyCapture->deliveries != 1) {
+        std::cerr << "testE2D1ExecutiveFailureIsolation: healthy subscriber not delivered after throw\n";
+        return false;
+    }
+    if (!executiveOutcomeEqual(*baseline.controller, *throwingRun.controller)) {
+        std::cerr << "testE2D1ExecutiveFailureIsolation: Executive terminal outcome changed\n";
+        return false;
+    }
+    if (throwingRun.controller->get_state() != baselineState) {
+        std::cerr << "testE2D1ExecutiveFailureIsolation: controller state mismatch\n";
+        return false;
+    }
+    const Plan throwingPlan = throwingRun.controller->get_current_plan();
+    if (throwingPlan.status != baselinePlan.status || throwingPlan.goal != baselinePlan.goal) {
+        std::cerr << "testE2D1ExecutiveFailureIsolation: plan outcome mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/**
+ * E2-D1-03 — invisibility audit + behavioral outcome/payload equivalence.
+ * Passive Consumer Law §3: structural audit ensures subscribers cannot influence
+ * execution ordering (no subscriber-count / consumer-identity branching in Executive).
+ */
+static bool testE2D1ExecutiveInvisibilityAudit() {
+    const std::string source = readRepoSourceFile("external/basic_agent/src/executive_controller.cpp");
+    if (source.empty()) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: cannot read executive source\n";
+        return false;
+    }
+    // Passive Consumer Law §3 traceability: Executive must not branch on subscriber registry.
+    const std::vector<std::string> forbidden = {"subscriberCount", "subscriber_count", "subscribers_"};
+    for (const auto& sym : forbidden) {
+        if (source.find(sym) != std::string::npos) {
+            std::cerr << "testE2D1ExecutiveInvisibilityAudit: found forbidden symbol " << sym
+                      << " (Passive Consumer Law §3)\n";
+            return false;
+        }
+    }
+    if (source.find("publish_episode_completed_unlocked") == std::string::npos) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: publication hook missing\n";
+        return false;
+    }
+
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    const std::string goal = "E2-D1 invisibility goal";
+    const Thoth::BenchmarkAttribution attr{"run-d1-03", "env-d1-03"};
+
+    ExecutiveD1TestBed zeroSubs("d1_03_zero");
+    zeroSubs.controller->execute_goal(goal, attr);
+    if (!waitForPlanTerminal(*zeroSubs.controller)) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: zero-subscriber run timeout\n";
+        return false;
+    }
+    const auto zeroState = zeroSubs.controller->get_state();
+    const Plan zeroPlan = zeroSubs.controller->get_current_plan();
+    const auto zeroEvent = zeroSubs.channel->lastPublishedEventForTests();
+    if (!zeroEvent.has_value()) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: zero-subscriber publish missing\n";
+        return false;
+    }
+
+    ExecutiveD1TestBed manySubs("d1_03_many");
+    auto capA = std::make_shared<TestEpisodeCaptureSubscriber>();
+    auto capB = std::make_shared<TestEpisodeCaptureSubscriber>();
+    auto capC = std::make_shared<TestEpisodeCaptureSubscriber>();
+    manySubs.channel->subscribe(capA);
+    manySubs.channel->subscribe(capB);
+    manySubs.channel->subscribe(capC);
+    if (manySubs.channel->subscriberCountForTests() != 3) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: expected 3 subscribers\n";
+        return false;
+    }
+    manySubs.controller->execute_goal(goal, attr);
+    if (!waitForPlanTerminal(*manySubs.controller)) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: many-subscriber run timeout\n";
+        return false;
+    }
+
+    if (manySubs.controller->get_state() != zeroState) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: Executive state differs at 0 vs N\n";
+        return false;
+    }
+    const Plan manyPlan = manySubs.controller->get_current_plan();
+    if (manyPlan.status != zeroPlan.status || manyPlan.goal != zeroPlan.goal) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: plan outcome differs at 0 vs N\n";
+        return false;
+    }
+
+    const auto manyEvent = manySubs.channel->lastPublishedEventForTests();
+    if (!manyEvent.has_value()) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: many-subscriber publish missing\n";
+        return false;
+    }
+    if (!episodeCompletedOutcomeEqual(*zeroEvent, *manyEvent)) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: published outcome fields differ at 0 vs N\n";
+        return false;
+    }
+    if (!episodeCompletedFieldsEqual(capA->last_event, capB->last_event) ||
+        !episodeCompletedFieldsEqual(capA->last_event, *manyEvent)) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: subscriber payloads not identical\n";
+        return false;
+    }
+    if (zeroEvent->run_id != attr.run_id || zeroEvent->env_hash != attr.env_hash) {
+        std::cerr << "testE2D1ExecutiveInvisibilityAudit: attribution not propagated\n";
+        return false;
+    }
+    return true;
+}
+
+static bool runE2D1Tests() {
+    if (!testE2D1MultiSubscriberDelivery()) {
+        std::cerr << "E2-D1-01 failed\n";
+        return false;
+    }
+    if (!testE2D1ExecutiveFailureIsolation()) {
+        std::cerr << "E2-D1-02 failed\n";
+        return false;
+    }
+    if (!testE2D1ExecutiveInvisibilityAudit()) {
+        std::cerr << "E2-D1-03 failed\n";
+        return false;
+    }
+    std::cout << "E2-D1-01..03 path equivalence prerequisites: channel fan-out green\n";
+    return true;
+}
+
+// --- E2-D2: Replay subscriber (deterministic re-observation) ---
+
+static Thoth::EpisodeCompleted makeE2D2FixtureEvent() {
+    Thoth::EpisodeCompleted event;
+    event.plan_id = "plan-d2-01";
+    event.goal = "d2 replay coexistence goal";
+    event.terminal_state = "COMPLETED";
+    event.final_success_score = 0.85f;
+    event.completed_at_ms = 1'700'000'000'000;
+    event.run_id = "run-d2-01";
+    event.env_hash = "env-d2-01";
+    event.plan_snapshot = {
+        {"steps", nlohmann::json::array({{{"step_id", "retrieve-a"}, {"status", "SUCCESS"}}})},
+        {"e2_expectations",
+         {{"case_id", "E2-D2-01"},
+          {"expected_lift", 0.0},
+          {"min_cold_score", 0.0},
+          {"min_warm_score", 0.0}}}};
+    event.trajectory_snapshot = {{"entries", nlohmann::json::array({{{"step_id", "s1"}}})}};
+    return event;
+}
+
+static nlohmann::json evaluationSubscriberObservedOutputsJson() {
+    nlohmann::json observed = nlohmann::json::object();
+    if (const auto* summary = Thoth::EvaluationSubscriber::lastSummaryForTests()) {
+        observed["summary"] = Thoth::episodicLearningSummaryToJson(*summary);
+    }
+    if (const auto* diagnostics = Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests()) {
+        observed["diagnostics"] = Thoth::evaluationDiagnosticSummaryToJson(*diagnostics);
+    }
+    return observed;
+}
+
+static bool testE2D2ReplayStructuralAudit() {
+    const std::vector<std::string> paths = {"external/basic_agent/include/replay_subscriber.h",
+                                            "external/basic_agent/src/replay_subscriber.cpp"};
+    const std::vector<std::string> forbidden = {"publish(",
+                                                "ExecutiveController",
+                                                "resolveEvaluation",
+                                                "execute_goal",
+                                                "episodic_evaluation_service",
+                                                "IEpisodicEvaluationService"};
+    const std::vector<std::string> forbiddenChannelHandles = {
+        "IEpisodeEventChannel*",
+        "IEpisodeEventChannel&",
+        "std::shared_ptr<IEpisodeEventChannel>"};
+
+    auto extractReplaySubscriberClassBlock = [](const std::string& header) -> std::string {
+        const std::string marker = "class ReplaySubscriber";
+        const std::size_t start = header.find(marker);
+        if (start == std::string::npos) {
+            return {};
+        }
+        const std::size_t open = header.find('{', start);
+        if (open == std::string::npos) {
+            return {};
+        }
+        int depth = 0;
+        for (std::size_t i = open; i < header.size(); ++i) {
+            if (header[i] == '{') {
+                ++depth;
+            } else if (header[i] == '}') {
+                --depth;
+                if (depth == 0) {
+                    return header.substr(start, i - start + 1);
+                }
+            }
+        }
+        return {};
+    };
+
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2D2ReplayStructuralAudit: cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << "testE2D2ReplayStructuralAudit: found " << sym << " in " << path
+                          << '\n';
+                return false;
+            }
+        }
+    }
+
+    const std::string header =
+        readRepoSourceFile("external/basic_agent/include/replay_subscriber.h");
+    const std::string classBody = extractReplaySubscriberClassBlock(header);
+    if (classBody.empty()) {
+        std::cerr << "testE2D2ReplayStructuralAudit: cannot locate ReplaySubscriber class\n";
+        return false;
+    }
+    for (const auto& handle : forbiddenChannelHandles) {
+        if (classBody.find(handle) != std::string::npos) {
+            std::cerr << "testE2D2ReplayStructuralAudit: ReplaySubscriber holds channel "
+                      << handle << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-D2-01 — replay idempotence, append-only storage, coexistence, structural audit. */
+static bool testE2D2ReplayIdempotenceAndCoexistence() {
+    if (!testE2D2ReplayStructuralAudit()) {
+        return false;
+    }
+
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+
+    Thoth::EvaluationSubscriber evalOnly;
+    evalOnly.onEpisodeCompleted(fixture);
+    const nlohmann::json evalBaselineOutputs = evaluationSubscriberObservedOutputsJson();
+    if (evalBaselineOutputs.empty()) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: eval baseline missing outputs\n";
+        return false;
+    }
+
+    Thoth::InProcessEpisodeEventChannel channel;
+    auto replay = std::make_shared<Thoth::ReplaySubscriber>();
+    auto eval = std::make_shared<Thoth::EvaluationSubscriber>();
+    channel.subscribe(eval);
+    channel.subscribe(replay);
+    channel.publish(fixture);
+
+    if (replay->captureCount() != 1) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: expected capture count 1\n";
+        return false;
+    }
+    const Thoth::EpisodeCompleted* captured = replay->capturedAtForTests(0);
+    if (!captured || !episodeCompletedFieldsEqual(*captured, fixture)) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: captured payload mismatch\n";
+        return false;
+    }
+    const Thoth::EpisodeCompleted storedBeforeReplay = *captured;
+
+    const nlohmann::json evalCoexistenceOutputs = evaluationSubscriberObservedOutputsJson();
+    if (evalCoexistenceOutputs != evalBaselineOutputs) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: EvaluationSubscriber outputs "
+                     "changed when ReplaySubscriber present\n";
+        return false;
+    }
+
+    std::vector<Thoth::EpisodeCompleted> replaySinkPayloads;
+    replay->setReplaySinkForTests([&](const Thoth::EpisodeCompleted& replayed) {
+        replaySinkPayloads.push_back(replayed);
+    });
+
+    if (!replay->replayCaptured(0)) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: first replay failed\n";
+        return false;
+    }
+    if (replay->captureCount() != 1) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: capture count changed after "
+                     "first replay\n";
+        return false;
+    }
+    captured = replay->capturedAtForTests(0);
+    if (!captured || !episodeCompletedFieldsEqual(*captured, storedBeforeReplay) ||
+        !episodeCompletedFieldsEqual(*captured, fixture)) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: stored object changed after "
+                     "first replay\n";
+        return false;
+    }
+    if (replaySinkPayloads.size() != 1 ||
+        !episodeCompletedFieldsEqual(replaySinkPayloads.back(), fixture)) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: first replay payload mismatch\n";
+        return false;
+    }
+    const Thoth::EpisodeCompleted firstReplayPayload = replaySinkPayloads.back();
+
+    if (!replay->replayCaptured(0)) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: second replay failed\n";
+        return false;
+    }
+    if (replay->captureCount() != 1) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: capture count changed after "
+                     "second replay\n";
+        return false;
+    }
+    captured = replay->capturedAtForTests(0);
+    if (!captured || !episodeCompletedFieldsEqual(*captured, storedBeforeReplay) ||
+        !episodeCompletedFieldsEqual(*captured, fixture)) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: stored object changed after "
+                     "second replay\n";
+        return false;
+    }
+    if (replaySinkPayloads.size() != 2 ||
+        !episodeCompletedFieldsEqual(replaySinkPayloads.back(), firstReplayPayload) ||
+        !episodeCompletedFieldsEqual(replaySinkPayloads.back(), fixture)) {
+        std::cerr << "testE2D2ReplayIdempotenceAndCoexistence: second replay payload mismatch\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool runE2D2Tests() {
+    if (!testE2D2ReplayIdempotenceAndCoexistence()) {
+        std::cerr << "E2-D2-01 failed\n";
+        return false;
+    }
+    if (!testE2D2BenchmarkAuthorityIsolation()) {
+        std::cerr << "E2-D2-02 failed\n";
+        return false;
+    }
+    std::cout << "E2-D2-01 replay idempotence + coexistence green\n";
+    std::cout << "E2-D2-02 benchmark authority isolation green\n";
+    return true;
+}
+
+// --- E2-D3: Metrics + trace subscribers (observability without influence) ---
+
+static bool testE2D3Step1ConfigDefaults() {
+    Config cfg;
+    if (cfg.enable_metrics_subscriber || cfg.enable_trace_subscriber) {
+        std::cerr << "testE2D3Step1ConfigDefaults: D3 flags must default OFF\n";
+        return false;
+    }
+    return true;
+}
+
+static std::string extractSubscriberClassBlock(const std::string& header,
+                                               const std::string& className) {
+    const std::string marker = "class " + className;
+    const std::size_t start = header.find(marker);
+    if (start == std::string::npos) {
+        return {};
+    }
+    const std::size_t open = header.find('{', start);
+    if (open == std::string::npos) {
+        return {};
+    }
+    int depth = 0;
+    for (std::size_t i = open; i < header.size(); ++i) {
+        if (header[i] == '{') {
+            ++depth;
+        } else if (header[i] == '}') {
+            --depth;
+            if (depth == 0) {
+                return header.substr(start, i - start + 1);
+            }
+        }
+    }
+    return {};
+}
+
+static bool testE2D3Step1StructuralAudit() {
+    const std::vector<std::string> paths = {"external/basic_agent/include/metrics_subscriber.h",
+                                            "external/basic_agent/src/metrics_subscriber.cpp",
+                                            "external/basic_agent/include/trace_subscriber.h",
+                                            "external/basic_agent/src/trace_subscriber.cpp"};
+    const std::vector<std::string> forbidden = {"publish(",
+                                                "ExecutiveController",
+                                                "resolveEvaluation",
+                                                "execute_goal",
+                                                "episodic_evaluation_service",
+                                                "IEpisodicEvaluationService",
+                                                "ReplaySubscriber",
+                                                "registerReplaySubscriber"};
+    const std::vector<std::string> forbiddenChannelHandles = {
+        "IEpisodeEventChannel*",
+        "IEpisodeEventChannel&",
+        "std::shared_ptr<IEpisodeEventChannel>"};
+
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2D3Step1StructuralAudit: cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << "testE2D3Step1StructuralAudit: found " << sym << " in " << path
+                          << '\n';
+                return false;
+            }
+        }
+    }
+
+    const std::vector<std::pair<std::string, std::string>> classHeaders = {
+        {"external/basic_agent/include/metrics_subscriber.h", "MetricsSubscriber"},
+        {"external/basic_agent/include/trace_subscriber.h", "TraceSubscriber"}};
+    for (const auto& [path, className] : classHeaders) {
+        const std::string header = readRepoSourceFile(path);
+        const std::string classBody = extractSubscriberClassBlock(header, className);
+        if (classBody.empty()) {
+            std::cerr << "testE2D3Step1StructuralAudit: cannot locate " << className << '\n';
+            return false;
+        }
+        for (const auto& handle : forbiddenChannelHandles) {
+            if (classBody.find(handle) != std::string::npos) {
+                std::cerr << "testE2D3Step1StructuralAudit: " << className << " holds channel "
+                          << handle << '\n';
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool testE2D3Step1RegistrationAndDelivery() {
+    Thoth::InProcessEpisodeEventChannel channel;
+    Thoth::registerMetricsSubscriber(channel);
+    Thoth::registerTraceSubscriber(channel);
+    if (channel.subscriberCountForTests() != 2) {
+        std::cerr << "testE2D3Step1RegistrationAndDelivery: expected 2 subscribers\n";
+        return false;
+    }
+
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+    channel.publish(fixture);
+    if (Thoth::MetricsSubscriber::deliveryCountForTests() != 1) {
+        std::cerr << "testE2D3Step1RegistrationAndDelivery: metrics delivery count mismatch\n";
+        return false;
+    }
+    if (Thoth::TraceSubscriber::segmentCountForTests() != 1) {
+        std::cerr << "testE2D3Step1RegistrationAndDelivery: trace segment count mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D3Step1ImmutableEventView() {
+    Thoth::InProcessEpisodeEventChannel channel;
+    auto metrics = std::make_shared<Thoth::MetricsSubscriber>();
+    auto trace = std::make_shared<Thoth::TraceSubscriber>();
+    channel.subscribe(metrics);
+    channel.subscribe(trace);
+
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+    channel.publish(fixture);
+
+    const auto published = channel.lastPublishedEventForTests();
+    if (!published || !episodeCompletedFieldsEqual(*published, fixture)) {
+        std::cerr << "testE2D3Step1ImmutableEventView: published snapshot mismatch\n";
+        return false;
+    }
+    if (metrics->deliveryCount() != 1) {
+        std::cerr << "testE2D3Step1ImmutableEventView: metrics not delivered\n";
+        return false;
+    }
+    const Thoth::TraceSegmentRecord* segment = trace->segmentAtForTests(0);
+    if (!segment || segment->plan_id != fixture.plan_id || segment->run_id != fixture.run_id ||
+        segment->timestamp_ms != fixture.completed_at_ms) {
+        std::cerr << "testE2D3Step1ImmutableEventView: trace segment fields mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D3Step1CoexistenceWithEvalReplay() {
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+
+    Thoth::EvaluationSubscriber evalOnly;
+    evalOnly.onEpisodeCompleted(fixture);
+    const nlohmann::json evalBaselineOutputs = evaluationSubscriberObservedOutputsJson();
+    if (evalBaselineOutputs.empty()) {
+        std::cerr << "testE2D3Step1CoexistenceWithEvalReplay: eval baseline missing outputs\n";
+        return false;
+    }
+
+    Thoth::InProcessEpisodeEventChannel channel;
+    auto eval = std::make_shared<Thoth::EvaluationSubscriber>();
+    auto replay = std::make_shared<Thoth::ReplaySubscriber>();
+    auto metrics = std::make_shared<Thoth::MetricsSubscriber>();
+    auto trace = std::make_shared<Thoth::TraceSubscriber>();
+    channel.subscribe(eval);
+    channel.subscribe(replay);
+    channel.subscribe(metrics);
+    channel.subscribe(trace);
+    channel.publish(fixture);
+
+    const nlohmann::json evalWithD3 = evaluationSubscriberObservedOutputsJson();
+    if (evalWithD3 != evalBaselineOutputs) {
+        std::cerr << "testE2D3Step1CoexistenceWithEvalReplay: EvaluationSubscriber outputs "
+                     "changed when D3 subscribers present\n";
+        return false;
+    }
+    if (replay->captureCount() != 1) {
+        std::cerr << "testE2D3Step1CoexistenceWithEvalReplay: replay capture count mismatch\n";
+        return false;
+    }
+    if (metrics->deliveryCount() != 1 || trace->segmentCount() != 1) {
+        std::cerr << "testE2D3Step1CoexistenceWithEvalReplay: D3 delivery mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool runE2D3Step1Tests() {
+    if (!testE2D3Step1ConfigDefaults()) {
+        std::cerr << "E2-D3-Step1 config defaults failed\n";
+        return false;
+    }
+    if (!testE2D3Step1StructuralAudit()) {
+        std::cerr << "E2-D3-Step1 structural audit failed\n";
+        return false;
+    }
+    if (!testE2D3Step1RegistrationAndDelivery()) {
+        std::cerr << "E2-D3-Step1 registration failed\n";
+        return false;
+    }
+    if (!testE2D3Step1ImmutableEventView()) {
+        std::cerr << "E2-D3-Step1 immutability failed\n";
+        return false;
+    }
+    if (!testE2D3Step1CoexistenceWithEvalReplay()) {
+        std::cerr << "E2-D3-Step1 coexistence failed\n";
+        return false;
+    }
+    std::cout << "E2-D3-Step1 subscriber skeleton green\n";
+    return true;
+}
+
+static bool metricsJsonlContainsForbiddenAuthority(const nlohmann::json& record) {
+    const std::string dumped = record.dump();
+    const std::vector<std::string> forbidden = {"official_scoring",
+                                                "e2_outcome",
+                                                "evaluation_resolution",
+                                                "\"lift\"",
+                                                "success_rate",
+                                                "scorable_cases",
+                                                "not_scorable_cases"};
+    for (const auto& key : forbidden) {
+        if (dumped.find(key) != std::string::npos) {
+            std::cerr << "metricsJsonlContainsForbiddenAuthority: forbidden key " << key << '\n';
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool testE2D3_01MetricsEvalIndependence() {
+    const std::vector<std::string> paths = {"external/basic_agent/include/metrics_subscriber.h",
+                                            "external/basic_agent/src/metrics_subscriber.cpp"};
+    const std::vector<std::string> forbidden = {"episodic_evaluation_service.h",
+                                                "evaluation_subscriber.h",
+                                                "IEpisodicEvaluationService",
+                                                "resolveEvaluation",
+                                                "evaluateCase",
+                                                "evaluateEpisodicLearningCase",
+                                                "episodicDiagnosticService",
+                                                "e2_expectations"};
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << "testE2D3_01MetricsEvalIndependence: cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << "testE2D3_01MetricsEvalIndependence: found " << sym << " in " << path
+                          << '\n';
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool testE2D3_01MetricsSinkOnly() {
+    const fs::path jsonlPath = makeTempPath("thoth_e2_d3_01_metrics.jsonl");
+    Thoth::MetricsSubscriber::setJsonlSinkPathForTests(jsonlPath.string());
+
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+
+    Thoth::EvaluationSubscriber evalOnly;
+    evalOnly.onEpisodeCompleted(fixture);
+    const nlohmann::json evalBaselineOutputs = evaluationSubscriberObservedOutputsJson();
+    if (evalBaselineOutputs.empty()) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: eval baseline missing outputs\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+
+    Thoth::InProcessEpisodeEventChannel channel;
+    auto eval = std::make_shared<Thoth::EvaluationSubscriber>();
+    auto replay = std::make_shared<Thoth::ReplaySubscriber>();
+    auto metrics = std::make_shared<Thoth::MetricsSubscriber>();
+    channel.subscribe(eval);
+    channel.subscribe(replay);
+    channel.subscribe(metrics);
+    channel.publish(fixture);
+
+    const nlohmann::json evalWithMetrics = evaluationSubscriberObservedOutputsJson();
+    if (evalWithMetrics != evalBaselineOutputs) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: EvaluationSubscriber outputs changed\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+    if (replay->captureCount() != 1) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: replay capture count mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+
+    const Thoth::MetricsRunAggregate* aggregate = metrics->runAggregateForRun(fixture.run_id);
+    if (!aggregate || aggregate->episode_completed_total != 1) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: episode_completed_total mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+    if (aggregate->observed_final_success_score != fixture.final_success_score) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: observed_final_success_score mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+    if (aggregate->plan_step_count != 1) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: plan_step_count mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+    if (aggregate->histogram_score_samples != 1) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: histogram sample count mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+
+    const nlohmann::json jsonl = metrics->lastJsonlRecord();
+    if (jsonl.value("metrics_schema_version", "") != "1.0" ||
+        jsonl.value("record_type", "") != "episode_observation") {
+        std::cerr << "testE2D3_01MetricsSinkOnly: episode JSONL schema mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+    const auto& observations = jsonl["observations"];
+    if (!observations.is_object() ||
+        observations.value("observed_final_success_score", 0.0f) != fixture.final_success_score) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: JSONL observations mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+    if (metricsJsonlContainsForbiddenAuthority(jsonl)) {
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+
+    Thoth::E2PipelineStageTimings timings;
+    timings.pipeline_duration_ms = 42;
+    timings.mapping_duration_ms = 10;
+    timings.evaluation_duration_ms = 12;
+    timings.diagnostic_duration_ms = 8;
+    timings.episodes_processed = 1;
+    Thoth::E2PipelineTelemetryContext context;
+    context.run_id = fixture.run_id;
+    context.plan_id = fixture.plan_id;
+    context.episode_completed_at_ms = fixture.completed_at_ms;
+    const Thoth::E2PipelineTelemetryRecord pipelineRecord =
+        Thoth::episodicPipelineTelemetryService().recordPipelineRun(timings, context);
+    metrics->observePipelineTelemetry(pipelineRecord);
+
+    if (aggregate->last_pipeline_duration_ms != 42) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: pipeline duration observation mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+
+    const nlohmann::json pipelineJsonl = metrics->lastJsonlRecord();
+    if (pipelineJsonl.value("record_type", "") != "pipeline_observation" ||
+        !pipelineJsonl.contains("pipeline")) {
+        std::cerr << "testE2D3_01MetricsSinkOnly: pipeline JSONL shape mismatch\n";
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+    if (metricsJsonlContainsForbiddenAuthority(pipelineJsonl)) {
+        Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+        return false;
+    }
+
+    Thoth::MetricsSubscriber::resetJsonlSinkPathForTests();
+    std::error_code ec;
+    fs::remove(jsonlPath, ec);
+    return true;
+}
+
+static bool runE2D3_01Tests() {
+    if (!testE2D3_01MetricsEvalIndependence()) {
+        std::cerr << "E2-D3-01 eval-independence audit failed\n";
+        return false;
+    }
+    if (!testE2D3_01MetricsSinkOnly()) {
+        std::cerr << "E2-D3-01 metrics sink-only failed\n";
+        return false;
+    }
+    std::cout << "E2-D3-01 metrics sink-only green\n";
+    return true;
+}
+
+// --- E2-D3-02: Failure isolation (metrics + trace subscribers) ---
+
+class TestThrowingD3SubscriberProxy final : public Thoth::IEpisodeEventSubscriber {
+public:
+    std::shared_ptr<Thoth::IEpisodeEventSubscriber> inner;
+    int deliveries = 0;
+    std::string label;
+
+    void onEpisodeCompleted(const Thoth::EpisodeCompleted& event) override {
+        ++deliveries;
+        if (inner) {
+            inner->onEpisodeCompleted(event);
+        }
+        throw std::runtime_error("E2-D3-02 " + label + " injected subscriber failure");
+    }
+};
+
+enum class D3FanoutOrder { EvalReplayMetricsTrace, TraceMetricsReplayEval };
+
+static nlohmann::json evalBaselineOutputsForFixture(const Thoth::EpisodeCompleted& fixture) {
+    Thoth::EvaluationSubscriber evalOnly;
+    evalOnly.onEpisodeCompleted(fixture);
+    return evaluationSubscriberObservedOutputsJson();
+}
+
+static void subscribeD3Fanout(Thoth::InProcessEpisodeEventChannel& channel,
+                              D3FanoutOrder order,
+                              const std::shared_ptr<Thoth::EvaluationSubscriber>& eval,
+                              const std::shared_ptr<Thoth::ReplaySubscriber>& replay,
+                              const std::shared_ptr<Thoth::IEpisodeEventSubscriber>& metrics_slot,
+                              const std::shared_ptr<Thoth::IEpisodeEventSubscriber>& trace_slot,
+                              const std::shared_ptr<TestEpisodeCaptureSubscriber>& capture) {
+    const auto sub = [&](const std::shared_ptr<Thoth::IEpisodeEventSubscriber>& s) {
+        if (s) {
+            channel.subscribe(s);
+        }
+    };
+    switch (order) {
+    case D3FanoutOrder::EvalReplayMetricsTrace:
+        sub(std::static_pointer_cast<Thoth::IEpisodeEventSubscriber>(eval));
+        sub(std::static_pointer_cast<Thoth::IEpisodeEventSubscriber>(replay));
+        sub(metrics_slot);
+        sub(trace_slot);
+        sub(capture);
+        break;
+    case D3FanoutOrder::TraceMetricsReplayEval:
+        sub(trace_slot);
+        sub(metrics_slot);
+        sub(std::static_pointer_cast<Thoth::IEpisodeEventSubscriber>(replay));
+        sub(std::static_pointer_cast<Thoth::IEpisodeEventSubscriber>(eval));
+        sub(capture);
+        break;
+    }
+}
+
+static bool assertPublicationInvariant(const Thoth::InProcessEpisodeEventChannel& channel,
+                                       const Thoth::EpisodeCompleted& fixture) {
+    const auto published = channel.lastPublishedEventForTests();
+    if (!published) {
+        std::cerr << "assertPublicationInvariant: published snapshot missing\n";
+        return false;
+    }
+    if (!episodeCompletedFieldsEqual(*published, fixture)) {
+        std::cerr << "assertPublicationInvariant: published snapshot mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool assertNonThrowingExactlyOnce(
+    const std::shared_ptr<Thoth::ReplaySubscriber>& replay,
+    const std::shared_ptr<Thoth::MetricsSubscriber>& metrics,
+    const std::shared_ptr<Thoth::TraceSubscriber>& trace,
+    const std::shared_ptr<TestEpisodeCaptureSubscriber>& capture,
+    const nlohmann::json& evalBaseline) {
+    if (replay->captureCount() != 1) {
+        std::cerr << "assertNonThrowingExactlyOnce: replay delivery count mismatch\n";
+        return false;
+    }
+    if (metrics->deliveryCount() != 1) {
+        std::cerr << "assertNonThrowingExactlyOnce: metrics delivery count mismatch\n";
+        return false;
+    }
+    if (trace->segmentCount() != 1) {
+        std::cerr << "assertNonThrowingExactlyOnce: trace delivery count mismatch\n";
+        return false;
+    }
+    if (capture->deliveries != 1) {
+        std::cerr << "assertNonThrowingExactlyOnce: capture delivery count mismatch\n";
+        return false;
+    }
+    const nlohmann::json evalObserved = evaluationSubscriberObservedOutputsJson();
+    if (evalBaseline.empty() || evalObserved != evalBaseline) {
+        std::cerr << "assertNonThrowingExactlyOnce: eval delivery/output mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static void registerD3SubscribersOnExecutiveBed(
+    ExecutiveD1TestBed& bed,
+    std::shared_ptr<Thoth::EvaluationSubscriber>& eval,
+    std::shared_ptr<Thoth::ReplaySubscriber>& replay,
+    std::shared_ptr<Thoth::MetricsSubscriber>& metrics,
+    std::shared_ptr<Thoth::TraceSubscriber>& trace,
+    const std::shared_ptr<Thoth::IEpisodeEventSubscriber>& metrics_slot,
+    const std::shared_ptr<Thoth::IEpisodeEventSubscriber>& trace_slot) {
+    eval = std::make_shared<Thoth::EvaluationSubscriber>();
+    replay = std::make_shared<Thoth::ReplaySubscriber>();
+    metrics = std::make_shared<Thoth::MetricsSubscriber>();
+    trace = std::make_shared<Thoth::TraceSubscriber>();
+    bed.channel->subscribe(eval);
+    bed.channel->subscribe(replay);
+    bed.channel->subscribe(metrics_slot ? metrics_slot : metrics);
+    bed.channel->subscribe(trace_slot ? trace_slot : trace);
+}
+
+static bool testE2D3_02ChannelFailureIsolation(const bool throwing_metrics) {
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+    const nlohmann::json evalBaseline = evalBaselineOutputsForFixture(fixture);
+
+    auto eval = std::make_shared<Thoth::EvaluationSubscriber>();
+    auto replay = std::make_shared<Thoth::ReplaySubscriber>();
+    auto metrics = std::make_shared<Thoth::MetricsSubscriber>();
+    auto trace = std::make_shared<Thoth::TraceSubscriber>();
+    auto capture = std::make_shared<TestEpisodeCaptureSubscriber>();
+    auto throwing_proxy = std::make_shared<TestThrowingD3SubscriberProxy>();
+
+    std::shared_ptr<Thoth::IEpisodeEventSubscriber> metrics_slot = metrics;
+    std::shared_ptr<Thoth::IEpisodeEventSubscriber> trace_slot = trace;
+    if (throwing_metrics) {
+        throwing_proxy->inner = metrics;
+        throwing_proxy->label = "MetricsSubscriber";
+        metrics_slot = throwing_proxy;
+    } else {
+        throwing_proxy->inner = trace;
+        throwing_proxy->label = "TraceSubscriber";
+        trace_slot = throwing_proxy;
+    }
+
+    Thoth::InProcessEpisodeEventChannel channel;
+    subscribeD3Fanout(channel,
+                      D3FanoutOrder::EvalReplayMetricsTrace,
+                      eval,
+                      replay,
+                      metrics_slot,
+                      trace_slot,
+                      capture);
+    channel.publish(fixture);
+
+    if (!assertPublicationInvariant(channel, fixture)) {
+        return false;
+    }
+    if (throwing_proxy->deliveries != 1) {
+        std::cerr << "testE2D3_02ChannelFailureIsolation: throwing proxy not invoked once\n";
+        return false;
+    }
+    return assertNonThrowingExactlyOnce(replay, metrics, trace, capture, evalBaseline);
+}
+
+static bool testE2D3_02OrderingPermutation() {
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+    const nlohmann::json evalBaseline = evalBaselineOutputsForFixture(fixture);
+    const D3FanoutOrder orders[] = {D3FanoutOrder::EvalReplayMetricsTrace,
+                                    D3FanoutOrder::TraceMetricsReplayEval};
+
+    for (const D3FanoutOrder order : orders) {
+        auto eval = std::make_shared<Thoth::EvaluationSubscriber>();
+        auto replay = std::make_shared<Thoth::ReplaySubscriber>();
+        auto metrics = std::make_shared<Thoth::MetricsSubscriber>();
+        auto trace = std::make_shared<Thoth::TraceSubscriber>();
+        auto capture = std::make_shared<TestEpisodeCaptureSubscriber>();
+
+        Thoth::InProcessEpisodeEventChannel channel;
+        subscribeD3Fanout(channel, order, eval, replay, metrics, trace, capture);
+        channel.publish(fixture);
+
+        if (!assertPublicationInvariant(channel, fixture)) {
+            std::cerr << "testE2D3_02OrderingPermutation: publication invariant failed\n";
+            return false;
+        }
+        if (!assertNonThrowingExactlyOnce(replay, metrics, trace, capture, evalBaseline)) {
+            std::cerr << "testE2D3_02OrderingPermutation: delivery invariant failed\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool testE2D3_02ExecutiveFailureIsolation(const bool throwing_metrics) {
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    const std::string goal = "E2-D3-02 executive failure isolation goal";
+
+    std::shared_ptr<Thoth::EvaluationSubscriber> evalBaseline;
+    std::shared_ptr<Thoth::ReplaySubscriber> replayBaseline;
+    std::shared_ptr<Thoth::MetricsSubscriber> metricsBaseline;
+    std::shared_ptr<Thoth::TraceSubscriber> traceBaseline;
+    ExecutiveD1TestBed baseline("d3_02_baseline");
+    registerD3SubscribersOnExecutiveBed(
+        baseline, evalBaseline, replayBaseline, metricsBaseline, traceBaseline, nullptr, nullptr);
+    if (!baseline.runGoalToTerminal(goal)) {
+        std::cerr << "testE2D3_02ExecutiveFailureIsolation: baseline goal did not reach terminal\n";
+        return false;
+    }
+    const auto baselineState = baseline.controller->get_state();
+    const Plan baselinePlan = baseline.controller->get_current_plan();
+
+    std::shared_ptr<Thoth::EvaluationSubscriber> evalThrow;
+    std::shared_ptr<Thoth::ReplaySubscriber> replayThrow;
+    std::shared_ptr<Thoth::MetricsSubscriber> metricsThrow;
+    std::shared_ptr<Thoth::TraceSubscriber> traceThrow;
+    auto throwing_proxy = std::make_shared<TestThrowingD3SubscriberProxy>();
+    std::shared_ptr<Thoth::IEpisodeEventSubscriber> metrics_slot;
+    std::shared_ptr<Thoth::IEpisodeEventSubscriber> trace_slot;
+    ExecutiveD1TestBed throwingRun("d3_02_throwing");
+    if (throwing_metrics) {
+        throwing_proxy->label = "MetricsSubscriber";
+        registerD3SubscribersOnExecutiveBed(throwingRun,
+                                          evalThrow,
+                                          replayThrow,
+                                          metricsThrow,
+                                          traceThrow,
+                                          throwing_proxy,
+                                          nullptr);
+        throwing_proxy->inner = metricsThrow;
+    } else {
+        throwing_proxy->label = "TraceSubscriber";
+        registerD3SubscribersOnExecutiveBed(throwingRun,
+                                          evalThrow,
+                                          replayThrow,
+                                          metricsThrow,
+                                          traceThrow,
+                                          nullptr,
+                                          throwing_proxy);
+        throwing_proxy->inner = traceThrow;
+    }
+    if (!throwingRun.runGoalToTerminal(goal)) {
+        std::cerr << "testE2D3_02ExecutiveFailureIsolation: throwing run did not reach terminal\n";
+        return false;
+    }
+
+    if (throwing_proxy->deliveries != 1) {
+        std::cerr << "testE2D3_02ExecutiveFailureIsolation: throwing proxy not invoked once\n";
+        return false;
+    }
+    if (replayThrow->captureCount() != 1 || metricsThrow->deliveryCount() != 1 ||
+        traceThrow->segmentCount() != 1) {
+        std::cerr << "testE2D3_02ExecutiveFailureIsolation: non-throwing delivery count mismatch\n";
+        return false;
+    }
+    if (!executiveOutcomeEqual(*baseline.controller, *throwingRun.controller)) {
+        std::cerr << "testE2D3_02ExecutiveFailureIsolation: Executive terminal outcome changed\n";
+        return false;
+    }
+    if (throwingRun.controller->get_state() != baselineState) {
+        std::cerr << "testE2D3_02ExecutiveFailureIsolation: controller state mismatch\n";
+        return false;
+    }
+    const Plan throwingPlan = throwingRun.controller->get_current_plan();
+    if (throwingPlan.status != baselinePlan.status || throwingPlan.goal != baselinePlan.goal ||
+        throwingPlan.plan_id != baselinePlan.plan_id) {
+        std::cerr << "testE2D3_02ExecutiveFailureIsolation: plan outcome mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool runE2D3_02Tests() {
+    if (!testE2D3_02ChannelFailureIsolation(true)) {
+        std::cerr << "E2-D3-02 channel throwing-metrics failed\n";
+        return false;
+    }
+    if (!testE2D3_02ChannelFailureIsolation(false)) {
+        std::cerr << "E2-D3-02 channel throwing-trace failed\n";
+        return false;
+    }
+    if (!testE2D3_02OrderingPermutation()) {
+        std::cerr << "E2-D3-02 ordering permutation failed\n";
+        return false;
+    }
+    if (!testE2D3_02ExecutiveFailureIsolation(true)) {
+        std::cerr << "E2-D3-02 executive throwing-metrics failed\n";
+        return false;
+    }
+    if (!testE2D3_02ExecutiveFailureIsolation(false)) {
+        std::cerr << "E2-D3-02 executive throwing-trace failed\n";
+        return false;
+    }
+    std::cout << "E2-D3-02 failure isolation green\n";
+    return true;
+}
+
+// --- E2-D3-03: Structural audit (measure, don't interpret) ---
+
+static const std::vector<std::string>& d3SubscriberSourcePaths() {
+    static const std::vector<std::string> paths = {
+        "external/basic_agent/include/metrics_subscriber.h",
+        "external/basic_agent/src/metrics_subscriber.cpp",
+        "external/basic_agent/include/trace_subscriber.h",
+        "external/basic_agent/src/trace_subscriber.cpp"};
+    return paths;
+}
+
+static bool grepSubscriberSources(const std::vector<std::string>& paths,
+                                  const std::vector<std::string>& forbidden,
+                                  const char* audit_name) {
+    for (const auto& path : paths) {
+        const std::string source = readRepoSourceFile(path);
+        if (source.empty()) {
+            std::cerr << audit_name << ": cannot read " << path << '\n';
+            return false;
+        }
+        for (const auto& sym : forbidden) {
+            if (source.find(sym) != std::string::npos) {
+                std::cerr << audit_name << ": found forbidden symbol " << sym << " in " << path
+                          << '\n';
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool grepClassBody(const std::string& header_path,
+                          const std::string& class_name,
+                          const std::vector<std::string>& forbidden,
+                          const char* audit_name) {
+    const std::string header = readRepoSourceFile(header_path);
+    const std::string class_body = extractSubscriberClassBlock(header, class_name);
+    if (class_body.empty()) {
+        std::cerr << audit_name << ": cannot locate class " << class_name << '\n';
+        return false;
+    }
+    for (const auto& sym : forbidden) {
+        if (class_body.find(sym) != std::string::npos) {
+            std::cerr << audit_name << ": class " << class_name << " contains forbidden " << sym
+                      << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-D3-03 — narrow authority symbol grep (architectural authority only). */
+static bool testE2D3_03ForbiddenAuthoritySymbols() {
+    const std::vector<std::string> forbidden = {"episodic_evaluation_service.h",
+                                              "evaluation_subscriber.h",
+                                              "IEpisodicEvaluationService",
+                                              "resolveEvaluation",
+                                              "evaluateCase",
+                                              "evaluateEpisodicLearningCase",
+                                              "episodicDiagnosticService",
+                                              "ExecutiveController",
+                                              "execute_goal",
+                                              "e2_expectations",
+                                              "official_scoring",
+                                              "evaluation_resolution",
+                                              "e2_outcome"};
+    return grepSubscriberSources(d3SubscriberSourcePaths(), forbidden,
+                                 "testE2D3_03ForbiddenAuthoritySymbols");
+}
+
+/** E2-D3-03 — exclusive ownership: metrics ⊄ trace; trace ⊄ metrics aggregation. */
+static bool testE2D3_03ExclusiveOwnership() {
+    const std::vector<std::string> metrics_paths = {
+        "external/basic_agent/include/metrics_subscriber.h",
+        "external/basic_agent/src/metrics_subscriber.cpp"};
+    const std::vector<std::string> metrics_forbidden = {"TraceSegmentRecord",
+                                                        "segmentAtForTests",
+                                                        "segments_",
+                                                        "kRingCapacity",
+                                                        "correlation_keys"};
+    if (!grepSubscriberSources(metrics_paths, metrics_forbidden,
+                               "testE2D3_03ExclusiveOwnership(metrics)")) {
+        return false;
+    }
+
+    const std::vector<std::string> trace_paths = {
+        "external/basic_agent/include/trace_subscriber.h",
+        "external/basic_agent/src/trace_subscriber.cpp"};
+    const std::vector<std::string> trace_forbidden = {"MetricsRunAggregate",
+                                                      "histogramObserve",
+                                                      "counterIncrement",
+                                                      "counterAdd",
+                                                      "gaugeSet",
+                                                      "durationObserveMs",
+                                                      "observed_final_success_score",
+                                                      "metrics_schema_version"};
+    return grepSubscriberSources(trace_paths, trace_forbidden,
+                                 "testE2D3_03ExclusiveOwnership(trace)");
+}
+
+/** E2-D3-03 — immutability contract: const event view at API boundary. */
+static bool testE2D3_03ImmutabilityContract() {
+    const std::vector<std::pair<std::string, std::string>> headers = {
+        {"external/basic_agent/include/metrics_subscriber.h", "MetricsSubscriber"},
+        {"external/basic_agent/include/trace_subscriber.h", "TraceSubscriber"}};
+    for (const auto& [path, class_name] : headers) {
+        const std::string header = readRepoSourceFile(path);
+        if (header.find("onEpisodeCompleted(const EpisodeCompleted&") == std::string::npos) {
+            std::cerr << "testE2D3_03ImmutabilityContract: missing const event view in " << path
+                      << '\n';
+            return false;
+        }
+    }
+    return testE2D3Step1ImmutableEventView();
+}
+
+/** E2-D3-03 — ordering structural: no registration or delivery-sequence dependence. */
+static bool testE2D3_03OrderingStructural() {
+    const std::vector<std::string> forbidden = {"subscriberCount",
+                                                "firstDelivery",
+                                                "lastSubscriber",
+                                                "seen_before",
+                                                "delivery_index",
+                                                "registration_order",
+                                                "subscriber_index"};
+    return grepSubscriberSources(d3SubscriberSourcePaths(), forbidden,
+                                 "testE2D3_03OrderingStructural");
+}
+
+/** E2-D3-03 — subscribers own no publication mechanism (class bodies). */
+static bool testE2D3_03PublicationMechanism() {
+    const std::vector<std::string> class_forbidden = {"IEpisodeEventChannel*",
+                                                      "IEpisodeEventChannel&",
+                                                      "std::shared_ptr<IEpisodeEventChannel>",
+                                                      "publish("};
+    if (!grepClassBody("external/basic_agent/include/metrics_subscriber.h",
+                       "MetricsSubscriber",
+                       class_forbidden,
+                       "testE2D3_03PublicationMechanism")) {
+        return false;
+    }
+    if (!grepClassBody("external/basic_agent/include/trace_subscriber.h",
+                       "TraceSubscriber",
+                       class_forbidden,
+                       "testE2D3_03PublicationMechanism")) {
+        return false;
+    }
+    const std::vector<std::string> cpp_paths = {
+        "external/basic_agent/src/metrics_subscriber.cpp",
+        "external/basic_agent/src/trace_subscriber.cpp"};
+    return grepSubscriberSources(cpp_paths, {"publish("},
+                                 "testE2D3_03PublicationMechanism(cpp)");
+}
+
+/** E2-D3-03 — JSONL observational path: forbidden authority keys absent from builders. */
+static bool testE2D3_03JsonlObservationalPath() {
+    const std::string metrics_source =
+        readRepoSourceFile("external/basic_agent/src/metrics_subscriber.cpp");
+    if (metrics_source.empty()) {
+        std::cerr << "testE2D3_03JsonlObservationalPath: cannot read metrics source\n";
+        return false;
+    }
+    const std::vector<std::string> forbidden_keys = {"\"official_scoring\"",
+                                                     "\"e2_outcome\"",
+                                                     "\"evaluation_resolution\"",
+                                                     "\"success_rate\"",
+                                                     "\"lift\"",
+                                                     "\"pass\"",
+                                                     "\"fail\"",
+                                                     "\"recommendation\""};
+    for (const auto& key : forbidden_keys) {
+        if (metrics_source.find(key) != std::string::npos) {
+            std::cerr << "testE2D3_03JsonlObservationalPath: forbidden JSONL key " << key
+                      << " in metrics source\n";
+            return false;
+        }
+    }
+    const std::vector<std::string> required_allowed = {"\"metrics_schema_version\"",
+                                                       "\"observed_final_success_score\"",
+                                                       "\"terminal_state_label\""};
+    for (const auto& key : required_allowed) {
+        if (metrics_source.find(key) == std::string::npos) {
+            std::cerr << "testE2D3_03JsonlObservationalPath: missing allowed key " << key
+                      << " in metrics source\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+/** E2-D3-03 — authority boundary: no reverse edges into eval/Executive. */
+static bool testE2D3_03AuthorityBoundary() {
+    const std::vector<std::string> forbidden = {"EvaluationSubscriber",
+                                              "episodicEvaluationService",
+                                              "IEpisodicEvaluationService",
+                                              "resolveEvaluation",
+                                              "execute_goal",
+                                              "ExecutiveController"};
+    if (!grepSubscriberSources(d3SubscriberSourcePaths(), forbidden,
+                                 "testE2D3_03AuthorityBoundary")) {
+        return false;
+    }
+    return testE2D3_01MetricsSinkOnly();
+}
+
+static bool runE2D3_03Tests() {
+    if (!testE2D3_03ForbiddenAuthoritySymbols()) {
+        std::cerr << "E2-D3-03 forbidden authority symbols failed\n";
+        return false;
+    }
+    if (!testE2D3_03ExclusiveOwnership()) {
+        std::cerr << "E2-D3-03 exclusive ownership failed\n";
+        return false;
+    }
+    if (!testE2D3_03ImmutabilityContract()) {
+        std::cerr << "E2-D3-03 immutability contract failed\n";
+        return false;
+    }
+    if (!testE2D3_03OrderingStructural()) {
+        std::cerr << "E2-D3-03 ordering structural failed\n";
+        return false;
+    }
+    if (!testE2D3_03PublicationMechanism()) {
+        std::cerr << "E2-D3-03 publication mechanism failed\n";
+        return false;
+    }
+    if (!testE2D3_03JsonlObservationalPath()) {
+        std::cerr << "E2-D3-03 JSONL observational path failed\n";
+        return false;
+    }
+    if (!testE2D3_03AuthorityBoundary()) {
+        std::cerr << "E2-D3-03 authority boundary failed\n";
+        return false;
+    }
+    if (!testE2D3Step1StructuralAudit()) {
+        std::cerr << "E2-D3-03 step-1 structural audit regression failed\n";
+        return false;
+    }
+    std::cout << "E2-D3-03 structural audit green\n";
+    return true;
+}
+
+static bool testE2D3_05ConfigJsonRoundTrip() {
+    const fs::path tempPath = makeTempPath("thoth_d3_flags_config.json");
+
+    auto roundTrip = [&](bool metricsOn, bool traceOn) -> bool {
+        Config cfg;
+        cfg.enable_metrics_subscriber = metricsOn;
+        cfg.enable_trace_subscriber = traceOn;
+        if (!cfg.saveToJson(tempPath.string())) {
+            std::cerr << "testE2D3_05ConfigJsonRoundTrip: failed to save config\n";
+            return false;
+        }
+        Config loaded;
+        if (!loaded.loadFromJson(tempPath.string())) {
+            std::cerr << "testE2D3_05ConfigJsonRoundTrip: failed to load config\n";
+            return false;
+        }
+        if (loaded.enable_metrics_subscriber != metricsOn ||
+            loaded.enable_trace_subscriber != traceOn) {
+            std::cerr << "testE2D3_05ConfigJsonRoundTrip: flag mismatch after round-trip\n";
+            return false;
+        }
+        return true;
+    };
+
+    const bool ok = roundTrip(true, false) && roundTrip(false, true) && roundTrip(true, true) &&
+        roundTrip(false, false);
+    fs::remove(tempPath);
+    return ok;
+}
+
+static bool testE2D3_05PluginStructuralAudit() {
+    const std::string plugin =
+        readRepoSourceFile("external/basic_agent/src/basic_agent_plugin.cpp");
+    if (plugin.empty()) {
+        std::cerr << "testE2D3_05PluginStructuralAudit: cannot read basic_agent_plugin.cpp\n";
+        return false;
+    }
+    if (plugin.find("config.enable_metrics_subscriber && episode_event_channel_") ==
+            std::string::npos ||
+        plugin.find("Thoth::registerMetricsSubscriber(*episode_event_channel_)") ==
+            std::string::npos ||
+        plugin.find("config.enable_trace_subscriber && episode_event_channel_") ==
+            std::string::npos ||
+        plugin.find("Thoth::registerTraceSubscriber(*episode_event_channel_)") ==
+            std::string::npos) {
+        std::cerr << "testE2D3_05PluginStructuralAudit: flag-gated registration blocks missing\n";
+        return false;
+    }
+
+    const std::string executive =
+        readRepoSourceFile("external/basic_agent/src/executive_controller.cpp");
+    if (executive.empty()) {
+        std::cerr << "testE2D3_05PluginStructuralAudit: cannot read executive_controller.cpp\n";
+        return false;
+    }
+    const std::vector<std::string> forbiddenExecutive = {"enable_metrics_subscriber",
+                                                         "enable_trace_subscriber",
+                                                         "MetricsSubscriber",
+                                                         "TraceSubscriber",
+                                                         "registerMetricsSubscriber",
+                                                         "registerTraceSubscriber"};
+    for (const auto& sym : forbiddenExecutive) {
+        if (executive.find(sym) != std::string::npos) {
+            std::cerr << "testE2D3_05PluginStructuralAudit: Executive references " << sym << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool testE2D3_05ProductionOnlyRegistrationPath() {
+    const std::vector<std::string> allowMetrics = {
+        "external/basic_agent/src/basic_agent_plugin.cpp",
+        "external/basic_agent/src/metrics_subscriber.cpp"};
+    const std::vector<std::string> allowTrace = {
+        "external/basic_agent/src/basic_agent_plugin.cpp",
+        "external/basic_agent/src/trace_subscriber.cpp"};
+
+    FileHandler fh;
+    const fs::path srcRoot = fs::path(fh.getProjectRoot()) / "external/basic_agent/src";
+    if (!fs::is_directory(srcRoot)) {
+        std::cerr << "testE2D3_05ProductionOnlyRegistrationPath: missing src directory\n";
+        return false;
+    }
+
+    for (const auto& entry : fs::directory_iterator(srcRoot)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".cpp") {
+            continue;
+        }
+        const std::string rel = "external/basic_agent/src/" + entry.path().filename().string();
+        const std::string source = readRepoSourceFile(rel);
+        if (source.empty()) {
+            std::cerr << "testE2D3_05ProductionOnlyRegistrationPath: cannot read " << rel << '\n';
+            return false;
+        }
+        if (source.find("registerMetricsSubscriber") != std::string::npos &&
+            std::find(allowMetrics.begin(), allowMetrics.end(), rel) == allowMetrics.end()) {
+            std::cerr << "testE2D3_05ProductionOnlyRegistrationPath: unexpected metrics registration "
+                         "in "
+                      << rel << '\n';
+            return false;
+        }
+        if (source.find("registerTraceSubscriber") != std::string::npos &&
+            std::find(allowTrace.begin(), allowTrace.end(), rel) == allowTrace.end()) {
+            std::cerr << "testE2D3_05ProductionOnlyRegistrationPath: unexpected trace registration in "
+                      << rel << '\n';
+            return false;
+        }
+    }
+
+    const std::string plugin =
+        readRepoSourceFile("external/basic_agent/src/basic_agent_plugin.cpp");
+    if (plugin.find("registerMetricsSubscriber") == std::string::npos ||
+        plugin.find("registerTraceSubscriber") == std::string::npos) {
+        std::cerr << "testE2D3_05ProductionOnlyRegistrationPath: plugin missing registration calls\n";
+        return false;
+    }
+    return true;
+}
+
+struct E2D3PluginWorkspaceGuard {
+    fs::path workspace;
+    std::string priorWorkspaceEnv;
+    bool hadWorkspaceEnv = false;
+
+    bool prepare(bool metricsOn, bool traceOn) {
+        workspace = makeTempPath("thoth_e2_d3_plugin_workspace");
+        fs::create_directories(workspace);
+
+        Config cfg;
+        cfg.enable_metrics_subscriber = metricsOn;
+        cfg.enable_trace_subscriber = traceOn;
+        cfg.enable_episodic_evaluation_publication = false;
+        cfg.enable_episode_replay_subscriber = false;
+        if (!cfg.saveToJson((workspace / "config.json").string())) {
+            return false;
+        }
+
+        if (const char* prior = std::getenv("THOTH_WORKSPACE_PATH"); prior && *prior) {
+            hadWorkspaceEnv = true;
+            priorWorkspaceEnv = prior;
+        }
+        setenv("THOTH_WORKSPACE_PATH", workspace.string().c_str(), 1);
+        setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+        setenv("THOTH_MOCK_LLM", "true", 1);
+        return true;
+    }
+
+    void restore() {
+        if (hadWorkspaceEnv) {
+            setenv("THOTH_WORKSPACE_PATH", priorWorkspaceEnv.c_str(), 1);
+        } else {
+            unsetenv("THOTH_WORKSPACE_PATH");
+        }
+        unsetenv("THOTH_TEST_SUITE_DEV");
+        unsetenv("THOTH_MOCK_LLM");
+        fs::remove_all(workspace);
+    }
+};
+
+static bool verifyD3PluginChannelRegistration(Thoth::InProcessEpisodeEventChannel& channel,
+                                             bool expectMetrics,
+                                             bool expectTrace) {
+    const std::size_t expectedCount =
+        (expectMetrics ? 1u : 0u) + (expectTrace ? 1u : 0u);
+    if (channel.subscriberCountForTests() != expectedCount) {
+        std::cerr << "verifyD3PluginChannelRegistration: subscriber count "
+                  << channel.subscriberCountForTests() << " expected " << expectedCount << '\n';
+        return false;
+    }
+
+    const bool metricsOnChannel =
+        Thoth::MetricsSubscriber::isRegisteredOnChannelForTests(channel);
+    const bool traceOnChannel = Thoth::TraceSubscriber::isRegisteredOnChannelForTests(channel);
+    if (metricsOnChannel != expectMetrics || traceOnChannel != expectTrace) {
+        std::cerr << "verifyD3PluginChannelRegistration: identity mismatch metrics="
+                  << metricsOnChannel << " trace=" << traceOnChannel << '\n';
+        return false;
+    }
+
+    const Thoth::EpisodeCompleted fixture = makeE2D2FixtureEvent();
+    channel.publish(fixture);
+
+    const std::size_t metricsDeliveries = Thoth::MetricsSubscriber::deliveryCountForTests();
+    const std::size_t traceSegments = Thoth::TraceSubscriber::segmentCountForTests();
+    const bool metricsDelivered = metricsDeliveries == 1;
+    const bool traceDelivered = traceSegments == 1;
+    if (metricsDelivered != expectMetrics || traceDelivered != expectTrace) {
+        std::cerr << "verifyD3PluginChannelRegistration: delivery mismatch metrics="
+                  << metricsDeliveries << " trace=" << traceSegments << '\n';
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D3_05PluginRegistrationIntegration() {
+    struct FlagCase {
+        bool metrics;
+        bool trace;
+    };
+    const FlagCase cases[] = {{false, false}, {true, false}, {false, true}, {true, true}};
+
+    for (const auto& flagCase : cases) {
+        E2D3PluginWorkspaceGuard guard;
+        if (!guard.prepare(flagCase.metrics, flagCase.trace)) {
+            std::cerr << "testE2D3_05PluginRegistrationIntegration: workspace prepare failed\n";
+            return false;
+        }
+
+        {
+            BasicAgentPlugin plugin;
+            Thoth::InProcessEpisodeEventChannel* channel = plugin.episodeEventChannelForTests();
+            if (!channel) {
+                std::cerr << "testE2D3_05PluginRegistrationIntegration: missing channel\n";
+                guard.restore();
+                return false;
+            }
+            if (!verifyD3PluginChannelRegistration(*channel, flagCase.metrics, flagCase.trace)) {
+                guard.restore();
+                return false;
+            }
+        }
+        guard.restore();
+    }
+    return true;
+}
+
+static bool runE2D3_05Tests() {
+    if (!testE2D3_05ConfigJsonRoundTrip()) {
+        std::cerr << "E2-D3-05 config JSON round-trip failed\n";
+        return false;
+    }
+    if (!testE2D3_05PluginStructuralAudit()) {
+        std::cerr << "E2-D3-05 plugin structural audit failed\n";
+        return false;
+    }
+    if (!testE2D3_05ProductionOnlyRegistrationPath()) {
+        std::cerr << "E2-D3-05 production-only registration path failed\n";
+        return false;
+    }
+    if (!testE2D3_05PluginRegistrationIntegration()) {
+        std::cerr << "E2-D3-05 plugin registration integration failed\n";
+        return false;
+    }
+    std::cout << "E2-D3-05 plugin/config integration proof green\n";
+    return true;
+}
+
+static bool runE2D3Tests() {
+    if (!runE2D3Step1Tests()) {
+        std::cerr << "E2-D3 proof suite Step 1 failed\n";
+        return false;
+    }
+    if (!runE2D3_01Tests()) {
+        std::cerr << "E2-D3 proof suite Step 2 (E2-D3-01) failed\n";
+        return false;
+    }
+    if (!runE2D3_02Tests()) {
+        std::cerr << "E2-D3 proof suite Step 3 (E2-D3-02) failed\n";
+        return false;
+    }
+    if (!runE2D3_03Tests()) {
+        std::cerr << "E2-D3 proof suite Step 4 (E2-D3-03) failed\n";
+        return false;
+    }
+    if (!runE2D3_05Tests()) {
+        std::cerr << "E2-D3 proof suite Step 5 failed\n";
+        return false;
+    }
+    std::cout << "E2-D3 full proof suite (Steps 1-5) green\n";
     return true;
 }
 
@@ -6842,6 +8749,92 @@ static bool testE2EpisodicLearningBenchmarkSmoke() {
 }
 
 int main() {
+    if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
+        if (parallelOnly[0] == '1') {
+            return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* d3 = std::getenv("THOTH_E2_D3")) {
+        if (d3[0] != '0' && std::string(d3) != "false") {
+            if (!runE2D3Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D3 gate passed (full proof suite).\n";
+            return 0;
+        }
+    }
+
+    if (const char* d3_05 = std::getenv("THOTH_E2_D3_05")) {
+        if (d3_05[0] != '0' && std::string(d3_05) != "false") {
+            if (!runE2D3_05Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D3-05 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* d3_03 = std::getenv("THOTH_E2_D3_03")) {
+        if (d3_03[0] != '0' && std::string(d3_03) != "false") {
+            if (!runE2D3_03Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D3-03 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* d3_02 = std::getenv("THOTH_E2_D3_02")) {
+        if (d3_02[0] != '0' && std::string(d3_02) != "false") {
+            if (!runE2D3_02Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D3-02 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* d3_01 = std::getenv("THOTH_E2_D3_01")) {
+        if (d3_01[0] != '0' && std::string(d3_01) != "false") {
+            if (!runE2D3_01Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D3-01 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* d3step1 = std::getenv("THOTH_E2_D3_STEP1")) {
+        if (d3step1[0] != '0' && std::string(d3step1) != "false") {
+            if (!runE2D3Step1Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D3 Step 1 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* d2 = std::getenv("THOTH_E2_D2")) {
+        if (d2[0] != '0' && std::string(d2) != "false") {
+            if (!runE2D2Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D2 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* d1 = std::getenv("THOTH_E2_D1")) {
+        if (d1[0] != '0' && std::string(d1) != "false") {
+            if (!runE2D1Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D1 gate passed.\n";
+            return 0;
+        }
+    }
+
     if (const char* matrix = std::getenv("THOTH_E2_C5_MATRIX")) {
         if (matrix[0] == '1') {
             printE2C5EquivalenceMatrix();
@@ -6991,6 +8984,9 @@ int main() {
     if (!testE2C2IntegrationEnvelope()) failures++;
     if (!testE2C2SubscriberNoExecutionLogic()) failures++;
     if (!testE2C2MappingDeterministic()) failures++;
+    if (!testE2D1MultiSubscriberDelivery()) failures++;
+    if (!testE2D1ExecutiveFailureIsolation()) failures++;
+    if (!testE2D1ExecutiveInvisibilityAudit()) failures++;
     if (!testE2C3NoEvaluationCoupling()) failures++;
     if (!testE2C3Determinism()) failures++;
     if (!testE2C3NonInterference()) failures++;
