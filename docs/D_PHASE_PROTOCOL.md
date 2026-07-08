@@ -627,29 +627,16 @@ Pause for review after each D4 step and after D4 composition gate (`THOTH_E2_D4=
 
 ### D5 — Evolution trust proof & close-out
 
+**Authority:** [`docs/D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒 — D5 trust contract  
+**Implementation plan:** `cursor_list.md` § **D.5.0** (draft against locked protocol — not yet approved)
+
 **Question:** After all D changes, is trust still intact?
 
 > **D5 mirrors C5:** not “prove the new thing works” — **prove nothing important changed.**
 
-**Scope**
+D5 is a **meta-proof**, not a feature phase. It verifies the composed proof surface after D1–D4 evolution. Full contract: four constitutional invariants, sub-gates (`THOTH_E2_D5_AUTHORITY`, `THOTH_E2_D5_C5`, `THOTH_E2_D5_DETERMINISM`), closure gate (`THOTH_E2_D5=1`), coverage-gap rule, and reopening boundary — see **`D5_PROTOCOL.md`**.
 
-- Re-run C5 equivalence matrix on mapping-safe fixtures (E2-01..03)
-- Re-run Phase B two-run fingerprint gate (E2-28)
-- Full regression: E2-C1..C5 + E2-D1..D4
-- Passive Consumer Law structural audit on all new subscribers
-- `docs/phases/PHASE_D_COMPLETE.md`
-- Optional housekeeping: split E2-C5-03 into independent snapshot assertions (traceability only)
-
-#### Exit criteria
-
-| Gate | Must pass |
-|------|-----------|
-| C5 path equivalence | MATCH on golden fixtures |
-| Phase B fingerprint | Unchanged on consecutive `B` runs |
-| Constitutional Rule | No subscriber influences execution or scoring |
-| Passive Consumer Law | All five conditions per subscriber |
-| INTEGRATION boundary | No `official_scoring: true` from production live path |
-| Phase C regression | E2-C1..C5 green |
+**Preregistered IDs:** E2-D5-01 (C5 re-pass), E2-D5-02 (Phase B two-run gate), E2-D5-03 (Passive Consumer Law audit).
 
 **Pause before Phase E.**
 
@@ -723,7 +710,7 @@ Pause for review after each D4 step and after D4 composition gate (`THOTH_E2_D4=
 | Metrics / trace | `metrics_subscriber.h` / `.cpp`, `trace_subscriber.h` / `.cpp` (new) |
 | Integration connection | `evaluation_subscriber.cpp` (live path verification only) |
 | Tests | `tests/unit_tests.cpp` (E2-D1..D5) |
-| Docs | This file, `PHASE_D_COMPLETE.md`, `cursor_list.md` § D.0.0 |
+| Docs | [`D5_PROTOCOL.md`](D5_PROTOCOL.md), this file, `PHASE_D_COMPLETE.md`, `cursor_list.md` § D.0.0 / § D.5.0 |
 
 ---
 
@@ -742,4 +729,4 @@ Pause for review after each D4 step and after D4 composition gate (`THOTH_E2_D4=
 **Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4:** complete 2026-07-08 (`THOTH_E2_D4=1` composition proof green)  
 **Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 containment + live-path definition + protocol lock; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 ✅ complete** — paused before **D5** (evolution trust proof).
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 ✅ complete** — **D5 protocol locked** v0.1 ([`D5_PROTOCOL.md`](D5_PROTOCOL.md)) — paused before § D.5.0 implementation plan.

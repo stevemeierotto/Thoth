@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D4 complete** — composition proof `THOTH_E2_D4=1` ✅; paused before D5)  
+**Last updated:** 2026-07-08 (E2 **D5 protocol locked** v0.1 — [`docs/D5_PROTOCOL.md`](D5_PROTOCOL.md))  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** **D4 ✅ complete** — paused before **D5** (evolution trust proof). All D4 steps green.
+**Active E2 work:** 🔒 **D5 protocol locked** — draft § D.5.0 implementation plan against [`D5_PROTOCOL.md`](D5_PROTOCOL.md); await explicit implementation approval. D4 ✅ complete.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -273,7 +273,7 @@ If a component influences planning, retrieval, memory, evaluation, or benchmark 
 | **E2-D2** | Replay subscriber — replay changes **time** | Passive Consumer Law; replay removal → benchmark unchanged |
 | **E2-D3** | Metrics + trace subscribers — observation changes, not time | Measure, don't interpret (C4 philosophy) |
 | **E2-D4** | Live INTEGRATION connection — wire diagnostic mode to production path | E2-06 contract; STRICT path uncontaminated |
-| **E2-D5** | Evolution trust proof — mirror C5 | C5 matrix + Phase B fingerprint + `PHASE_D_COMPLETE.md` |
+| **E2-D5** | Evolution trust proof — meta-proof over composed D surface | [`D5_PROTOCOL.md`](D5_PROTOCOL.md); `THOTH_E2_D5=1` + sub-gates; `PHASE_D_COMPLETE.md` |
 
 **Time estimate:** D1 **3–5 h**; D2 **3–4 h**; D3 **4–6 h**; D4 **3–5 h**; D5 **2–4 h**.
 
@@ -1584,7 +1584,37 @@ On green gate, `runE2D4Tests()` records:
 | STRICT harness / `wiring_stage=B` fingerprint | Must remain stable |
 | D3 subscribers | Contract frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — **D4 Step 4 ✅** — **D4 Step 5 ✅** — **D4 complete** — paused before **D5** (evolution trust proof).
+**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — **D4 Step 4 ✅** — **D4 Step 5 ✅** — **D4 complete** — paused before **D5** protocol lock.
+
+#### D.5.0 — E2-D5 implementation plan (evolution trust proof — **await protocol lock**)
+
+**Authority:** [`docs/D5_PROTOCOL.md`](D5_PROTOCOL.md) — D5 trust contract  
+**Prerequisites:** D1 ✅, D2 ✅, D3 ✅, D4 ✅ (`THOTH_E2_D4=1`)  
+**Estimate:** 2–4 h (orchestration + evidence only — no production changes)  
+**Status:** 📋 **Awaiting implementation plan** — protocol 🔒 locked v0.1 ([`D5_PROTOCOL.md`](D5_PROTOCOL.md)); draft § D.5.0 against locked protocol before implementation approval
+
+##### Mandatory order
+
+1. Review / refine `D5_PROTOCOL.md` (draft)  
+2. **Lock** protocol (commit)  
+3. Draft / refine § D.5.0 implementation plan against locked protocol  
+4. Explicit implementation approval  
+5. Implement + verify `THOTH_E2_D5=1` and sub-gates  
+
+**Do not implement until step 2 completes.**
+
+##### Proof obligation (summary — see protocol for full contract)
+
+> D5 proves accumulated D-phase evolution preserved authority boundaries, deterministic behavior, and benchmark equivalence — without re-proving every lower-level invariant.
+
+| Invariant | Sub-gate | ID |
+|-----------|----------|-----|
+| Authority preservation | `THOTH_E2_D5_AUTHORITY=1` | E2-D5-03 |
+| Behavioral preservation | `THOTH_E2_D5_C5=1` | E2-D5-01 |
+| Determinism preservation | `THOTH_E2_D5_DETERMINISM=1` | E2-D5-02 |
+| Evidence completeness | `THOTH_E2_D5=1` | (closure) |
+
+**Full detail:** [`D5_PROTOCOL.md`](D5_PROTOCOL.md) — constitutional invariants, frozen surface, intentionally not re-proven, coverage-gap rule, reopening boundary.
 
 ### Separation debt (acknowledged)
 
@@ -1904,7 +1934,7 @@ Done    E2 Phase D4 Step 2 — E2-D4-01 live plugin path (`THOTH_E2_D4_01=1`) �
 Done    E2 Phase D4 Step 3 — E2-D4-02 STRICT authority preservation (`THOTH_E2_D4_02=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D5** — evolution trust proof (full suite, G2, Phase B fingerprint)
+Next 1  **E2 Phase D5** — draft § D.5.0 implementation plan ([`D5_PROTOCOL.md`](D5_PROTOCOL.md) 🔒 locked v0.1)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
