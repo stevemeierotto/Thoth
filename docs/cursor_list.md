@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D4 Step 4 locked** § D.4.0 Step 4; Step 3 ✅)  
+**Last updated:** 2026-07-08 (E2 **D4 Step 5 locked** § D.4.0 Step 5 composition proof; Step 4 ✅)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D4 Step 4 locked** (§ D.4.0 Step 4) — backward-compat regressions; await explicit implementation approval. Step 3 ✅ · Step 2 ✅ · Step 1 ✅ · D3 ✅.
+**Active E2 work:** 🔒 **D4 Step 5 locked** (§ D.4.0 Step 5) — composition proof `THOTH_E2_D4=1`; await explicit implementation approval. Step 4 ✅ · Step 3 ✅ · Step 2 ✅ · Step 1 ✅ · D3 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -959,14 +959,14 @@ Implementation may add tests and minimal wiring only; protocol documents change 
 
 ##### Implementation order (pause between steps)
 
-| Step | Work | Gate (proposed) |
-|------|------|-----------------|
-| **1** | Production wiring seam confirmation — structural audit only (§ D.4.0 Step 1) | `THOTH_E2_D4_STEP1=1` |
-| **2** | **E2-D4-01** — live plugin path: presence + containment + `integrationDefaults()` behavioral negative proof | `THOTH_E2_D4_01=1` |
-| **3** | **E2-D4-02** — STRICT authority preservation audit | `THOTH_E2_D4_02=1` |
-| **4** | Backward-compat regressions — D3, D2, D1, C5 with flags default OFF | `THOTH_E2_D4_STEP4=1` |
-| **5** | Umbrella — full D4 proof suite | `THOTH_E2_D4=1` |
-| **6** | **Pause for review** before D5 |
+| Step | Proof type | Gate (proposed) |
+|------|------------|-----------------|
+| **1** | Structural seam proof | `THOTH_E2_D4_STEP1=1` |
+| **2** | Live INTEGRATION behavior proof (**E2-D4-01**) | `THOTH_E2_D4_01=1` |
+| **3** | STRICT authority preservation proof (**E2-D4-02**) | `THOTH_E2_D4_02=1` |
+| **4** | Backward compatibility proof | `THOTH_E2_D4_STEP4=1` |
+| **5** | Composition proof | `THOTH_E2_D4=1` |
+| **6** | **Pause for review** before **D5** (evolution trust proof) |
 
 **Verification scope (Steps 2–5):** Targeted env gates only — full suite / G2 deferred to **D5** unless explicitly requested (same discipline as D3).
 
@@ -1065,7 +1065,7 @@ If D3 proved observers can observe, Step 2 proves **production can emit diagnost
 |----------------------------|--------------------------------------|
 | **Presence** — INTEGRATION tier, diagnostic metadata, E2-06 required fields | STRICT authority preservation (Step 3) |
 | **Containment** — containment contract (§ above) | INTEGRATION ≡ STRICT equivalence or promotion |
-| **Behavioral negative** — `integrationDefaults()` with test seam unset; no STRICT config injected | Full D4 umbrella / D5 regression |
+| **Behavioral negative** — `integrationDefaults()` with test seam unset; no STRICT config injected | D4 composition proof / **D5** evolution trust proof |
 | Live plugin path (canonical definition § above) | Deployed / external-user runtime |
 
 **Proof ladder:** Step 1 = config selection · **Step 2 = presence + containment + integrationDefaults negative proof on live plugin path**
@@ -1189,7 +1189,7 @@ Step 2 proved INTEGRATION can observe without acquiring authority. Step 3 proves
 |---------------|--------------------------------------|
 | **STRICT presence** — official harness envelope fields (`wiring_stage=B`, `official_scoring=true`, golden rollup) | INTEGRATION presence/containment (Step 2) |
 | **Authority preservation** — scoped `B` snapshot matches baseline with eval publication ON | INTEGRATION ≡ STRICT equivalence or promotion |
-| **Isolation** — no INTEGRATION/diagnostic authority on STRICT official artifacts | Full D4 umbrella / D5 regression |
+| **Isolation** — no INTEGRATION/diagnostic authority on STRICT official artifacts | D4 composition proof / **D5** evolution trust proof |
 | **Determinism** — two identical `B` builds with D4 wiring produce identical scoped snapshots | Deployed / external-user runtime |
 | D4 workspace + channel publication during golden harness runs | Production code changes without verified wiring defect |
 
@@ -1276,7 +1276,7 @@ Step 3 tests **separate** presence, preservation, and isolation (distinct test f
 3. Presence proof — official STRICT envelope fields present  
 4. Preservation proof — scoped `B` equivalence unchanged with eval publication ON (+ D4 workspace variant)  
 5. Isolation proof — no INTEGRATION authority on STRICT official artifacts  
-6. **Deferred:** Step 4 regressions · Step 5 umbrella `THOTH_E2_D4=1`  
+6. **Deferred:** Step 4 backward compatibility · Step 5 composition proof (`THOTH_E2_D4=1`)  
 
 ###### Step 3 exit criteria
 
@@ -1295,7 +1295,7 @@ Step 3 tests **separate** presence, preservation, and isolation (distinct test f
 
 ##### D.4.0 Step 4 — backward-compat regressions (**v1 locked**)
 
-**Status:** 🔒 **LOCKED** (2026-07-08) — paused before implementation (AGENTS.md gate)
+**Status:** 🔒 **LOCKED** (2026-07-08) — ✅ **Step 4 complete** (2026-07-08) — paused before Step 5.
 
 ###### Core invariant (why Step 4 exists)
 
@@ -1312,12 +1312,12 @@ Step 4 is **regression only** — no new proof obligations, no new preregistered
 | Step 4 proves | Step 4 does **not** prove (deferred) |
 |---------------|--------------------------------------|
 | **D3 regression** — full D3 proof suite (`THOTH_E2_D3=1`) | D4 Steps 1–3 obligations (already proven) |
-| **D2 regression** — replay + authority isolation (`THOTH_E2_D2=1`) | D4 umbrella close-out (Step 5) |
+| **D2 regression** — replay + authority isolation (`THOTH_E2_D2=1`) | D4 composition close-out (Step 5) |
 | **D1 regression** — channel fan-out + invisibility (`THOTH_E2_D1=1`) | Full unit-test suite / G2 (D5) |
 | **C5 regression** — path equivalence matrix (`THOTH_E2_C5=1`) | New subscriber or protocol behavior |
 | Flags-default-OFF discipline during regression run | Deployed / external-user runtime |
 
-**Proof ladder:** Steps 1–3 = D4 obligations · **Step 4 = prior phases unchanged** · Step 5 = umbrella
+**Proof ladder:** Step 1 = structural seam · Step 2 = live INTEGRATION behavior · Step 3 = STRICT authority preservation · **Step 4 = backward compatibility** · Step 5 = composition proof · D5 = evolution trust proof
 
 ###### Default flag contract (locked — regression run discipline)
 
@@ -1344,7 +1344,7 @@ Regression gates run with **no D4 wiring activated**. The following must remain 
 
 **Call, do not duplicate:** Step 4 invokes existing orchestrators — no reimplementation of D1/D2/D3/C5 test bodies.
 
-**D4 Step 3 not re-run in Step 4:** Step 3 is not re-run in Step 4 because authority preservation was already proven and committed at the D4 Step 3 checkpoint; Step 4 is limited to backward-compatibility regression validation. (`runE2D4_02Tests()` is omitted — avoids ~7 min duplicate.) Step 5 umbrella includes D4 Steps 1–4 together.
+**D4 Step 3 not re-run in Step 4:** Step 3 is not re-run in Step 4 because authority preservation was already proven and committed at the D4 Step 3 checkpoint; Step 4 is limited to backward-compatibility regression validation. (`runE2D4_02Tests()` is omitted — avoids ~7 min duplicate.) Step 5 composition proof includes D4 Steps 1–4 together.
 
 ###### Step 4 forbidden (locked)
 
@@ -1386,7 +1386,7 @@ On green gate, Step 4 records:
 5. `THOTH_E2_C5=1` pass (via `runE2C5RegressionGate()`)  
 6. Default flag contract verified — no D4 workspace harness with eval publication enabled  
 7. **Conclusion:** no backward-compat regression detected  
-8. **Deferred:** Step 5 umbrella `THOTH_E2_D4=1`  
+8. **Deferred:** Step 5 composition proof (`THOTH_E2_D4=1`)  
 
 ###### Step 4 exit criteria
 
@@ -1402,29 +1402,161 @@ On green gate, Step 4 records:
 | `tests/unit_tests.cpp` | `runE2C5RegressionGate()` + `runE2D4Step4Tests()` + gate |
 | `external/basic_agent/*` | **None** |
 
-##### D.4.0 Step 5 — D4 umbrella proof suite (**outline — lock at Step 4 close**)
+##### D.4.0 Step 5 — composition proof (**v1 locked**)
 
-**Purpose:** Close D4 by running Steps 1–4 under one env gate — prove all D4 obligations hold together.
+**Status:** 🔒 **LOCKED** (2026-07-08) — paused before implementation (AGENTS.md gate)
 
-| Work | Gate |
-|------|------|
-| `runE2D4Tests()` orchestrates Steps 1–4 | `THOTH_E2_D4=1` |
-| Step 1 → `runE2D4Step1Tests()` | |
-| Step 2 → `runE2D4_01Tests()` (includes Step 1 regression) | |
-| Step 3 → `runE2D4_02Tests()` (includes Steps 1–2 regression) | |
-| Step 4 → `runE2D4Step4Tests()` | |
+###### D4 proof ladder (canonical — locked)
 
-**Forbidden:** Full unit-test suite / G2 (deferred to D5).
+| Step | Proof type | Gate |
+|------|------------|------|
+| **1** | Structural seam proof | `THOTH_E2_D4_STEP1=1` |
+| **2** | Live INTEGRATION behavior proof | `THOTH_E2_D4_01=1` |
+| **3** | STRICT authority preservation proof | `THOTH_E2_D4_02=1` |
+| **4** | Backward compatibility proof | `THOTH_E2_D4_STEP4=1` |
+| **5** | Composition proof | `THOTH_E2_D4=1` |
+| **D5** | Evolution trust proof | (D5 phase — deferred) |
 
-**Deferred detail:** Full step plan locked at Step 4 close-out (same discipline as Step 3 → Step 4).
+###### Core invariant (why Step 5 exists)
 
-##### D4 Step 5 exit criteria (umbrella gate)
+> **Each D4 step proved a distinct obligation in isolation. Step 5 proves all D4 obligations still hold together under one gate.**
+
+Steps 1–4 are individually green and committed. Step 5 is the **D4 composition orchestrator** — not new proof logic. It answers: “If I run the full D4 proof ladder once, does everything still pass?”
+
+###### Step 5 question (locked boundary)
+
+> **Step 5 answers: “Under `THOTH_E2_D4=1`, do structural seam, live INTEGRATION behavior, STRICT authority preservation, and backward compatibility proofs all green in one run?”**
+
+| Step 5 proves | Step 5 does **not** prove (deferred) |
+|---------------|--------------------------------------|
+| **Composition** — Steps 1–4 orchestrators compose without failure | New D4 proof obligations or preregistered test IDs |
+| **Live INTEGRATION behavior** — E2-D4-01 presence + containment + `integrationDefaults()` negative (via nested `runE2D4_01Tests()` in Phase A) | Full unit-test suite / G2 `ctest` (**D5** evolution trust proof) |
+| **STRICT authority preservation** — E2-D4-02 scoped equivalence stable (via `runE2D4_02Tests()`) | Phase B two-run fingerprint gate (**D5**) |
+| **Backward compatibility** — D3, D2, D1, C5 with flags default OFF (via `runE2D4Step4Tests()`) | Deployed / external-user runtime |
+| **D4-I1..I7** — collectively satisfied by Steps 1–3 evidence chain | INTEGRATION ≡ STRICT promotion or lift claims |
+| Evidence chain recorded for **D5** evolution trust proof | Protocol document edits without explicit approval |
+
+**Proof ladder (complete):** Step 1 = structural seam · Step 2 = live INTEGRATION behavior · Step 3 = STRICT authority preservation · Step 4 = backward compatibility · **Step 5 = composition proof** · D5 = evolution trust proof
+
+###### Orchestration contract (locked — call composition, not duplication)
+
+**Critical rule:** Do **not** naively call all four step orchestrators sequentially. Nested regressions already exist:
+
+| Orchestrator | Already includes |
+|--------------|------------------|
+| `runE2D4_01Tests()` | Step 1 via `runE2D4Step1Tests()` at end |
+| `runE2D4_02Tests()` | Steps 1–2 via `runE2D4_01Tests()` at end |
+| `runE2D4Step4Tests()` | D3, D2, D1, C5 only — **no** D4 Steps 1–3 |
+
+**Composition (locked):**
+
+| Phase | Orchestrator | Covers | Gate equivalent |
+|-------|--------------|--------|-----------------|
+| **A** | `runE2D4_02Tests()` | Steps 1–3 (structural + live behavior + authority preservation) | `THOTH_E2_D4_02=1` |
+| **B** | `runE2D4Step4Tests()` | Step 4 (backward compatibility) | `THOTH_E2_D4_STEP4=1` |
+
+```cpp
+static bool runE2D4Tests() {
+    if (!runE2D4_02Tests()) return false;   // Phase A: Steps 1–3
+    if (!runE2D4Step4Tests()) return false; // Phase B: Step 4
+    return true;
+}
+```
+
+**Call, do not duplicate:** Step 5 invokes existing orchestrators only — no reimplementation of Step 1–4 test bodies.
+
+**Order locked:** Phase A (D4 wiring obligations) **before** Phase B (flags-default-OFF backward compatibility). Rationale: prove containment and authority preservation first; then prove prior phases unchanged with wiring disabled.
+
+###### Default flag contract (Step 5 discipline)
+
+| Segment | Flag discipline |
+|---------|-----------------|
+| Phase A (`runE2D4_02Tests()`) | D4 workspace harness **may** enable `enable_episodic_evaluation_publication` per existing Step 2/3 tests |
+| Phase B (`runE2D4Step4Tests()`) | `verifyD4Step4DefaultFlagContract()` runs first — all five subscriber/eval flags **OFF** before D3/D2/D1/C5 regressions |
+
+Step 5 does **not** merge these contexts — each phase owns its env setup/teardown via existing guards.
+
+###### Step 5 forbidden (locked)
+
+- New proof obligations or preregistered test IDs (`E2-D4-03`, etc.)
+- New `testE2D4_*` test functions — orchestration only
+- Calling `runE2D4Step1Tests()`, `runE2D4_01Tests()`, `runE2D4_02Tests()`, and `runE2D4Step4Tests()` **all four** sequentially (triple-runs Step 1, double-runs Steps 1–2)
+- Re-open INTEGRATION ≡ STRICT equivalence or C5 semantic claims beyond existing gates
+- Full unit-test suite / G2 `ctest` (deferred to **D5** evolution trust proof)
+- Production code changes — Step 5 is harness-only
+- Protocol document edits without explicit approval
+- Claiming **D5** complete — Step 5 closes **D4** only
+
+###### Proposed work (`THOTH_E2_D4=1`)
+
+| Work | Detail |
+|------|--------|
+| `runE2D4Tests()` | `runE2D4_02Tests()` → `runE2D4Step4Tests()` + composition evidence artifact |
+| `main()` early-exit | `THOTH_E2_D4=1` → `runE2D4Tests()` — **insert before** `THOTH_E2_D4_STEP4` check (composition gate must win over subset gates) |
+| Evidence output | Print consolidated pass record for all sub-gates (see below) |
+| Deferred strings | Update Step 3/4 `deferred:` lines from composition proof → **D5** evolution trust proof |
+
+**No new test functions.** Step 5 is pure orchestration + evidence printing.
+
+**Orchestrator:** `runE2D4Tests()` · gate `THOTH_E2_D4=1` in `main()`.
+
+###### Step 5 implementation discipline
+
+- Orchestration only — reuse existing `runE2D4_02Tests()` and `runE2D4Step4Tests()`
+- **No production changes** expected
+- Verification: `cmake --build --preset build-debug` + `THOTH_E2_D4=1` **only**
+- **Not** default full suite / G2 (**D5** evolution trust proof)
+- Estimated wall time: **~12–15 min** (Phase A ~7 min; Phase B ~5 min)
+- On failure: stop per AGENTS.md Build/Test Failure Rule
+
+###### Step 5 evidence artifact
+
+On green gate, `runE2D4Tests()` records:
+
+1. `THOTH_E2_D4=1` pass — composition gate  
+2. Phase A pass — structural seam + live INTEGRATION behavior + STRICT authority preservation (`THOTH_E2_D4_02=1`)  
+3. Phase B pass — backward compatibility (`THOTH_E2_D4_STEP4=1`)  
+4. E2-D4-01 obligations satisfied  
+5. E2-D4-02 obligations satisfied  
+6. D4-I1..I7 satisfied (evidence chain from Steps 1–3)  
+7. `THOTH_E2_D3=1`, `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1` pass (via Step 4 orchestrator)  
+8. Default flag contract verified during Phase B  
+9. **Conclusion:** D4 proof suite complete — all obligations compose  
+10. **Deferred:** **D5** evolution trust proof (full suite, G2, Phase B fingerprint two-run gate)
+
+###### Step 5 exit criteria
+
+1. Plan locked in § D.4.0 Step 5 — committed before implementation  
+2. `THOTH_E2_D4=1` green after implementation approval  
+3. Build green  
+4. D4 exit criteria 1–7 satisfied (see `D_PHASE_PROTOCOL.md` § D4 Exit criteria)  
+5. **Pause for review** before **D5** (evolution trust proof)
+
+###### Step 5 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | `runE2D4Tests()` + `THOTH_E2_D4=1` early-exit (before `THOTH_E2_D4_STEP4`); update deferred strings |
+| `docs/cursor_list.md` | § D.4.0 Step 5 (this section) |
+| `docs/D_PHASE_PROTOCOL.md` | D4 composition proof + pause before D5 |
+| `external/basic_agent/*` | **None** |
+
+###### Relationship to D5 (explicit boundary)
+
+| D4 Step 5 — composition proof (`THOTH_E2_D4=1`) | D5 — evolution trust proof |
+|------------------------------------------------|----------------------------|
+| D4 Steps 1–4 compose under one gate | Full unit-test suite + G2 `ctest` |
+| Targeted env gates only | Phase B fingerprint two-run gate |
+| Proves D4 obligations compose | Proves **nothing important changed** after all D changes |
+| Closes D4 | Closes Phase D |
+
+##### D4 Step 5 exit criteria (composition gate)
 
 1. `THOTH_E2_D4=1` green — full D4 proof suite (Steps 1–4)  
 2. E2-D4-01: presence + containment on live plugin path; `integrationDefaults()` behavioral negative proof  
 3. E2-D4-02: STRICT authority preserved; `wiring_stage=B` fingerprint stable  
 4. Post–D3 regressions green with flags default OFF where applicable  
-5. **Pause for review** before D5
+5. **Pause for review** before **D5** (evolution trust proof)
 
 ##### Forbidden (D4)
 
@@ -1452,7 +1584,7 @@ On green gate, Step 4 records:
 | STRICT harness / `wiring_stage=B` fingerprint | Must remain stable |
 | D3 subscribers | Contract frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — **D4 Step 4 locked** (§ D.4.0 Step 4) — paused pending AGENTS.md approval.
+**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — **D4 Step 4 ✅** — **D4 Step 5 locked** (§ D.4.0 Step 5) — paused pending implementation approval.
 
 ### Separation debt (acknowledged)
 
@@ -1770,7 +1902,8 @@ Done    E2 Phase D3 — observability proof suite (Steps 1–6, `THOTH_E2_D3=1`)
 Done    E2 Phase D4 Step 1 — production wiring seam confirmation (`THOTH_E2_D4_STEP1=1`) ✅ 2026-07-07
 Done    E2 Phase D4 Step 2 — E2-D4-01 live plugin path (`THOTH_E2_D4_01=1`) ✅ 2026-07-07
 Done    E2 Phase D4 Step 3 — E2-D4-02 STRICT authority preservation (`THOTH_E2_D4_02=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D4 Step 4** — backward-compat regressions (§ **D.4.0 Step 4** locked; await explicit implementation approval)
+Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1`) ✅ 2026-07-08
+Next 1  **E2 Phase D4 Step 5** — composition proof (`THOTH_E2_D4=1`; § **D.4.0 Step 5** locked; await implementation approval)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
