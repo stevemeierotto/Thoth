@@ -8564,7 +8564,7 @@ static bool runE2D4_02Tests() {
     std::cout << "  gate: THOTH_E2_D4_02 presence + preservation + isolation\n";
     std::cout << "  invariant: observational infrastructure transparent to authoritative path\n";
     std::cout << "  comparator: episodicLearningScopedEquivalenceEqual (E2-28 scoped snapshot)\n";
-    std::cout << "  deferred: Step 4 regressions · Step 5 umbrella THOTH_E2_D4=1\n";
+    std::cout << "  deferred: Step 4 backward compatibility · Step 5 composition proof (THOTH_E2_D4=1)\n";
     return true;
 }
 
@@ -9452,7 +9452,37 @@ static bool runE2D4Step4Tests() {
     std::cout << "  THOTH_E2_C5=1 pass\n";
     std::cout << "  default flag contract verified (no D4 workspace harness with eval ON)\n";
     std::cout << "  conclusion: no backward-compat regression detected\n";
-    std::cout << "  deferred: Step 5 umbrella THOTH_E2_D4=1\n";
+    return true;
+}
+
+// --- E2-D4 Step 5: composition proof (orchestration only) ---
+
+static bool runE2D4Tests() {
+    if (!runE2D4_02Tests()) {
+        std::cerr << "E2-D4 composition: Phase A (Steps 1-3) failed\n";
+        return false;
+    }
+    if (!runE2D4Step4Tests()) {
+        std::cerr << "E2-D4 composition: Phase B (Step 4 backward compatibility) failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D4 composition proof green\n";
+    std::cout << "E2-D4 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D4\n";
+    std::cout << "  Phase A: THOTH_E2_D4_02=1 pass (structural seam + live INTEGRATION behavior + "
+                 "STRICT authority preservation)\n";
+    std::cout << "  Phase B: THOTH_E2_D4_STEP4=1 pass (backward compatibility)\n";
+    std::cout << "  E2-D4-01 obligations satisfied\n";
+    std::cout << "  E2-D4-02 obligations satisfied\n";
+    std::cout << "  D4-I1..I7 evidence chain satisfied (Steps 1-3)\n";
+    std::cout << "  THOTH_E2_D3=1 pass\n";
+    std::cout << "  THOTH_E2_D2=1 pass\n";
+    std::cout << "  THOTH_E2_D1=1 pass\n";
+    std::cout << "  THOTH_E2_C5=1 pass\n";
+    std::cout << "  default flag contract verified during Phase B\n";
+    std::cout << "  conclusion: D4 proof suite complete — all obligations compose\n";
+    std::cout << "  deferred: D5 evolution trust proof\n";
     return true;
 }
 
@@ -9623,6 +9653,16 @@ int main() {
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* d4 = std::getenv("THOTH_E2_D4")) {
+        if (d4[0] != '0' && std::string(d4) != "false") {
+            if (!runE2D4Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D4 composition gate passed.\n";
+            return 0;
         }
     }
 

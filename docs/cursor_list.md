@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **D4 Step 5 locked** § D.4.0 Step 5 composition proof; Step 4 ✅)  
+**Last updated:** 2026-07-08 (E2 **D4 complete** — composition proof `THOTH_E2_D4=1` ✅; paused before D5)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D4 Step 5 locked** (§ D.4.0 Step 5) — composition proof `THOTH_E2_D4=1`; await explicit implementation approval. Step 4 ✅ · Step 3 ✅ · Step 2 ✅ · Step 1 ✅ · D3 ✅.
+**Active E2 work:** **D4 ✅ complete** — paused before **D5** (evolution trust proof). All D4 steps green.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1404,7 +1404,7 @@ On green gate, Step 4 records:
 
 ##### D.4.0 Step 5 — composition proof (**v1 locked**)
 
-**Status:** 🔒 **LOCKED** (2026-07-08) — paused before implementation (AGENTS.md gate)
+**Status:** 🔒 **LOCKED** (2026-07-08) — ✅ **Step 5 complete** (2026-07-08) — **D4 complete** — paused before **D5** (evolution trust proof).
 
 ###### D4 proof ladder (canonical — locked)
 
@@ -1584,7 +1584,7 @@ On green gate, `runE2D4Tests()` records:
 | STRICT harness / `wiring_stage=B` fingerprint | Must remain stable |
 | D3 subscribers | Contract frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — **D4 Step 4 ✅** — **D4 Step 5 locked** (§ D.4.0 Step 5) — paused pending implementation approval.
+**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — **D4 Step 4 ✅** — **D4 Step 5 ✅** — **D4 complete** — paused before **D5** (evolution trust proof).
 
 ### Separation debt (acknowledged)
 
@@ -1903,7 +1903,8 @@ Done    E2 Phase D4 Step 1 — production wiring seam confirmation (`THOTH_E2_D4
 Done    E2 Phase D4 Step 2 — E2-D4-01 live plugin path (`THOTH_E2_D4_01=1`) ✅ 2026-07-07
 Done    E2 Phase D4 Step 3 — E2-D4-02 STRICT authority preservation (`THOTH_E2_D4_02=1`) ✅ 2026-07-08
 Done    E2 Phase D4 Step 4 — backward-compat regressions (`THOTH_E2_D4_STEP4=1`) ✅ 2026-07-08
-Next 1  **E2 Phase D4 Step 5** — composition proof (`THOTH_E2_D4=1`; § **D.4.0 Step 5** locked; await implementation approval)
+Done    E2 Phase D4 Step 5 — composition proof (`THOTH_E2_D4=1`) ✅ 2026-07-08
+Next 1  **E2 Phase D5** — evolution trust proof (full suite, G2, Phase B fingerprint)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
