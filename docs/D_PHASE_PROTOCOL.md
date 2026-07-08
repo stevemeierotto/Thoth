@@ -354,7 +354,7 @@ Trace subscribers follow the same interpret boundary for timeline labels.
 
 **D3 Step 6 (umbrella proof-suite gate):** `THOTH_E2_D3=1` executes the complete D3 proof suite (Steps 1–5), then backward-compat gates (`THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`) and G2 `ctest` confirm D3 close-out. Each step establishes a different architectural invariant; the umbrella gate proves they hold together.
 
-**D4 (live INTEGRATION connection):** Full protocol § **D4** below; detailed step plan in `cursor_list.md` § **D.4.0**. Step 1 complete (`THOTH_E2_D4_STEP1=1`); Step 2 complete (`THOTH_E2_D4_01=1`); Steps 3–5 paused pending authorization.
+**D4 (live INTEGRATION connection):** Full protocol § **D4** below; detailed step plan in `cursor_list.md` § **D.4.0**. Steps 1–3 complete (`THOTH_E2_D4_STEP1=1`, `THOTH_E2_D4_01=1`, `THOTH_E2_D4_02=1`); Steps 4–5 paused pending authorization.
 
 #### Storage (subscriber-owned)
 
@@ -507,6 +507,24 @@ Step 2 tests **separate** presence proofs from containment proofs (distinct test
 **Step 2 implementation discipline:** Tests only first. **Production changes are permitted only to correct verified production wiring defects discovered by the behavioral proof** — not to reshape subscriber semantics for test convenience.
 
 **E2-D4-01 preregistered tests:** `testE2D4_01LivePluginPathPresence`, `testE2D4_01LivePluginPathJsonlPresence` (presence); `testE2D4_01LivePluginPathContainment` (containment); `testE2D4_01IntegrationDefaultsBehavioralNegative` (negative — seam unset → `integrationDefaults()` only; no STRICT config injected).
+
+**Step 3 — STRICT authority preservation (E2-D4-02):** See `cursor_list.md` § D.4.0 Step 3.
+
+**Theorem-like invariant:** Observational infrastructure shall be observationally transparent to the authoritative execution path.
+
+**Comparator contract:** `episodicLearningScopedEquivalenceEqual` determines whether benchmark authority is unchanged — intentionally **not** full-object equality. Answers one question only: **did the benchmark authority change?** Minimal field set; additions require explicit justification (no comparator creep). Full contract: `cursor_list.md` § D.4.0 Step 3 “Scoped equivalence.”
+
+**Separation of concerns:** (1) Same authoritative result? → scoped comparator. (2) Official STRICT envelope? → presence/isolation tests. (3) Diagnostics leaked into authority? → D4 isolation tests.
+
+**Scoped equivalence (E2-28):** Deep equality on `episodicLearningScopedEquivalenceSnapshot`. **Included:** `case_resolutions[]`, `scorable_cases`, `not_scorable_cases`, `summary_evaluation_resolution`, `fingerprint_hash`, `e2_eval_config` (fingerprint + config anchor verdict to producing configuration). **Excluded:** timestamps/run attribution, observational side-channel, non-authority scoring detail, export rollups not in snapshot, envelope labels (`wiring_stage`, `scoring_tier`, `official_scoring` — validated by presence/isolation tests to keep semantic authority independent from envelope validation), ordering/wall-clock.
+
+**Determinism:** Two consecutive identical `B` builds with D4 wiring → `episodicLearningScopedEquivalenceEqual` true (bucket #0). **Preservation:** publication ON vs OFF baseline → same deep-equal scoped snapshot under pinned `makeE2StrictTestConfig()`.
+
+**STRICT authority preservation contract:** `wiring_stage=="B"`; `official_scoring==true` on official path; golden `evaluation_resolution` rollup present; scoped equivalence preserved; fingerprint determinism under D4 wiring; no INTEGRATION tier on official STRICT artifacts; channel side-paths lack authority fields (E2-D2-02 discipline).
+
+**E2-D4-02 preregistered tests:** `testE2D4_02StrictOfficialEnvelopePresence` (presence); `testE2D4_02ScopedEquivalencePreservedWithEvalPublication`, `testE2D4_02ScopedEquivalencePreservedWithD4Workspace`, `testE2D4_02StrictFingerprintDeterminismWithD4Wiring` (preservation); `testE2D4_02NoIntegrationLeakIntoStrictArtifacts` (isolation).
+
+**Step 3 implementation discipline:** Tests only first; reuse golden harness helpers; production changes only for verified wiring defects; gate `THOTH_E2_D4_02=1` + `THOTH_E2_D4_01=1` regression.
 
 #### E2-06 enforcement requirements
 
@@ -720,7 +738,7 @@ Pause for review after each D4 step and after D4 umbrella gate. Build/test failu
 
 ## D0 lock record
 
-**Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4 Step 1:** ✅ `THOTH_E2_D4_STEP1=1`; **D4 Step 2:** ✅ `THOTH_E2_D4_01=1`  
+**Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4 Step 1:** ✅ `THOTH_E2_D4_STEP1=1`; **D4 Step 2:** ✅ `THOTH_E2_D4_01=1`; **D4 Step 3:** ✅ `THOTH_E2_D4_02=1`  
 **Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 containment + live-path definition + protocol lock; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — **D4 Step 2 ✅** — paused before Step 3.
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — D4 Step 2 ✅ — **D4 Step 3 ✅** — paused before Step 4.

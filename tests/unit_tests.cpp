@@ -8350,6 +8350,224 @@ static bool runE2D4_01Tests() {
     return true;
 }
 
+// --- E2-D4 Step 3: E2-D4-02 STRICT authority preservation audit ---
+
+struct E2WiringStageBGuard {
+    E2WiringStageBGuard() { setenv("THOTH_E2_WIRING_STAGE", "B", 1); }
+    ~E2WiringStageBGuard() { unsetenv("THOTH_E2_WIRING_STAGE"); }
+};
+
+static Thoth::EpisodicLearningSummary buildOfficialGoldenSummaryWithD4EvalPublicationHarness() {
+    return buildOfficialGoldenSummaryWithChannelHarness(false);
+}
+
+static nlohmann::json e2D4OfficialStrictSummaryLogRow(
+    const Thoth::EpisodicLearningSummary& summary) {
+    const Thoth::EpisodicLearningRunEnvelope envelope{true, true, "B"};
+    return Thoth::episodicLearningSummaryLogRow(
+        {}, summary, static_cast<int>(summary.case_results.size()),
+        summary.case_results.size(), envelope);
+}
+
+static bool testE2D4_02StrictOfficialEnvelopePresence() {
+    E2WiringStageBGuard wiringStage;
+    const auto summary = buildOfficialGoldenSummary();
+    if (summary.scoring_tier != Thoth::E2EvalTier::STRICT || !summary.official_scoring) {
+        std::cerr << "testE2D4_02StrictOfficialEnvelopePresence: summary not STRICT official\n";
+        return false;
+    }
+    if (!summary.evaluation_resolution.has_value() ||
+        *summary.evaluation_resolution != Thoth::E2EvaluationResolution::SCORED_SUCCESS) {
+        std::cerr << "testE2D4_02StrictOfficialEnvelopePresence: golden rollup missing "
+                     "SCORED_SUCCESS\n";
+        return false;
+    }
+
+    const nlohmann::json row = e2D4OfficialStrictSummaryLogRow(summary);
+    if (row.value("wiring_stage", "") != "B" || row.value("official_scoring", false) != true) {
+        std::cerr << "testE2D4_02StrictOfficialEnvelopePresence: official envelope mismatch\n";
+        return false;
+    }
+    if (row.value("scoring_tier", "") != "STRICT") {
+        std::cerr << "testE2D4_02StrictOfficialEnvelopePresence: expected scoring_tier STRICT\n";
+        return false;
+    }
+    if (!row.contains("evaluation_resolution")) {
+        std::cerr << "testE2D4_02StrictOfficialEnvelopePresence: evaluation_resolution missing\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4_02ScopedEquivalencePreservedWithEvalPublication() {
+    E2WiringStageBGuard wiringStage;
+    const auto baselineSummary = buildOfficialGoldenSummary();
+    const auto baselineSnap = episodicLearningScopedBSnapshot(baselineSummary);
+
+    const auto publicationSummary = buildOfficialGoldenSummaryWithChannelHarness(false);
+    const auto publicationSnap = episodicLearningScopedBSnapshot(publicationSummary);
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(baselineSnap, publicationSnap)) {
+        std::cerr << "testE2D4_02ScopedEquivalencePreservedWithEvalPublication: E2-28 scoped "
+                     "snapshot differs with eval publication ON\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4_02ScopedEquivalencePreservedWithD4Workspace() {
+    E2WiringStageBGuard wiringStage;
+    E2D4PluginWorkspaceGuard workspace;
+    if (!workspace.prepare()) {
+        std::cerr << "testE2D4_02ScopedEquivalencePreservedWithD4Workspace: workspace prepare "
+                     "failed\n";
+        return false;
+    }
+
+    const auto baselineSummary = buildOfficialGoldenSummary();
+    const auto baselineSnap = episodicLearningScopedBSnapshot(baselineSummary);
+
+    const auto d4Summary = buildOfficialGoldenSummaryWithD4EvalPublicationHarness();
+    const auto d4Snap = episodicLearningScopedBSnapshot(d4Summary);
+    const bool ok = Thoth::episodicLearningScopedEquivalenceEqual(baselineSnap, d4Snap);
+
+    workspace.restore();
+    if (!ok) {
+        std::cerr << "testE2D4_02ScopedEquivalencePreservedWithD4Workspace: E2-28 scoped snapshot "
+                     "differs with D4 workspace active\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4_02StrictFingerprintDeterminismWithD4Wiring() {
+    E2WiringStageBGuard wiringStage;
+    E2D4PluginWorkspaceGuard workspace;
+    if (!workspace.prepare()) {
+        std::cerr << "testE2D4_02StrictFingerprintDeterminismWithD4Wiring: workspace prepare "
+                     "failed\n";
+        return false;
+    }
+
+    const auto summary_a = buildOfficialGoldenSummaryWithD4EvalPublicationHarness();
+    const auto summary_b = buildOfficialGoldenSummaryWithD4EvalPublicationHarness();
+    const auto snap_a = episodicLearningScopedBSnapshot(summary_a);
+    const auto snap_b = episodicLearningScopedBSnapshot(summary_b);
+
+    workspace.restore();
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(snap_a, snap_b)) {
+        std::cerr << "testE2D4_02StrictFingerprintDeterminismWithD4Wiring: consecutive scoped "
+                     "snapshots differ\n";
+        return false;
+    }
+    if (Thoth::episodicLearningFingerprintMismatchBucket(snap_a, snap_b, "h1", "h1") != 0) {
+        std::cerr << "testE2D4_02StrictFingerprintDeterminismWithD4Wiring: expected E2-28 "
+                     "bucket #0\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4_02NoIntegrationLeakIntoStrictArtifacts() {
+    E2WiringStageBGuard wiringStage;
+
+    const auto strictSummary = buildOfficialGoldenSummaryWithChannelHarness(false);
+    if (strictSummary.scoring_tier != Thoth::E2EvalTier::STRICT || !strictSummary.official_scoring) {
+        std::cerr << "testE2D4_02NoIntegrationLeakIntoStrictArtifacts: official rollup not STRICT\n";
+        return false;
+    }
+
+    const nlohmann::json officialRow = e2D4OfficialStrictSummaryLogRow(strictSummary);
+    if (officialRow.value("scoring_tier", "") == "INTEGRATION" ||
+        officialRow.value("official_scoring", true) == false) {
+        std::cerr << "testE2D4_02NoIntegrationLeakIntoStrictArtifacts: INTEGRATION authority on "
+                     "official STRICT row\n";
+        return false;
+    }
+
+    E2EpisodeChannelHarness harness;
+    harness.enable_episode_publication = true;
+    harness.register_replay_subscriber = false;
+    const auto cases = Thoth::getEpisodicLearningCases();
+    if (cases.empty()) {
+        std::cerr << "testE2D4_02NoIntegrationLeakIntoStrictArtifacts: no episodic cases\n";
+        return false;
+    }
+
+    Thoth::BenchmarkAttribution attr{"e2-d4-02-isolation", "e2-d4-02-isolation-env"};
+    (void)runE2TestArm(cases.front(), "warm", attr, nullptr, nullptr, &harness);
+
+    const Thoth::EpisodicLearningSummary* sideSummary =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    if (!sideSummary) {
+        std::cerr << "testE2D4_02NoIntegrationLeakIntoStrictArtifacts: missing subscriber side "
+                     "summary\n";
+        return false;
+    }
+    if (sideSummary->scoring_tier != Thoth::E2EvalTier::INTEGRATION ||
+        sideSummary->official_scoring) {
+        std::cerr << "testE2D4_02NoIntegrationLeakIntoStrictArtifacts: side channel must be "
+                     "INTEGRATION non-official\n";
+        return false;
+    }
+    if (sideSummary->scoring_tier == strictSummary.scoring_tier &&
+        sideSummary->official_scoring == strictSummary.official_scoring) {
+        std::cerr << "testE2D4_02NoIntegrationLeakIntoStrictArtifacts: side channel collapsed "
+                     "into official STRICT rollup\n";
+        return false;
+    }
+
+    if (harness.channel && harness.channel->lastPublishedEventForTests().has_value()) {
+        const nlohmann::json episodeJson =
+            harness.channel->lastPublishedEventForTests()->toJson();
+        if (!episodeJsonLacksStrictAuthorityFields(episodeJson)) {
+            std::cerr << "testE2D4_02NoIntegrationLeakIntoStrictArtifacts: published episode has "
+                         "authority fields\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool runE2D4_02Tests() {
+    if (!testE2D4_02StrictOfficialEnvelopePresence()) {
+        std::cerr << "E2-D4-02 STRICT official envelope presence failed\n";
+        return false;
+    }
+    if (!testE2D4_02ScopedEquivalencePreservedWithEvalPublication()) {
+        std::cerr << "E2-D4-02 scoped equivalence (eval publication) failed\n";
+        return false;
+    }
+    if (!testE2D4_02ScopedEquivalencePreservedWithD4Workspace()) {
+        std::cerr << "E2-D4-02 scoped equivalence (D4 workspace) failed\n";
+        return false;
+    }
+    if (!testE2D4_02StrictFingerprintDeterminismWithD4Wiring()) {
+        std::cerr << "E2-D4-02 fingerprint determinism with D4 wiring failed\n";
+        return false;
+    }
+    if (!testE2D4_02NoIntegrationLeakIntoStrictArtifacts()) {
+        std::cerr << "E2-D4-02 INTEGRATION leak isolation failed\n";
+        return false;
+    }
+    if (!testE2D2BenchmarkAuthorityIsolation()) {
+        std::cerr << "E2-D4-02 E2-D2-02 regression failed\n";
+        return false;
+    }
+    if (!runE2D4_01Tests()) {
+        std::cerr << "E2-D4-02 Step 2 regression failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D4-02 STRICT authority preservation audit green\n";
+    std::cout << "E2-D4-02 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D4_02 presence + preservation + isolation\n";
+    std::cout << "  invariant: observational infrastructure transparent to authoritative path\n";
+    std::cout << "  comparator: episodicLearningScopedEquivalenceEqual (E2-28 scoped snapshot)\n";
+    std::cout << "  deferred: Step 4 regressions · Step 5 umbrella THOTH_E2_D4=1\n";
+    return true;
+}
+
 /** E2-C3-01 — diagnostics do not call evaluation or scoring functions. */
 static bool testE2C3NoEvaluationCoupling() {
     const std::vector<std::string> paths = {"external/basic_agent/include/diagnostic_service.h",
@@ -9314,6 +9532,16 @@ int main() {
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* d4_02 = std::getenv("THOTH_E2_D4_02")) {
+        if (d4_02[0] != '0' && std::string(d4_02) != "false") {
+            if (!runE2D4_02Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D4-02 gate passed.\n";
+            return 0;
         }
     }
 

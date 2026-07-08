@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-07 (E2 **D4 Step 2 complete** § D.4.0 Step 2; Step 1 ✅ § D.4.0)  
+**Last updated:** 2026-07-08 (E2 **D4 Step 3 complete** § D.4.0 Step 3; Step 2 ✅)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **D4 Step 2 complete** (§ D.4.0 Step 2) — E2-D4-02 STRICT authority preservation audit next; paused before Step 3. Step 1 ✅ · D3 ✅.
+**Active E2 work:** ✅ **D4 Step 3 complete** (§ D.4.0 Step 3) — Step 4 targeted regressions next; paused before Step 4. Step 2 ✅ · Step 1 ✅ · D3 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1124,21 +1124,174 @@ If D3 proved observers can observe, Step 2 proves **production can emit diagnost
 | `tests/unit_tests.cpp` | E2-D4-01 tests + `runE2D4_01Tests()` + gate |
 | `evaluation_subscriber.*` / `basic_agent_plugin.cpp` | Only for **verified wiring defects** found by behavioral proof |
 
-##### D.4.0 Step 3 — E2-D4-02 STRICT authority preservation audit (**outline — lock at Step 2 close**)
+##### D.4.0 Step 3 — E2-D4-02 STRICT authority preservation audit (**v1 locked**)
 
-**Purpose (preferred name):** **STRICT authority preservation audit** — proves STRICT benchmark authority is **preserved** when D4 wiring is present. (“Contamination” is useful internally; “authority preservation” states the proof obligation.)
+**Status:** 🔒 **LOCKED** (2026-07-08) — ✅ **Step 3 complete** (2026-07-08) — comparator contract locked § Scoped equivalence — paused before Step 4.
 
-**Question:** With live plugin path wiring enabled, is `wiring_stage=B` / Phase B benchmark authority unchanged?
+###### Core invariant (why Step 3 exists)
 
-| Proves | Gate |
+> **Observational infrastructure shall be observationally transparent to the authoritative execution path.**
+
+> **Step 3 proves that connecting INTEGRATION to production does not alter STRICT benchmark authority.** D4 wiring may coexist with the official harness; it must not change `wiring_stage=B` scored outcomes, Phase B fingerprints, or official authority envelopes.
+
+Step 2 proved INTEGRATION can observe without acquiring authority. Step 3 proves **STRICT authority is preserved** when that wiring is present — not that INTEGRATION is “as good as” STRICT.
+
+###### Scoped equivalence (canonical definition — locked)
+
+**Comparator contract:** `episodicLearningScopedEquivalenceEqual` determines whether **benchmark authority is unchanged**. It is intentionally **not** a full-object equality comparison. It answers exactly one question: **did the benchmark authority change?** Everything else — diagnostic envelopes, metadata, timestamps, transport, observability — is validated by other tests.
+
+**Scoped equivalence** is the E2-28 comparison over `episodicLearningScopedEquivalenceSnapshot()` — **not** full summary or JSONL row equality.
+
+**Comparator (authoritative):** `episodicLearningScopedEquivalenceEqual(a, b)` — deep structural equality of the snapshot JSON objects (`nlohmann::json::operator==`). Preservation and determinism tests must use this function; no ad-hoc field diffs.
+
+**Minimal by design:** The comparator intentionally includes only the **minimum** set of fields necessary to determine benchmark-authority equivalence. Any additional field requires an **explicit justification** before being added (prevents comparator creep).
+
+**Separation of concerns (locked):**
+
+| Question | Verified by |
+|----------|-------------|
+| Did STRICT produce the same authoritative result? | Scoped comparator (`episodicLearningScopedEquivalenceEqual`) |
+| Is the envelope still an official STRICT envelope? | Step 3 presence/isolation tests |
+| Did diagnostics leak into authority? | D4 isolation tests (Step 2 containment + Step 3 isolation) |
+
+**Included in scoped snapshot** (benchmark authority fields — minimum necessary set):
+
+| Field | Content | Why included |
+|-------|---------|--------------|
+| `case_resolutions[]` | Per case: `case_id`, `evaluation_resolution` (when set) | Per-case verdict — core Phase B authority |
+| `scorable_cases` / `not_scorable_cases` | Rollup counts | Scoring eligibility — affects rollup semantics |
+| `summary_evaluation_resolution` | Present when summary rollup resolution is set | Run-level verdict |
+| `fingerprint_hash` | From `computeEvaluationFingerprint()` for pinned STRICT config | Anchors verdict to the config that produced it |
+| `e2_eval_config` | Canonical config JSON for pinned STRICT config | Without both fingerprint + config, identical verdicts under a different evaluation configuration could falsely appear equivalent |
+
+**Excluded from scoped snapshot** (allowed to differ without failing preservation):
+
+| Category | Examples | Why excluded |
+|----------|----------|--------------|
+| Run attribution | `timestamp_ms`, `run_id`, `env_hash` | Identity of a run, not semantic scoring outcome |
+| Diagnostic / observational side-channel | INTEGRATION subscriber summaries, diagnostics, telemetry | Observation layer — not scored-loop authority |
+| Non-authority scoring detail | Per-case `lift`, `passes`, `failure_reason`, arm observations, retrieval provenance | Supporting detail; `evaluation_resolution` is the authority field |
+| Export-only rollups not in snapshot | `not_scorable_by_reason`, `success_rate`, `mean_episodic_lift` | Export/diagnostic rollups — not in E2-28 contract |
+| Envelope / tier labels | `wiring_stage`, `scoring_tier`, `official_scoring` on JSONL rows | See below |
+| Ordering / wall-clock | Log line ordering, `wall_clock_ms`, debug metadata | Serialization and performance noise |
+
+**Envelope fields (`wiring_stage`, `scoring_tier`, `official_scoring`):** These are intentionally validated by **dedicated presence/isolation tests** rather than the scoped comparator, to keep **semantic authority comparison independent from envelope validation**. Exclusion here is by design — not omission.
+
+**Determinism invariant (E2-28):** Two consecutive identical `B` harness builds with the same D4 wiring state must produce scoped snapshots for which `episodicLearningScopedEquivalenceEqual` returns **true** (diagnostic bucket **#0**). This is **deep structural equality** on the E2-28 snapshot object — the locked comparator. It is **not** a byte-compare of full JSONL log rows or raw `dump()` strings; it is authoritative JSON value equality on the included fields only.
+
+**Preservation invariant:** Scoped snapshot with eval publication ON must be **deep-equal** to baseline (publication OFF) under the same pinned `makeE2StrictTestConfig()` — observational infrastructure must not change authority-relevant fields.
+
+###### Step 3 question (locked boundary)
+
+> **Step 3 answers: “With D4 eval publication wiring enabled, is `wiring_stage=B` benchmark authority unchanged?”**
+
+| Step 3 proves | Step 3 does **not** prove (deferred) |
+|---------------|--------------------------------------|
+| **STRICT presence** — official harness envelope fields (`wiring_stage=B`, `official_scoring=true`, golden rollup) | INTEGRATION presence/containment (Step 2) |
+| **Authority preservation** — scoped `B` snapshot matches baseline with eval publication ON | INTEGRATION ≡ STRICT equivalence or promotion |
+| **Isolation** — no INTEGRATION/diagnostic authority on STRICT official artifacts | Full D4 umbrella / D5 regression |
+| **Determinism** — two identical `B` builds with D4 wiring produce identical scoped snapshots | Deployed / external-user runtime |
+| D4 workspace + channel publication during golden harness runs | Production code changes without verified wiring defect |
+
+**Proof ladder:** Step 1 = config selection · Step 2 = INTEGRATION presence + containment · **Step 3 = STRICT authority preserved under D4 wiring**
+
+###### STRICT authority preservation contract (locked — all Step 3 preservation/isolation tests use this)
+
+**STRICT authority preserved** means the official harness path satisfies **all** of:
+
+| Rule | Requirement |
+|------|-------------|
+| `wiring_stage` | `"B"` on official harness envelope |
+| `official_scoring` | `true` on STRICT authority path |
+| Golden rollup | `evaluation_resolution` present on official golden trio summary where Phase B expects SCORED_SUCCESS |
+| Scoped equivalence | `episodicLearningScopedEquivalenceEqual(baseline_snap, wired_snap)` **true** — deep structural equality on E2-28 snapshot (§ Scoped equivalence above) when eval publication is ON during harness runs |
+| Fingerprint determinism | Two consecutive identical `B` harness builds with D4 wiring → `episodicLearningScopedEquivalenceEqual(snap_a, snap_b)` **true** (E2-28 bucket #0) |
+| No INTEGRATION leak | Official STRICT JSONL row: `scoring_tier != "INTEGRATION"`, `official_scoring != false` |
+| Side-channel isolation | Episode / replay JSON from channel fan-out lacks STRICT authority fields (`episodeJsonLacksStrictAuthorityFields`) — same contract as E2-D2-02 |
+
+Every preservation/isolation test checks this same contract. Do not invent per-test forbidden lists.
+
+**Presence vs preservation vs isolation (proof ladder):**
+
+| Class | Proves |
+|-------|--------|
+| **Presence (STRICT authority)** | Official envelope fields present on `wiring_stage=B` path |
+| **Preservation (equivalence)** | E2-28 scoped snapshot deep-equal to baseline when D4 eval publication ON (`episodicLearningScopedEquivalenceEqual`) |
+| **Isolation (absence)** | No INTEGRATION/diagnostic authority on STRICT official artifacts; channel side-paths lack authority fields |
+
+Step 3 tests **separate** presence, preservation, and isolation (distinct test functions).
+
+###### Step 3 forbidden (locked)
+
+- Claim INTEGRATION ≡ STRICT or promotion suitability  
+- Use INTEGRATION-vs-STRICT comparison as improvement evidence  
+- Re-open C5 equivalence under pinned config  
+- Modify `resolveEvaluation()`, Phase B export, or `E2_PROTOCOL.md` tier semantics  
+- Inject `integrationDefaults()` into the **official scored loop** — STRICT harness must remain `makeE2StrictTestConfig()` / `strictDefaults()` pins only  
+- Full unit-test suite / G2 ctest (deferred to D5)  
+- Rewriting harness or subscriber because tests are awkward — see production-change rule below  
+
+###### Harness (locked)
+
+**Primary harness:** extend existing golden harness helpers — do **not** duplicate `buildOfficialGoldenSummary()`.
+
+| Helper | Role |
 |--------|------|
-| Golden / official harness outcomes unchanged (eval publication ON vs OFF) | `THOTH_E2_D4_02=1` |
-| Phase B fingerprint or scoped equivalence snapshot stable | |
-| No INTEGRATION authority leaking into STRICT artifacts | |
+| `buildOfficialGoldenSummary()` | Baseline — no episode publication (reuse) |
+| `episodicLearningScopedBSnapshot()` | Scoped `B` snapshot (reuse) |
+| `buildOfficialGoldenSummaryWithChannelHarness(bool replay)` | Executive + channel + `EvaluationSubscriber` during arms (reuse from E2-D2-02) |
+| `E2D4PluginWorkspaceGuard` | Temp workspace with `enable_episodic_evaluation_publication=true`, other subscriber flags OFF (reuse from Step 2) |
+| `setenv("THOTH_E2_WIRING_STAGE", "B", 1)` | Official harness stage — **required** for all Step 3 tests; unset in guard destructor |
 
-**Forbidden:** STRICT score promotion; INTEGRATION-vs-STRICT comparison as improvement.
+**D4 wiring variant:** `buildOfficialGoldenSummaryWithD4EvalPublicationHarness()` — same as `buildOfficialGoldenSummaryWithChannelHarness(false)` (publication ON, replay OFF) **while** `E2D4PluginWorkspaceGuard` is active (workspace config proves D4 flags loaded). Executive channel still uses `registerEvaluationSubscriber` path (production registration function, not test-only stub).
 
-**Deferred detail:** Full step plan locked at Step 2 close-out (same discipline as Step 1 → Step 2).
+**Behavioral negative obligation:** eval publication ON must **not** change the E2-28 scoped snapshot vs baseline — if `episodicLearningScopedEquivalenceEqual` fails, STRICT authority is **not** preserved (observational infrastructure is not transparent).
+
+###### Proposed tests (`THOTH_E2_D4_02=1`)
+
+| Test | Class | Purpose |
+|------|-------|---------|
+| `testE2D4_02StrictOfficialEnvelopePresence` | **Presence** | Golden summary under `wiring_stage=B`: official JSONL row has `wiring_stage=="B"`, `official_scoring==true`, `evaluation_resolution` present; `scoring_tier=="STRICT"` on summary |
+| `testE2D4_02ScopedEquivalencePreservedWithEvalPublication` | **Preservation** | `episodicLearningScopedEquivalenceEqual(baseline_snap, publication_snap)` (D2-02 discipline; may delegate to `testE2D2BenchmarkAuthorityIsolation` without duplicating) |
+| `testE2D4_02ScopedEquivalencePreservedWithD4Workspace` | **Preservation** | Same deep-equal scoped snapshot with `E2D4PluginWorkspaceGuard` active during harness build |
+| `testE2D4_02StrictFingerprintDeterminismWithD4Wiring` | **Preservation** | Two consecutive D4-wiring harness runs → `episodicLearningScopedEquivalenceEqual(snap_a, snap_b)` (E2-28 bucket #0) |
+| `testE2D4_02NoIntegrationLeakIntoStrictArtifacts` | **Isolation** | Official STRICT row/envelope has no INTEGRATION tier; subscriber side-channel during harness publish produces INTEGRATION summary **separate from** official STRICT rollup; captured episode JSON lacks authority fields |
+
+**Regression dependencies (call, do not duplicate):** `runE2D4_01Tests()` · `testE2D2BenchmarkAuthorityIsolation()` (or thin wrapper if already green).
+
+**Orchestrator:** `runE2D4_02Tests()` · gate `THOTH_E2_D4_02=1` in `main()`.
+
+###### Step 3 implementation discipline
+
+- Tests only first  
+- Reuse `buildOfficialGoldenSummary*`, `episodicLearningScopedBSnapshot`, `E2D4PluginWorkspaceGuard` — no parallel harness framework  
+- **Production changes are permitted only to correct verified production wiring defects discovered by the behavioral proof** — not to reshape harness or subscriber for test convenience  
+- Verification: `cmake --build --preset build-debug` + `THOTH_E2_D4_02=1` + `THOTH_E2_D4_01=1`  
+- **Not** full suite / G2 (deferred to D5)  
+
+###### Step 3 evidence artifact
+
+1. `THOTH_E2_D4_02=1` pass  
+2. `THOTH_E2_WIRING_STAGE=B` exercised with D4 workspace config present  
+3. Presence proof — official STRICT envelope fields present  
+4. Preservation proof — scoped `B` equivalence unchanged with eval publication ON (+ D4 workspace variant)  
+5. Isolation proof — no INTEGRATION authority on STRICT official artifacts  
+6. **Deferred:** Step 4 regressions · Step 5 umbrella `THOTH_E2_D4=1`  
+
+###### Step 3 exit criteria
+
+1. Plan locked in § D.4.0 Step 3 — committed before implementation  
+2. `THOTH_E2_D4_02=1` green after implementation approval  
+3. `THOTH_E2_D4_01=1` regression green  
+4. Build green  
+5. **Pause for review** before Step 4  
+
+###### Step 3 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | E2-D4-02 tests + `buildOfficialGoldenSummaryWithD4EvalPublicationHarness()` + `runE2D4_02Tests()` + gate |
+| `external/basic_agent/*` | Only for **verified wiring defects** found by behavioral proof — default: none |
 
 ##### D4 Step 5 exit criteria (umbrella gate)
 
@@ -1174,7 +1327,7 @@ If D3 proved observers can observe, Step 2 proves **production can emit diagnost
 | STRICT harness / `wiring_stage=B` fingerprint | Must remain stable |
 | D3 subscribers | Contract frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** (§ D.4.0 Step 2) — paused before Step 3.
+**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** — **D4 Step 3 ✅** — paused before Step 4.
 
 ### Separation debt (acknowledged)
 
@@ -1491,7 +1644,8 @@ Done    E2 Phase D2 — replay subscriber + D2-03/FLAKE-UT-02 ✅ 2026-07-07
 Done    E2 Phase D3 — observability proof suite (Steps 1–6, `THOTH_E2_D3=1`) ✅ 2026-07-07
 Done    E2 Phase D4 Step 1 — production wiring seam confirmation (`THOTH_E2_D4_STEP1=1`) ✅ 2026-07-07
 Done    E2 Phase D4 Step 2 — E2-D4-01 live plugin path (`THOTH_E2_D4_01=1`) ✅ 2026-07-07
-Next 1  **E2 Phase D4 Step 3** — E2-D4-02 STRICT authority preservation audit (§ **D.4.0 Step 3** outline; lock at Step 2 close)
+Done    E2 Phase D4 Step 3 — E2-D4-02 STRICT authority preservation (`THOTH_E2_D4_02=1`) ✅ 2026-07-08
+Next 1  **E2 Phase D4 Step 4** — targeted regressions D3/D2/D1/C5 (§ D.4.0 Step 4)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
