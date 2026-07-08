@@ -354,7 +354,7 @@ Trace subscribers follow the same interpret boundary for timeline labels.
 
 **D3 Step 6 (umbrella proof-suite gate):** `THOTH_E2_D3=1` executes the complete D3 proof suite (Steps 1–5), then backward-compat gates (`THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1`) and G2 `ctest` confirm D3 close-out. Each step establishes a different architectural invariant; the umbrella gate proves they hold together.
 
-**D4 (live INTEGRATION connection):** Full protocol § **D4** below; detailed step plan in `cursor_list.md` § **D.4.0**. Step 1 complete (`THOTH_E2_D4_STEP1=1`); Steps 2–5 paused pending authorization.
+**D4 (live INTEGRATION connection):** Full protocol § **D4** below; detailed step plan in `cursor_list.md` § **D.4.0**. Step 1 complete (`THOTH_E2_D4_STEP1=1`); Step 2 complete (`THOTH_E2_D4_01=1`); Steps 3–5 paused pending authorization.
 
 #### Storage (subscriber-owned)
 
@@ -720,7 +720,7 @@ Pause for review after each D4 step and after D4 umbrella gate. Build/test failu
 
 ## D0 lock record
 
-**Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4 Step 1:** ✅ `THOTH_E2_D4_STEP1=1`  
+**Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4 Step 1:** ✅ `THOTH_E2_D4_STEP1=1`; **D4 Step 2:** ✅ `THOTH_E2_D4_01=1`  
 **Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 containment + live-path definition + protocol lock; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — **D4 Step 2 locked** — paused before Step 2 implementation.
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — **D4 Step 2 ✅** — paused before Step 3.

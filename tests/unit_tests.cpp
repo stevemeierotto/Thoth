@@ -8019,8 +8019,334 @@ static bool runE2D4Step1Tests() {
                  "registerEvaluationSubscriber; production-only registration; subscriber "
                  "configuration selection (integrationDefaults when test seam unset); executive "
                  "publication gate; test seam isolation from plugin/executive\n";
-    std::cout << "  deferred: Step 2 E2-D4-01 live INTEGRATION envelope on production path; "
-                 "Step 3 E2-D4-02 STRICT contamination audit\n";
+    std::cout << "  deferred: Step 2 E2-D4-01 live plugin path; "
+                 "Step 3 E2-D4-02 STRICT authority preservation audit\n";
+    return true;
+}
+
+// --- E2-D4 Step 2: E2-D4-01 live plugin path (presence + containment + negative) ---
+
+struct E2D4PluginWorkspaceGuard {
+    fs::path workspace;
+    std::string priorWorkspaceEnv;
+    bool hadWorkspaceEnv = false;
+
+    bool prepare() {
+        workspace = makeTempPath("thoth_e2_d4_plugin_workspace");
+        fs::create_directories(workspace);
+
+        Config cfg;
+        cfg.enable_episodic_evaluation_publication = true;
+        cfg.enable_episodic_pipeline_telemetry = false;
+        cfg.enable_episode_replay_subscriber = false;
+        cfg.enable_metrics_subscriber = false;
+        cfg.enable_trace_subscriber = false;
+        if (!cfg.saveToJson((workspace / "config.json").string())) {
+            return false;
+        }
+
+        if (const char* prior = std::getenv("THOTH_WORKSPACE_PATH"); prior && *prior) {
+            hadWorkspaceEnv = true;
+            priorWorkspaceEnv = prior;
+        }
+        setenv("THOTH_WORKSPACE_PATH", workspace.string().c_str(), 1);
+        setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+        setenv("THOTH_MOCK_LLM", "true", 1);
+        return true;
+    }
+
+    void restore() {
+        Thoth::setEvaluationSubscriberEvalConfigForTests(std::nullopt);
+        Thoth::setEvaluationSubscriberPipelineTelemetryEnabled(false);
+        if (hadWorkspaceEnv) {
+            setenv("THOTH_WORKSPACE_PATH", priorWorkspaceEnv.c_str(), 1);
+        } else {
+            unsetenv("THOTH_WORKSPACE_PATH");
+        }
+        unsetenv("THOTH_TEST_SUITE_DEV");
+        unsetenv("THOTH_MOCK_LLM");
+        fs::remove_all(workspace);
+    }
+};
+
+static bool e2D4RunLivePluginPathPublish(const Thoth::EpisodeCompleted& event,
+                                         const char* audit_label) {
+    E2D4PluginWorkspaceGuard guard;
+    if (!guard.prepare()) {
+        std::cerr << audit_label << ": workspace prepare failed\n";
+        return false;
+    }
+
+    Thoth::setEvaluationSubscriberEvalConfigForTests(std::nullopt);
+
+    {
+        BasicAgentPlugin plugin;
+        Thoth::InProcessEpisodeEventChannel* channel = plugin.episodeEventChannelForTests();
+        if (!channel) {
+            std::cerr << audit_label << ": missing episode channel\n";
+            guard.restore();
+            return false;
+        }
+        if (channel->subscriberCountForTests() != 1) {
+            std::cerr << audit_label << ": expected single eval subscriber, count="
+                      << channel->subscriberCountForTests() << '\n';
+            guard.restore();
+            return false;
+        }
+
+        channel->publish(event);
+
+        if (!Thoth::EvaluationSubscriber::lastSummaryForTests()) {
+            std::cerr << audit_label << ": subscriber produced no summary\n";
+            guard.restore();
+            return false;
+        }
+    }
+
+    guard.restore();
+    return true;
+}
+
+static nlohmann::json e2D4BuildIntegrationSummaryLogRow(const Thoth::EpisodeCompleted& event) {
+    const Thoth::EpisodicLearningSummary* summary =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    if (!summary) {
+        return nlohmann::json::object();
+    }
+
+    const Thoth::E2EvalConfig integration = Thoth::E2EvalConfig::integrationDefaults();
+    Thoth::EpisodicLearningLogContext ctx;
+    ctx.timestamp_ms = event.completed_at_ms;
+    ctx.run_id = event.run_id;
+    ctx.env_hash = event.env_hash;
+    ctx.e2_eval_config = integration.toJson();
+    ctx.evaluation_fingerprint =
+        Thoth::episodicEvaluationService().computeFingerprint(integration).toJson();
+
+    int cases_passed = 0;
+    for (const auto& eval : summary->case_results) {
+        if (eval.passes) {
+            ++cases_passed;
+        }
+    }
+
+    const Thoth::EpisodicLearningRunEnvelope envelope{false, true, "INTEGRATION"};
+    return Thoth::episodicLearningSummaryLogRow(
+        ctx, *summary, cases_passed, summary->case_results.size(), envelope);
+}
+
+static bool e2D4AssertIntegrationPresence(const Thoth::EpisodicLearningSummary& summary,
+                                          const nlohmann::json& row,
+                                          const char* audit_label) {
+    if (summary.scoring_tier != Thoth::E2EvalTier::INTEGRATION) {
+        std::cerr << audit_label << ": expected INTEGRATION tier\n";
+        return false;
+    }
+    if (summary.official_scoring) {
+        std::cerr << audit_label << ": official_scoring must be false\n";
+        return false;
+    }
+    if (!Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests()) {
+        std::cerr << audit_label << ": missing diagnostic metadata\n";
+        return false;
+    }
+
+    if (row.value("event", "") != "EPISODIC_LEARNING_SUMMARY") {
+        std::cerr << audit_label << ": expected EPISODIC_LEARNING_SUMMARY row\n";
+        return false;
+    }
+    if (row.value("scoring_tier", "") != "INTEGRATION") {
+        std::cerr << audit_label << ": JSONL scoring_tier must be INTEGRATION\n";
+        return false;
+    }
+    if (row.value("official_scoring", true) != false) {
+        std::cerr << audit_label << ": JSONL official_scoring must be false\n";
+        return false;
+    }
+    if (row.value("wiring_stage", "") != "INTEGRATION") {
+        std::cerr << audit_label << ": expected wiring_stage INTEGRATION\n";
+        return false;
+    }
+    if (!row.contains("e2_eval_config") || !row["e2_eval_config"].is_object()) {
+        std::cerr << audit_label << ": missing e2_eval_config diagnostic metadata\n";
+        return false;
+    }
+    return true;
+}
+
+/** D4 containment contract — absence proofs only (§ D.4.0). */
+static bool e2D4ViolatesContainmentContract(const Thoth::EpisodicLearningSummary& summary,
+                                            const nlohmann::json& row,
+                                            const nlohmann::json& diag_row) {
+    if (summary.official_scoring) {
+        return true;
+    }
+    if (summary.evaluation_resolution.has_value()) {
+        return true;
+    }
+    if (row.value("official_scoring", true) != false) {
+        return true;
+    }
+    if (row.contains("e2_outcome")) {
+        return true;
+    }
+    if (row.contains("evaluation_resolution")) {
+        return true;
+    }
+    if (row.value("wiring_stage", "") == "B" && row.value("official_scoring", false) == true) {
+        return true;
+    }
+    if (row.contains("success_rate")) {
+        return true;
+    }
+    if (diag_row.contains("e2_outcome")) {
+        return true;
+    }
+    if (diag_row.value("official_scoring", false) == true) {
+        return true;
+    }
+    return false;
+}
+
+static bool testE2D4_01LivePluginPathPresence() {
+    const Thoth::EpisodeCompleted event = makeE2D2FixtureEvent();
+    if (!e2D4RunLivePluginPathPublish(event, "testE2D4_01LivePluginPathPresence")) {
+        return false;
+    }
+
+    const Thoth::EpisodicLearningSummary* summary =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const nlohmann::json row = e2D4BuildIntegrationSummaryLogRow(event);
+    return e2D4AssertIntegrationPresence(*summary, row, "testE2D4_01LivePluginPathPresence");
+}
+
+static bool testE2D4_01LivePluginPathJsonlPresence() {
+    const Thoth::EpisodeCompleted event = makeE2D2FixtureEvent();
+    if (!e2D4RunLivePluginPathPublish(event, "testE2D4_01LivePluginPathJsonlPresence")) {
+        return false;
+    }
+
+    const Thoth::EpisodicLearningSummary* summary =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const nlohmann::json row = e2D4BuildIntegrationSummaryLogRow(event);
+    if (!e2D4AssertIntegrationPresence(*summary, row,
+                                       "testE2D4_01LivePluginPathJsonlPresence")) {
+        return false;
+    }
+
+    if (!row.contains("evaluation_fingerprint") || !row.contains("case_results")) {
+        std::cerr << "testE2D4_01LivePluginPathJsonlPresence: missing E2-06 JSONL fields\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4_01LivePluginPathContainment() {
+    const Thoth::EpisodeCompleted event = makeE2D2FixtureEvent();
+    if (!e2D4RunLivePluginPathPublish(event, "testE2D4_01LivePluginPathContainment")) {
+        return false;
+    }
+
+    const Thoth::EpisodicLearningSummary* summary =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    const nlohmann::json row = e2D4BuildIntegrationSummaryLogRow(event);
+    const nlohmann::json diag_row = Thoth::evaluationDiagnosticSummaryToJson(
+        *Thoth::EvaluationSubscriber::lastRunDiagnosticsForTests());
+
+    if (e2D4ViolatesContainmentContract(*summary, row, diag_row)) {
+        std::cerr << "testE2D4_01LivePluginPathContainment: containment contract violated\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testE2D4_01IntegrationDefaultsBehavioralNegative() {
+    const Thoth::EpisodeCompleted event = makeE2D2FixtureEvent();
+    const Thoth::E2EvalConfig integration = Thoth::E2EvalConfig::integrationDefaults();
+
+    Thoth::setEvaluationSubscriberEvalConfigForTests(Thoth::E2EvalConfig::strictDefaults());
+    {
+        Thoth::EvaluationSubscriber strictSubscriber;
+        strictSubscriber.onEpisodeCompleted(event);
+    }
+    const Thoth::EpisodicLearningSummary* strictSummary =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    if (!strictSummary || strictSummary->scoring_tier != Thoth::E2EvalTier::STRICT ||
+        !strictSummary->official_scoring) {
+        std::cerr << "testE2D4_01IntegrationDefaultsBehavioralNegative: STRICT control baseline "
+                     "missing\n";
+        Thoth::setEvaluationSubscriberEvalConfigForTests(std::nullopt);
+        return false;
+    }
+
+    const Thoth::EpisodicLearningSummary strictSummaryCopy = *strictSummary;
+
+    Thoth::setEvaluationSubscriberEvalConfigForTests(std::nullopt);
+    if (!e2D4RunLivePluginPathPublish(
+            event, "testE2D4_01IntegrationDefaultsBehavioralNegative")) {
+        return false;
+    }
+
+    const Thoth::EpisodicLearningSummary* liveSummary =
+        Thoth::EvaluationSubscriber::lastSummaryForTests();
+    if (!liveSummary) {
+        std::cerr << "testE2D4_01IntegrationDefaultsBehavioralNegative: missing live summary\n";
+        return false;
+    }
+    if (liveSummary->scoring_tier != integration.tier ||
+        liveSummary->official_scoring != integration.officialScoring()) {
+        std::cerr << "testE2D4_01IntegrationDefaultsBehavioralNegative: live path does not match "
+                     "integrationDefaults()\n";
+        return false;
+    }
+    if (liveSummary->scoring_tier == strictSummaryCopy.scoring_tier &&
+        liveSummary->official_scoring == strictSummaryCopy.official_scoring) {
+        std::cerr << "testE2D4_01IntegrationDefaultsBehavioralNegative: live path matches STRICT "
+                     "control — STRICT config may be injected\n";
+        return false;
+    }
+    if (liveSummary->outcome_rationale.find("non-scoring diagnostic") == std::string::npos) {
+        std::cerr << "testE2D4_01IntegrationDefaultsBehavioralNegative: expected INTEGRATION "
+                     "diagnostic summarize path\n";
+        return false;
+    }
+    if (strictSummaryCopy.outcome_rationale.find("non-scoring diagnostic") != std::string::npos) {
+        std::cerr << "testE2D4_01IntegrationDefaultsBehavioralNegative: STRICT control must not "
+                     "use INTEGRATION diagnostic summarize path\n";
+        return false;
+    }
+
+    Thoth::setEvaluationSubscriberEvalConfigForTests(std::nullopt);
+    return true;
+}
+
+static bool runE2D4_01Tests() {
+    if (!testE2D4_01LivePluginPathPresence()) {
+        std::cerr << "E2-D4-01 live plugin path presence failed\n";
+        return false;
+    }
+    if (!testE2D4_01LivePluginPathJsonlPresence()) {
+        std::cerr << "E2-D4-01 live plugin path JSONL presence failed\n";
+        return false;
+    }
+    if (!testE2D4_01LivePluginPathContainment()) {
+        std::cerr << "E2-D4-01 live plugin path containment failed\n";
+        return false;
+    }
+    if (!testE2D4_01IntegrationDefaultsBehavioralNegative()) {
+        std::cerr << "E2-D4-01 integrationDefaults behavioral negative failed\n";
+        return false;
+    }
+    if (!runE2D4Step1Tests()) {
+        std::cerr << "E2-D4-01 Step 1 regression failed\n";
+        return false;
+    }
+
+    std::cout << "E2-D4-01 live plugin path proof green\n";
+    std::cout << "E2-D4-01 evidence:\n";
+    std::cout << "  gate: THOTH_E2_D4_01 presence + containment + integrationDefaults negative\n";
+    std::cout << "  live plugin path: BasicAgentPlugin -> channel -> EvaluationSubscriber\n";
+    std::cout << "  deferred: Step 3 E2-D4-02 STRICT authority preservation audit\n";
     return true;
 }
 
@@ -8988,6 +9314,16 @@ int main() {
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* d4_01 = std::getenv("THOTH_E2_D4_01")) {
+        if (d4_01[0] != '0' && std::string(d4_01) != "false") {
+            if (!runE2D4_01Tests()) {
+                return 1;
+            }
+            std::cout << "E2-D4-01 gate passed.\n";
+            return 0;
         }
     }
 

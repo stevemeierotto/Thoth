@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-07 (E2 **D4 Step 2 locked** § D.4.0 Step 2; Step 1 ✅ § D.4.0)  
+**Last updated:** 2026-07-07 (E2 **D4 Step 2 complete** § D.4.0 Step 2; Step 1 ✅ § D.4.0)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **D4 Step 2 locked** (§ D.4.0 Step 2) — E2-D4-01 live plugin path; await explicit implementation authorization. Step 1 ✅ · D3 ✅.
+**Active E2 work:** ✅ **D4 Step 2 complete** (§ D.4.0 Step 2) — E2-D4-02 STRICT authority preservation audit next; paused before Step 3. Step 1 ✅ · D3 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -1049,7 +1049,7 @@ On green gate, Step 1 produces:
 
 ##### D.4.0 Step 2 — E2-D4-01 live plugin path (**v1 locked**)
 
-**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-07) — paused before implementation (AGENTS.md gate)
+**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-07) — ✅ **Step 2 complete** (2026-07-07) — paused before Step 3 (E2-D4-02).
 
 ###### Core invariant (why Step 2 exists)
 
@@ -1174,7 +1174,7 @@ If D3 proved observers can observe, Step 2 proves **production can emit diagnost
 | STRICT harness / `wiring_stage=B` fingerprint | Must remain stable |
 | D3 subscribers | Contract frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 locked** (§ D.4.0 Step 2) — paused pending AGENTS.md approval.
+**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 ✅** (§ D.4.0 Step 2) — paused before Step 3.
 
 ### Separation debt (acknowledged)
 
@@ -1490,7 +1490,8 @@ Done    E2 Phase D1 — event channel fan-out ✅ 2026-07-05
 Done    E2 Phase D2 — replay subscriber + D2-03/FLAKE-UT-02 ✅ 2026-07-07
 Done    E2 Phase D3 — observability proof suite (Steps 1–6, `THOTH_E2_D3=1`) ✅ 2026-07-07
 Done    E2 Phase D4 Step 1 — production wiring seam confirmation (`THOTH_E2_D4_STEP1=1`) ✅ 2026-07-07
-Next 1  **E2 Phase D4 Step 2** — E2-D4-01 live plugin path (§ **D.4.0 Step 2** locked; await explicit implementation approval)
+Done    E2 Phase D4 Step 2 — E2-D4-01 live plugin path (`THOTH_E2_D4_01=1`) ✅ 2026-07-07
+Next 1  **E2 Phase D4 Step 3** — E2-D4-02 STRICT authority preservation audit (§ **D.4.0 Step 3** outline; lock at Step 2 close)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
