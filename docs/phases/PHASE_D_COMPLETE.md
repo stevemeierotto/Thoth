@@ -39,7 +39,7 @@ D5 confirms trust boundaries were **preserved** after D1–D4 evolution. It does
 | D5 Step 2 (behavioral) | `f16664d` |
 | D5 Step 3 (determinism) | `6dec86b` |
 | D5 Step 4 plan lock | `3a5a323` |
-| D5 Step 4 closure + this seal | `f3bbb3a` |
+| D5 Step 4 closure + this seal | `e0a9ba5` |
 
 ---
 
