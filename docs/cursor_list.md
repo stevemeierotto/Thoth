@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-07 (E2 **D4 Step 1 locked** § D.4.0 Step 1; D3 complete § D.3.0)  
+**Last updated:** 2026-07-07 (E2 **D4 Step 2 locked** § D.4.0 Step 2; Step 1 ✅ § D.4.0)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **D4 Step 1 complete** — **Step 2** (E2-D4-01 live envelope) next; await explicit implementation authorization. D3 ✅ complete.
+**Active E2 work:** 🔒 **D4 Step 2 locked** (§ D.4.0 Step 2) — E2-D4-01 live plugin path; await explicit implementation authorization. Step 1 ✅ · D3 ✅.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -880,17 +880,44 @@ Prior tiers proved: C2 INTEGRATION envelope on **fixtures** · C5 equivalence un
 
 > **D4 connects INTEGRATION to production; it does not introduce INTEGRATION.** Prove valid E2-06 envelopes on the real subscriber/plugin path while STRICT remains the sole scoring authority.
 
-##### “Live production path” (scope boundary — locked)
+##### “Live plugin path” (canonical definition — locked)
 
-**“Live production path”** means the **production wiring path** exercised through the real subscriber/plugin registration path under `integrationDefaults()` — typically via integration tests that construct `BasicAgentPlugin` (or equivalent production registration) with publication enabled.
+Use this phrase consistently across D4 Steps 2–3.
+
+> **Live plugin path:** Production initialization through `BasicAgentPlugin` using normal registration and `integrationDefaults()`, executed in a test harness rather than deployed runtime.
+
+Synonym in protocol text: **live production path** — same meaning; prefer **live plugin path** in plans and tests.
 
 | In scope | Out of scope |
 |----------|--------------|
-| Production code path + plugin registration seam | Deployed service traffic or external user runtime |
-| `integrationDefaults()` on `EvaluationSubscriber` (test seam unset) | Claiming INTEGRATION object equality with STRICT |
+| Live plugin path (above) | Deployed service traffic or external user runtime |
+| `integrationDefaults()` with test config seam **unset** | Claiming INTEGRATION object equality with STRICT |
 | Organic warm tier, cross-session, heuristics per service config | Changing `resolveEvaluation()` or Phase B export |
 
 This prevents scope creep into “production ops” or deployment validation.
+
+##### Containment contract (locked — all containment tests use this)
+
+**Containment** means the live plugin path output satisfies **all** of:
+
+| Rule | Requirement |
+|------|-------------|
+| `official_scoring` | `false` |
+| `e2_outcome` | **absent** on diagnostic authority path |
+| STRICT authority metadata | **absent** (e.g. `wiring_stage: "B"` with official scoring, Phase B export authority fields) |
+| Benchmark authority fields | **absent** (`evaluation_resolution` used as verdict, lift, promotion labels, etc.) |
+| Envelope class | **Diagnostic only** — E2-06 INTEGRATION envelope |
+
+Every containment test checks this same contract. Do not invent per-test forbidden lists.
+
+**Presence vs absence (proof ladder):**
+
+| Class | Proves |
+|-------|--------|
+| **Presence** | `scoring_tier: INTEGRATION`; expected diagnostic metadata; E2-06 required fields present |
+| **Containment (absence)** | Containment contract above — nothing from the absence column may appear |
+
+Step 2 tests **separate** presence proofs from containment proofs (distinct test functions).
 
 ##### What C + D3 proved vs what D4 must add
 
@@ -927,16 +954,16 @@ Implementation may add tests and minimal wiring only; protocol documents change 
 
 | ID | Proves |
 |----|--------|
-| **E2-D4-01** | Live INTEGRATION envelope — E2-06 contract on production-path output |
-| **E2-D4-02** | STRICT contamination audit — `wiring_stage=B` benchmark authority unchanged |
+| **E2-D4-01** | Live plugin path — E2-06 presence + containment contract; `integrationDefaults()` behavioral negative proof |
+| **E2-D4-02** | STRICT authority preservation audit — `wiring_stage=B` benchmark authority unchanged |
 
 ##### Implementation order (pause between steps)
 
 | Step | Work | Gate (proposed) |
 |------|------|-----------------|
 | **1** | Production wiring seam confirmation — structural audit only (§ D.4.0 Step 1) | `THOTH_E2_D4_STEP1=1` |
-| **2** | **E2-D4-01** — live path: plugin/subscriber registration exercised; assert INTEGRATION envelope + **no scoring authority artifacts** | `THOTH_E2_D4_01=1` |
-| **3** | **E2-D4-02** — STRICT harness with D4 wiring present; fingerprint + authority fields unchanged | `THOTH_E2_D4_02=1` |
+| **2** | **E2-D4-01** — live plugin path: presence + containment + `integrationDefaults()` behavioral negative proof | `THOTH_E2_D4_01=1` |
+| **3** | **E2-D4-02** — STRICT authority preservation audit | `THOTH_E2_D4_02=1` |
 | **4** | Targeted regressions — `THOTH_E2_D3=1`, `THOTH_E2_D2=1`, `THOTH_E2_D1=1`, `THOTH_E2_C5=1` | Backward compat |
 | **5** | Umbrella `THOTH_E2_D4=1` (full D4 proof suite) | D4 close-out |
 | **6** | **Pause for review** before D5 |
@@ -959,7 +986,7 @@ D4 is **not** “add integration support.” D4 is **prove existing integration 
 |----------------------------|--------------------------------------|
 | Production wiring seam exists and is flag-gated | E2-D4-01 live envelope on plugin path |
 | `integrationDefaults()` is the production subscriber config selection | Executive goal run with publication ON |
-| No authority confusion in production init paths | `wiring_stage=B` fingerprint / STRICT contamination |
+| No authority confusion in production init paths | `wiring_stage=B` fingerprint / STRICT authority preservation (Step 3) |
 | Verified seam inventory for D5 evidence | INTEGRATION ≡ STRICT equivalence or promotion suitability |
 
 **Proof ladder:** Step 1 = *does the code select the expected config?* · Step 2 = *does the running path produce the expected envelope?*
@@ -1003,7 +1030,7 @@ On green gate, Step 1 produces:
 1. **D4 Step 1 gate result** — `THOTH_E2_D4_STEP1=1` pass  
 2. **Structural audit summary** — which greps/audits ran  
 3. **Verified seams list** — e.g. config flag, plugin registration, `integrationDefaults()` selection, Executive publication gate, test-seam isolation  
-4. **Deferred proof obligations** — explicitly listed for Steps 2–3 (live envelope, STRICT contamination)  
+4. **Deferred proof obligations** — explicitly listed for Steps 2–3 (live envelope, STRICT authority preservation audit)  
 
 ###### Step 1 exit criteria
 
@@ -1020,11 +1047,104 @@ On green gate, Step 1 produces:
 | `tests/unit_tests.cpp` | Step 1 tests + `runE2D4Step1Tests()` + gate |
 | `external/basic_agent/*` | **Only if audit finds violation** — default: none |
 
+##### D.4.0 Step 2 — E2-D4-01 live plugin path (**v1 locked**)
+
+**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-07) — paused before implementation (AGENTS.md gate)
+
+###### Core invariant (why Step 2 exists)
+
+> **Step 2 proves that the production path can emit diagnostic INTEGRATION artifacts without acquiring scoring authority.** It does **not** compare, rank, or promote those artifacts relative to STRICT.
+
+If D3 proved observers can observe, Step 2 proves **production can emit diagnostic observations while remaining outside the scoring authority chain.**
+
+###### Step 2 question (locked boundary)
+
+> **Step 2 answers: “On the live plugin path, does the running system produce the expected E2-06 presence **and** satisfy the containment contract?”**
+
+| Step 2 proves (behavioral) | Step 2 does **not** prove (deferred) |
+|----------------------------|--------------------------------------|
+| **Presence** — INTEGRATION tier, diagnostic metadata, E2-06 required fields | STRICT authority preservation (Step 3) |
+| **Containment** — containment contract (§ above) | INTEGRATION ≡ STRICT equivalence or promotion |
+| **Behavioral negative** — `integrationDefaults()` with test seam unset; no STRICT config injected | Full D4 umbrella / D5 regression |
+| Live plugin path (canonical definition § above) | Deployed / external-user runtime |
+
+**Proof ladder:** Step 1 = config selection · **Step 2 = presence + containment + integrationDefaults negative proof on live plugin path**
+
+###### Step 2 forbidden (locked)
+
+- Establish **equivalence** between INTEGRATION and STRICT  
+- Inject STRICT config via `setEvaluationSubscriberEvalConfigForTests` on live-plugin-path tests  
+- STRICT harness / fingerprint assertions (Step 3)  
+- Protocol document edits without explicit approval  
+- Rewriting subscriber behavior because tests are “awkward” — see production-change rule below  
+
+###### Proposed tests (`THOTH_E2_D4_01=1`)
+
+**Harness:** `E2D4PluginWorkspaceGuard` — temp workspace, `enable_episodic_evaluation_publication=true`, other subscriber flags OFF; `THOTH_WORKSPACE_PATH`, `THOTH_TEST_SUITE_DEV=1`, `THOTH_MOCK_LLM=true`; construct `BasicAgentPlugin` → `episodeEventChannelForTests()` → publish fixture.
+
+| Test | Class | Purpose |
+|------|-------|---------|
+| `testE2D4_01LivePluginPathPresence` | **Presence** | After live plugin path publish: `lastSummaryForTests()` has `INTEGRATION` tier, `official_scoring == false`, expected diagnostic metadata |
+| `testE2D4_01LivePluginPathJsonlPresence` | **Presence** | `episodicLearningSummaryLogRow` with INTEGRATION envelope — required E2-06 fields present |
+| `testE2D4_01LivePluginPathContainment` | **Containment** | Summary + JSONL satisfy **containment contract** (§ above) — absence proofs only |
+| `testE2D4_01IntegrationDefaultsBehavioralNegative` | **Negative** | `setEvaluationSubscriberEvalConfigForTests(std::nullopt)` before plugin construct; **only** changing nothing except leaving seam unset yields `integrationDefaults()` behavior — no STRICT config ever injected |
+
+**Regression dependencies (call, do not duplicate):** `runE2D4Step1Tests()` · `testE2C2IntegrationEnvelope()` (fixture baseline).
+
+**Orchestrator:** `runE2D4_01Tests()` · gate `THOTH_E2_D4_01=1` in `main()`.
+
+###### Step 2 implementation discipline
+
+- Tests only first  
+- **Production changes are permitted only to correct verified production wiring defects discovered by the behavioral proof** — not to reshape subscriber semantics for test convenience  
+- Verification: `cmake --build --preset build-debug` + `THOTH_E2_D4_01=1` + `THOTH_E2_D4_STEP1=1`  
+- **Not** full suite / G2 (deferred to D5)  
+
+###### Step 2 evidence artifact
+
+1. `THOTH_E2_D4_01=1` pass  
+2. Live plugin path exercised (plugin registration → channel → subscriber)  
+3. Presence proof — E2-06 fields present  
+4. Containment proof — containment contract satisfied  
+5. Behavioral negative — `integrationDefaults()` path confirmed, no STRICT injection  
+6. **Deferred:** Step 3 STRICT authority preservation audit  
+
+###### Step 2 exit criteria
+
+1. Plan locked in § D.4.0 Step 2 — committed before implementation  
+2. `THOTH_E2_D4_01=1` green after implementation approval  
+3. `THOTH_E2_D4_STEP1=1` regression green  
+4. Build green  
+5. **Pause for review** before Step 3  
+
+###### Step 2 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `tests/unit_tests.cpp` | E2-D4-01 tests + `runE2D4_01Tests()` + gate |
+| `evaluation_subscriber.*` / `basic_agent_plugin.cpp` | Only for **verified wiring defects** found by behavioral proof |
+
+##### D.4.0 Step 3 — E2-D4-02 STRICT authority preservation audit (**outline — lock at Step 2 close**)
+
+**Purpose (preferred name):** **STRICT authority preservation audit** — proves STRICT benchmark authority is **preserved** when D4 wiring is present. (“Contamination” is useful internally; “authority preservation” states the proof obligation.)
+
+**Question:** With live plugin path wiring enabled, is `wiring_stage=B` / Phase B benchmark authority unchanged?
+
+| Proves | Gate |
+|--------|------|
+| Golden / official harness outcomes unchanged (eval publication ON vs OFF) | `THOTH_E2_D4_02=1` |
+| Phase B fingerprint or scoped equivalence snapshot stable | |
+| No INTEGRATION authority leaking into STRICT artifacts | |
+
+**Forbidden:** STRICT score promotion; INTEGRATION-vs-STRICT comparison as improvement.
+
+**Deferred detail:** Full step plan locked at Step 2 close-out (same discipline as Step 1 → Step 2).
+
 ##### D4 Step 5 exit criteria (umbrella gate)
 
 1. `THOTH_E2_D4=1` green — full D4 proof suite (Steps 1–4)  
-2. E2-D4-01: valid INTEGRATION envelope **and** no production-path scoring authority artifacts  
-3. E2-D4-02: STRICT path uncontaminated  
+2. E2-D4-01: presence + containment on live plugin path; `integrationDefaults()` behavioral negative proof  
+3. E2-D4-02: STRICT authority preserved; `wiring_stage=B` fingerprint stable  
 4. Post–D3 regressions green with flags default OFF where applicable  
 5. **Pause for review** before D5
 
@@ -1054,7 +1174,7 @@ On green gate, Step 1 produces:
 | STRICT harness / `wiring_stage=B` fingerprint | Must remain stable |
 | D3 subscribers | Contract frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 locked for implementation** (§ D.4.0 Step 1) — paused pending AGENTS.md approval. D3 complete.
+**Status:** 🔒 **v1 locked** (2026-07-07). **D4 Step 1 ✅** — **D4 Step 2 locked** (§ D.4.0 Step 2) — paused pending AGENTS.md approval.
 
 ### Separation debt (acknowledged)
 
@@ -1370,7 +1490,7 @@ Done    E2 Phase D1 — event channel fan-out ✅ 2026-07-05
 Done    E2 Phase D2 — replay subscriber + D2-03/FLAKE-UT-02 ✅ 2026-07-07
 Done    E2 Phase D3 — observability proof suite (Steps 1–6, `THOTH_E2_D3=1`) ✅ 2026-07-07
 Done    E2 Phase D4 Step 1 — production wiring seam confirmation (`THOTH_E2_D4_STEP1=1`) ✅ 2026-07-07
-Next 1  **E2 Phase D4 Step 2** — E2-D4-01 live INTEGRATION envelope (§ D.4.0; await explicit implementation authorization)
+Next 1  **E2 Phase D4 Step 2** — E2-D4-01 live plugin path (§ **D.4.0 Step 2** locked; await explicit implementation approval)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus

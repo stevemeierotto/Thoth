@@ -424,6 +424,12 @@ D4 does **not** introduce INTEGRATION. D0 and Phase C defined it; D4 **connects 
 
 #### Scope
 
+**Live plugin path (canonical):** Production initialization through `BasicAgentPlugin` using normal registration and `integrationDefaults()`, executed in a test harness rather than deployed runtime. (Synonym: *live production path* — same meaning.)
+
+**Containment contract (all D4 containment tests):** `official_scoring == false`; no `e2_outcome`; no STRICT authority metadata; no benchmark authority fields; diagnostic INTEGRATION envelope only.
+
+**Core invariant (Step 2):** The production path can emit diagnostic INTEGRATION artifacts **without acquiring scoring authority**. Step 2 does not compare, rank, or promote those artifacts relative to STRICT.
+
 **In scope**
 
 | Area | Obligation |
@@ -489,7 +495,18 @@ It does **not** mean deployed service traffic, external user runtime, or product
 
 **STRICT authority (untouched):** `wiring_stage=B` harness remains sole official scoring path; Phase B fingerprint stable; C5 equivalence under pinned config remains valid; D4 does **not** claim INTEGRATION object equality with STRICT.
 
-**Containment vs presence:** D4 proof includes **presence** (valid E2-06 envelopes on live production path) and **containment** (no production-path scoring authority artifacts).
+**Containment vs presence (proof ladder):**
+
+| Class | Proves |
+|-------|--------|
+| **Presence** | `scoring_tier: INTEGRATION`; expected diagnostic metadata; E2-06 required fields present |
+| **Containment (absence)** | Containment contract (§ Scope) — every containment test checks the same contract |
+
+Step 2 tests **separate** presence proofs from containment proofs (distinct test functions).
+
+**Step 2 implementation discipline:** Tests only first. **Production changes are permitted only to correct verified production wiring defects discovered by the behavioral proof** — not to reshape subscriber semantics for test convenience.
+
+**E2-D4-01 preregistered tests:** `testE2D4_01LivePluginPathPresence`, `testE2D4_01LivePluginPathJsonlPresence` (presence); `testE2D4_01LivePluginPathContainment` (containment); `testE2D4_01IntegrationDefaultsBehavioralNegative` (negative — seam unset → `integrationDefaults()` only; no STRICT config injected).
 
 #### E2-06 enforcement requirements
 
@@ -522,8 +539,8 @@ D4 is organized as a **proof suite**. Each step establishes a distinct invariant
 | Step | Proof obligation | Gate |
 |------|------------------|------|
 | **1** | Production wiring seam structurally correct — “Is INTEGRATION already wired the way D4 assumes?” | `THOTH_E2_D4_STEP1=1` |
-| **2** | **E2-D4-01** — Live path: valid E2-06 envelope **and** no scoring authority artifacts | `THOTH_E2_D4_01=1` |
-| **3** | **E2-D4-02** — STRICT contamination audit — benchmark authority unchanged | `THOTH_E2_D4_02=1` |
+| **2** | **E2-D4-01** — Live plugin path: E2-06 presence + containment contract + `integrationDefaults()` behavioral negative proof | `THOTH_E2_D4_01=1` |
+| **3** | **E2-D4-02** — STRICT authority preservation audit — benchmark authority unchanged | `THOTH_E2_D4_02=1` |
 | **4** | Backward-compat regressions (D3, D2, D1, C5) with applicable flags default OFF | Targeted gates |
 | **5** | Umbrella — full D4 proof suite | `THOTH_E2_D4=1` |
 
@@ -535,7 +552,7 @@ D4 is organized as a **proof suite**. Each step establishes a distinct invariant
 
 **Step 1 forbidden:** establish INTEGRATION ≡ STRICT equivalence; scoring parity or promotion suitability claims; live-path envelope proof (deferred to Step 2).
 
-**Preregistered test IDs:** E2-D4-01 (live envelope + containment); E2-D4-02 (STRICT contamination).
+**Preregistered test IDs:** E2-D4-01 (live plugin path presence + containment + integrationDefaults negative); E2-D4-02 (STRICT authority preservation).
 
 #### Forbidden changes
 
@@ -565,8 +582,8 @@ D4 is organized as a **proof suite**. Each step establishes a distinct invariant
 
 1. Proof obligation satisfied — INTEGRATION connected with E2-06 containment  
 2. D4-I1..I7 verified (structural + behavioral)  
-3. E2-D4-01 green — valid envelope + no scoring authority artifacts on production path  
-4. E2-D4-02 green — STRICT path uncontaminated; `wiring_stage=B` fingerprint stable  
+3. E2-D4-01 green — presence + containment contract on live plugin path; `integrationDefaults()` behavioral negative proof  
+4. E2-D4-02 green — STRICT authority preserved; `wiring_stage=B` fingerprint stable  
 5. `THOTH_E2_D4=1` green — full D4 proof suite (Steps 1–4)  
 6. Post-D3 regressions green with applicable flags default OFF  
 7. Evidence chain recorded for D5 (Step 1 artifact + Steps 2–3 behavioral proof)  
@@ -670,8 +687,8 @@ Pause for review after each D4 step and after D4 umbrella gate. Build/test failu
 | E2-D3-01 | D3 | Metrics sink-only — frozen aggregation ops; opaque `observed_final_success_score`; Metrics JSONL v1.0; eval-independence structural audit; backward compat with `enable_metrics_subscriber=false` |
 | E2-D3-02 | D3 | Failure isolation: exactly-once delivery for non-throwing subscribers; locked terminal outcome comparison (excludes metrics/trace/logs); mandatory ordering permutation; catch/log/continue |
 | E2-D3-03 | D3 | Structural audit — exclusive ownership; interpret + authority boundaries; publication-mechanism invariant; ordering/JSONL structural audits (narrow authority grep only) |
-| E2-D4-01 | D4 | Live INTEGRATION envelope — E2-06 contract on production path; no scoring authority artifacts |
-| E2-D4-02 | D4 | STRICT path contamination audit — benchmark authority unchanged |
+| E2-D4-01 | D4 | Live plugin path — E2-06 presence + containment contract; `integrationDefaults()` behavioral negative |
+| E2-D4-02 | D4 | STRICT authority preservation audit — benchmark authority unchanged |
 | E2-D5-01 | D5 | C5 equivalence matrix re-pass |
 | E2-D5-02 | D5 | Phase B fingerprint two-run gate |
 | E2-D5-03 | D5 | Passive Consumer Law audit on all D subscribers |
@@ -706,4 +723,4 @@ Pause for review after each D4 step and after D4 umbrella gate. Build/test failu
 **Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4 Step 1:** ✅ `THOTH_E2_D4_STEP1=1`  
 **Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 containment + live-path definition + protocol lock; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — paused before D4 Step 2.
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 protocol locked** — D4 Step 1 ✅ — **D4 Step 2 locked** — paused before Step 2 implementation.
