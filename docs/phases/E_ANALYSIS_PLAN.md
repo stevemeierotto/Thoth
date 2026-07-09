@@ -371,4 +371,4 @@ Step 2 delivers partial **E-Q2** (L2/L3 on trio) and **E-Q3** (methodological ad
 ---
 
 **Supersedes:** None (initial lock)  
-**Commit:** (recorded on implementation commit)
+**Commit:** `48e7511`
