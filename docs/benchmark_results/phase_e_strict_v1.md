@@ -1,16 +1,32 @@
 # Phase E STRICT v1 — Authoritative Inference Trio (Step 2)
 
-> **⚠️ INVESTIGATION HOLD (2026-07-09)** — Pre-flight (1) check **failed**. Step 2 sealed artifacts are **not** valid authoritative-inference **empirical** evidence until resolved. See § Investigation hold below. Do **not** treat rollup `FAILURE` / `lift=0` as a falsification finding yet. Do **not** proceed to Step 3 on this evidence base.
+> **✅ SEALED (2026-07-09)** — Step 2 redo after EP-01.5 + E2-33 completion sync. E2-28 bucket **#0**. Execution gate PASS (all arms tokens > 0, all `COMPLETED`). Investigation hold **released**. Prior invalid / failed-redo pairs archived under `superseded_pre_ep015/` and `superseded_e228_fail_pre_fix/`.
 
 **Evidence scope:** `n=3_strict_trio`  
-**Locked:** 2026-07-09  
+**Locked:** 2026-07-09 (sealed post-sync redo)  
 **Wiring stage:** `B` (official STRICT)  
 **Inference tier:** authoritative (`--authoritative`; External embeddings + pinned LLM metadata)  
 **Protocol:** E-AP v1.1 · E2 v1.2  
+**Harness:** parent `0a38f22` / submodule `77508c4`
 
 ---
 
-## Investigation hold (2026-07-09 — pre Step 3)
+## Step 2 sealed result (post EP-01.5 + E2-33)
+
+| Run | `run_id` | `env_hash` | Rollup | lift | cases_passed | INCOMPLETE | tokens |
+|-----|----------|------------|--------|------|--------------|------------|--------|
+| A | `run-1783639167839` | `155b66a4…` | `FAILURE` / `SCORED_FAILURE` | 0.0 | 1/3 | **0** | all > 0 |
+| B | `run-1783639378206` | `155b66a4…` | `FAILURE` / `SCORED_FAILURE` | 0.0 | 1/3 | **0** | all > 0 |
+
+**E2-28:** PASS — scoped snapshot deep-equal; diagnosis bucket **#0**.
+
+**Per-case (A = B):** E2-01/E2-02 `SCORED_SUCCESS` with `passes=false` (cold=1, warm=1 → lift 0); E2-03 `SCORED_SUCCESS` `passes=true` (negative control). Under live LLM the model answers E2-01/E2-02 correctly on the cold arm, so episodic lift is zero — tier-labeled empirical outcome, not an instrument gap.
+
+**Repairs that unblocked this seal:** EP-01.5 (live LLM wiring) → metrics `run_id` filter (`649d32c`/`9bf8fd5`) → controller-first arm wait + E2-33 (`77508c4`/`0a38f22`).
+
+---
+
+## Investigation hold — RESOLVED (historical)
 
 **Bucket classification:** Case-level arm outcomes in the scored loop (bucket 3) — **not** EP-01 test failure (E2-29/E2-30 were green at implementation) and **not** a reported Phase D regression suite failure.
 
@@ -35,13 +51,92 @@ Evidence from Run A (`run-1783628170667`) `logs/cognitive_metrics.jsonl` (all 6 
 
 **Secondary flag:** Both runs emitted `TIER_MISMATCH` (`declared_tier: FULL`, `inferred_tier: OLLAMA`) in `logs/benchmark_env.jsonl`.
 
-**Required before sealing as finding:** Complete **EP-01.5** (Phases 1–3 harness repair ✅ 2026-07-09; Phase 4 docs; Phase 5 regression pending), then **redo** Step 2 pair with the execution gate. Prior run IDs remain **invalid empirical evidence** (instrument gap). **Do not** adjust `LIFT_MARGIN` or episode threshold. **Do not** re-run chasing pass on the pre-EP-01.5 path.
+**Required before sealing as finding:** Complete **EP-01.5** (✅ 2026-07-09) then **redo** Step 2 pair with the execution gate. Prior run IDs (`run-1783628170667` / `run-1783628248447`) remain **invalid empirical evidence** (instrument gap). **Do not** adjust `LIFT_MARGIN` or episode threshold. **Do not** re-run chasing pass on the pre-EP-01.5 path.
 
 **Planner contract (historical clarification):** `plan_id: e2-plan` / `EpisodicLearningMockPlanner` is expected under authoritative mode — topology provider only; it does not imply mock LLM. See `E2_PROTOCOL.md` § Planner / LLM contract (EP-01.5).
 
 ---
 
-## Step 2 summary
+## Step 2 redo attempt (2026-07-09 — E2-28 FAILED — HALTED)
+
+**EP-01.5:** complete. Execution gate: **PASS** on both runs (all 6 arms `total_tokens > 0`).
+
+| Run | `run_id` | `env_hash` | Rollup | `mean_episodic_lift` | cases_passed |
+|-----|----------|------------|--------|----------------------|--------------|
+| A | `run-1783635011687` | `94f45827…` | `SUCCESS` / `SCORED_SUCCESS` | **1.0** | 3/3 |
+| B | `run-1783635183819` | `94f45827…` | `FAILURE` / `SCORED_FAILURE` | **0.0** | 2/3 |
+
+**Fingerprint:** identical (`ddc5c865…`). **Tokens:** all arms nonzero on both runs.
+
+**E2-28 scoped equivalence:** **FAIL** — `summary_evaluation_resolution` differs (`SCORED_SUCCESS` vs `SCORED_FAILURE`). Case-level `evaluation_resolution` fields match (`SCORED_SUCCESS` ×3); rollup diverges because **non-scoped** fields (`lift` / `passes` / `final_success_score`) differ across runs.
+
+**Probable root cause:** `readLatestMetricsForGoal()` matches by **goal substring only** (not `run_id` / arm). Logs show `[E2] metrics run_id mismatch` on cold arms. Stale `GOAL_COGNITIVE_METRICS` rows from prior arms/runs can pollute `final_success_score` → wrong lift → unstable `passes` / rollup. Example: Run B E2-01/E2-02 cold arms report `score=1` with `terminal_state=INCOMPLETE` (inconsistent with a true cold failure).
+
+**Files likely involved:** `run_episodic_learning_benchmark.cpp` (`readLatestMetricsForGoal`, metrics attribution in `runCaseArm`).
+
+**Proposed repair (not implemented):** Attribute metrics by `run_id` + goal (+ arm/session if needed); reject mismatched rows instead of warning-and-using; re-run Step 2 pair once. **Forbidden:** adjusting `LIFT_MARGIN`, re-running until pass without fixing attribution.
+
+**Artifacts:** partial extracts under `docs/baselines/artifacts/phase_e/run_0{1,2}_*.json`; prior invalid pair archived in `docs/baselines/artifacts/phase_e/superseded_pre_ep015/`. **Not sealed** as Step 2 evidence.
+
+### Instrumentation proof (2026-07-09 — confirmed)
+
+Temporary `[E2][METRICS_ATTR]` logging in `runCaseArm` (requested vs returned `run_id`/`goal`). Two consecutive `--authoritative` + `wiring_stage=B` runs after rebuild.
+
+**Run B** (`run-1783636328980`) — **4× `CROSS_RUN_METRICS_HIT`**:
+
+| Case / arm | Requested `run_id` | Returned `run_id` | Returned score | Obs terminal |
+|------------|--------------------|-------------------|----------------|--------------|
+| E2-01 cold | `run-1783636328980` | `run-1783636174290` (Run A) | **1** | INCOMPLETE |
+| E2-02 cold | `run-1783636328980` | `run-1783636174290` | **1** | INCOMPLETE |
+| E2-02 warm | `run-1783636328980` | `run-1783636174290` | **1** | INCOMPLETE |
+| E2-03 cold | `run-1783636328980` | `run-1783636174290` | **1** | INCOMPLETE |
+
+Example (verbatim shape):
+
+```
+requested:
+  run_id = run-1783636328980
+  goal = What is my dog's name?
+returned:
+  run_id = run-1783636174290
+  goal = What is my dog's name?
+  final_success_score = 1
+  terminal_state(obs) = INCOMPLETE
+*** CROSS_RUN_METRICS_HIT ***
+```
+
+Cold arm scored **1** from a **prior run’s** metrics while the current arm was still `INCOMPLETE` → lift collapse / E2-28 rollup drift. Defect proven. Repair: filter metrics by `run_id` (reject mismatch). Instrumentation still in tree pending repair approval.
+
+### Repair applied (2026-07-09) — cross-run fixed; E2-28 still FAIL
+
+**Commit:** submodule `649d32c` / parent `9bf8fd5` — `readLatestMetricsForGoal(..., runId)` filters by `run_id`; temp `[METRICS_ATTR]` logging removed.
+
+**Post-fix pair:**
+
+| Run | `run_id` | Rollup | lift | cases_passed | Cross-run hits |
+|-----|----------|--------|------|--------------|----------------|
+| A | `run-1783636708099` | `FAILURE` | 0.5 | 2/3 | **0** |
+| B | `run-1783636847032` | `SUCCESS` | 0.5 | 3/3 | **0** |
+
+Cross-run pollution is **gone**. E2-28 scoped equality still **FAIL** (`SCORED_FAILURE` vs `SCORED_SUCCESS`) because case `passes` / lift still diverge.
+
+**New probable root cause (within-run race):** harness wait timeout (~15s) vs live LLM wall clock. Example Run B E2-01 cold: `terminal_state=INCOMPLETE` but metrics for same `run_id`+goal show `outcome=completed`, `final_success_score=1.0`, `total_wall_clock_ms=18248` (> timeout). Harness records INCOMPLETE while later-emitted metrics supply score=1 → cold score inflated → lift collapses (E2-01 lift 0 on B vs 1 on A). Similar: Run A E2-02 warm `INCOMPLETE` score=0 with tokens=124 (metrics not yet visible / timed out).
+
+### Repair applied (2026-07-09) — completion sync ✅ → Step 2 sealed
+
+**Commit:** submodule `77508c4` / parent `0a38f22` — controller-first `waitForArmCompletion` (60s authoritative budget; mock 15s); non-terminal → `INCOMPLETE` + score 0; **E2-33** gate `THOTH_E2_EP015_SYNC=1` PASS.
+
+**Authority precedence (locked):**
+
+1. **Primary:** Controller terminal (`PLAN_COMPLETED` / `PLAN_FAILED` / `PLAN_ABORTED`).
+2. **Secondary:** Metrics `(run_id, goal)` only as persisted record / late-event grace — not a score substitute when controller never signaled.
+3. **Else:** `TIMEOUT` / `INCOMPLETE` (score 0).
+
+Sealed pair: see § **Step 2 sealed result** above. Failed pre-sync extracts archived in `superseded_e228_fail_pre_fix/`.
+
+---
+
+## Step 2 summary (superseded — pre-EP-01.5 invalid pair)
 
 Phase E Step 2 executed two consecutive authoritative STRICT harness runs on the v1.2 trio (E2-01..03) with L2 environment pinning. **E2-28 scoped equivalence passed (bucket #0)** across Run A and Run B.
 
@@ -108,17 +203,17 @@ ddc5c865b7edbff73a2702ac1b1d2a00075baa6992f480d23d490fe2d551668e
 ### Environment hash (both runs)
 
 ```
-af20b692ac59e45f2ba3d65d71433c1b42b2f1bc042652a8085fe7ca8f81cb5f
+155b66a41bbca1bdba441e301841baaa35fd08b6681c3ebc1d7158610a96f790
 ```
 
 ---
 
-## Runs
+## Runs (sealed)
 
 | Run | `run_id` | Role |
 |-----|----------|------|
-| A | `run-1783628170667` | Authoritative STRICT evidence |
-| B | `run-1783628248447` | Reproducibility verification |
+| A | `run-1783639167839` | Authoritative STRICT evidence |
+| B | `run-1783639378206` | Reproducibility verification |
 
 **Command (locked — identical for A and B):**
 

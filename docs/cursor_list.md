@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **EP-01.5 complete** · Step 2 redo pending · Step 3 blocked)  
+**Last updated:** 2026-07-09 (Phase E — **EP-01.5 ✅** · **E2-33 ✅** · **Step 2 sealed** · Step 3 pending)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ⚠️ **Step 2 UNDER INVESTIGATION HOLD** — EP-01.5 ✅; Step 2 redo required before Step 3.
+**Active E2 work:** ✅ **Step 2 sealed** (E2-28 bucket #0; `run-1783639167839` / `run-1783639378206`; lift=0 FAILURE under live LLM). Investigation hold released. **Step 3** next (await approval).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2256,7 +2256,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.1 ✅ |
 | **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** ✅ |
 | **EP-01.5** | Authoritative LLM wiring + planner contract | Harness repair — § **E.0.0 EP-01.5** ✅ |
-| **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ⚠️ hold |
+| **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ sealed |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
@@ -2275,7 +2275,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **EP-01.5 complete** (2026-07-09). **Step 2 UNDER INVESTIGATION HOLD** — redo pending; Step 3 blocked.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **EP-01.5 complete** (2026-07-09). **E2-33 complete** (2026-07-09). **Step 2 sealed** (2026-07-09) — E2-28 #0; Step 3 pending approval.
 
 ---
 

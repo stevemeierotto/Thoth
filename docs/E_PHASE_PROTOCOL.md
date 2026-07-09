@@ -1,7 +1,7 @@
 # E — Empirical Validation Protocol
 
 **Protocol version:** E v0.1  
-**Status:** 🔒 **LOCKED** (2026-07-09) — E1 complete (`E_ANALYSIS_PLAN.md` E-AP v1.1); await explicit Step 2 approval  
+**Status:** 🔒 **LOCKED** (2026-07-09) — E1 complete · EP-01.5 complete · **Step 2 sealed** (E2-28 #0); await explicit Step 3 approval  
 **Supersedes:** Informal “Phase E scientific defense” label (deprecated in favor of **empirical validation**)  
 **Depends on:** [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) (Phase D sealed 2026-07-08), [`D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒, [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 🔒, [`benchmark_environment.md`](benchmark_environment.md) (benchmark E1 ✅)  
 **Checkpoint tracking:** `cursor_list.md` § **E.0.0** (E1 ✅ · EP-01 ✅ · **Step 2 ✅** · Step 3 pending)

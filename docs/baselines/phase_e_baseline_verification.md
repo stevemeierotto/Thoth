@@ -1,9 +1,10 @@
 # Phase E STRICT Verification (Step 2)
 
 **Status:** PASS (E2-28 reproducibility)  
-**Verified:** 2026-07-09  
+**Verified:** 2026-07-09 (post EP-01.5 + E2-33 completion sync)  
 **Protocol:** E-AP v1.1 · E2 v1.2 · E2-28 scoped equivalence  
 **Evidence scope:** `n=3_strict_trio`  
+**Harness:** parent `0a38f22` / submodule `77508c4`
 
 ---
 
@@ -11,8 +12,8 @@
 
 | Run | `run_id` | Role |
 |-----|----------|------|
-| A (#1) | `run-1783628170667` | Authoritative STRICT evidence |
-| B (#2) | `run-1783628248447` | Reproducibility verification |
+| A (#1) | `run-1783639167839` | Authoritative STRICT evidence |
+| B (#2) | `run-1783639378206` | Reproducibility verification |
 
 Source: `docs/baselines/artifacts/phase_e/run_01_summary.json`, `run_02_summary.json`
 
@@ -30,11 +31,23 @@ Source: `docs/baselines/artifacts/phase_e/run_01_summary.json`, `run_02_summary.
 | `not_scorable_cases` | 0 | 0 | PASS |
 | `fingerprint_hash` | `ddc5c865…` | same | PASS |
 | `e2_eval_config` (canonical) | identical | identical | PASS |
-| `env_hash` | `af20b692…` | same | PASS |
+| `env_hash` | `155b66a4…` | same | PASS |
 | `e2_outcome` | `FAILURE` | `FAILURE` | PASS |
 | `mean_episodic_lift` | 0.0 | 0.0 | PASS |
+| `cases_passed` | 1/3 | 1/3 | PASS |
 
 **Excluded from comparison (allowed to differ):** `timestamp_ms`, `run_id`, wall-clock fields, per-arm `wall_clock_ms`.
+
+---
+
+## Execution gate / completion sync
+
+| Check | Result |
+|-------|--------|
+| All arms `terminal_state=COMPLETED` | PASS (0× `INCOMPLETE`) |
+| All arms `total_tokens > 0` | PASS |
+| Cross-run metrics hits | 0 (run_id filter) |
+| E2-33 (`THOTH_E2_EP015_SYNC=1`) | PASS before this pair |
 
 ---
 
@@ -63,6 +76,6 @@ E2-28 diagnostic bucket: **0 (equivalent)**.
 
 ## Conclusion
 
-**Semantic equivalence confirmed** between consecutive authoritative STRICT builds. Step 2 reproducibility gate **green**.
+**Semantic equivalence confirmed** between consecutive authoritative STRICT builds after EP-01.5 + completion sync. Step 2 reproducibility gate **green**.
 
-**Note:** Authoritative tier rollup is `FAILURE` (`mean_episodic_lift = 0`). This does **not** invalidate the E2-28 gate; it is the preregistered outcome under authoritative inference tier. Do not compare to Phase B mock `SUCCESS` baseline without tier labels.
+**Note:** Authoritative tier rollup is `FAILURE` (`mean_episodic_lift = 0`). Under live LLM, cold and warm arms both score 1.0 on E2-01/E2-02 (model answers without needing the planted episode) → lift 0. This is a **tier-labeled empirical outcome**, not an instrument gap. Do not compare to Phase B mock `SUCCESS` baseline without tier labels.

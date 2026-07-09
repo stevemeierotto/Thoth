@@ -1,43 +1,16 @@
 {
-  "environment": {
-    "corpus": {
-      "chunk_count": 0,
-      "fingerprint": "",
-      "fingerprint_mode": "FAST"
-    },
-    "environment_hash": "af20b692ac59e45f2ba3d65d71433c1b42b2f1bc042652a8085fe7ca8f81cb5f",
-    "index": {
-      "rag_index_header": {
-        "chunk_count": 0,
-        "embedding_dimension": 768,
-        "embedding_version": 2,
-        "model_name": "nomic-embed-text:v1.5"
-      }
-    },
-    "model": {
-      "embedding_dimension": 768,
-      "embedding_internal_version": 2,
-      "embedding_method": "External",
-      "embedding_model": "nomic-embed-text:v1.5",
-      "llm_model": "qwen2.5:3b"
-    },
-    "ollama": {
-      "models_digest": "298bd31c1198b9ceb8c5378953f557cdafc3ffc5ee32ced62294171760d693fa",
-      "models_digest_version": "v1",
-      "version": "0.18.0"
-    },
-    "prov": {
-      "basic_agent_git_sha": "35d425a",
-      "captured_at_ms": 1783628170667,
-      "thoth_git_sha": "8bf09b3"
-    },
-    "runtime": {
-      "harness": "episodic_learning_benchmark",
-      "thoth_env_flags": {},
-      "tier": "FULL"
-    }
+  "env_hash": "155b66a41bbca1bdba441e301841baaa35fd08b6681c3ebc1d7158610a96f790",
+  "event": "EPISODIC_LEARNING_COMPLETE",
+  "payload": {
+    "case_count": 3,
+    "cases_passed": 1,
+    "e2_outcome": "FAILURE",
+    "mean_episodic_lift": 0.0,
+    "official_scoring": true,
+    "scoring_enabled": true,
+    "scoring_function": "ExecutiveController::calculate_trajectory_score",
+    "wiring_stage": "B"
   },
-  "environment_hash": "af20b692ac59e45f2ba3d65d71433c1b42b2f1bc042652a8085fe7ca8f81cb5f",
-  "index_hash": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
-  "run_id": "run-1783628170667"
+  "run_id": "run-1783639167839",
+  "ts": 1783639378023
 }

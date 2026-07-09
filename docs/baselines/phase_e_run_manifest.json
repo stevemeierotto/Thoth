@@ -5,12 +5,12 @@
     "e_analysis_plan": "E-AP v1.1",
     "e2_protocol": "E2_PROTOCOL.md v1.2"
   },
-  "analysis_plan_commit": "1fd067300a3d229e1431fc1b973e0f3dd738fdd2",
-  "step2_plan_commit": "8bf09b31212ed4fb845809bcf0b702a8c33cefd7",
-  "step2_implementation_commit": "4b9d27c9b8b8ae290b17d1953014ab4f9aa42bf9",
+  "ep015_complete": true,
+  "e233_complete": true,
+  "step2_seal_commit": "0a38f22bb7970356e81b5a4907cd0df863c26d1b",
   "git_sha": {
-    "thoth": "4b9d27c9b8b8ae290b17d1953014ab4f9aa42bf9",
-    "basic_agent": "54f2b3f"
+    "thoth": "0a38f22bb7970356e81b5a4907cd0df863c26d1b",
+    "basic_agent": "77508c4c2335e801692648074e657e3d29d846d5"
   },
   "inference_tier": "authoritative",
   "inference_backend_identifier": "ollama",
@@ -24,8 +24,8 @@
   "runs": [
     {
       "label": "A",
-      "run_id": "run-1783628170667",
-      "environment_hash": "af20b692ac59e45f2ba3d65d71433c1b42b2f1bc042652a8085fe7ca8f81cb5f",
+      "run_id": "run-1783639167839",
+      "environment_hash": "155b66a41bbca1bdba441e301841baaa35fd08b6681c3ebc1d7158610a96f790",
       "index_hash": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
       "evaluation_fingerprint": "ddc5c865b7edbff73a2702ac1b1d2a00075baa6992f480d23d490fe2d551668e",
       "corpus_snapshot_id": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
@@ -42,6 +42,7 @@
       "e2_outcome": "FAILURE",
       "evaluation_resolution": "SCORED_FAILURE",
       "mean_episodic_lift": 0.0,
+      "cases_passed": "1/3",
       "artifact_paths": {
         "summary": "docs/baselines/artifacts/phase_e/run_01_summary.json",
         "benchmark_env": "docs/baselines/artifacts/phase_e/run_01_benchmark_env.json"
@@ -49,8 +50,8 @@
     },
     {
       "label": "B",
-      "run_id": "run-1783628248447",
-      "environment_hash": "af20b692ac59e45f2ba3d65d71433c1b42b2f1bc042652a8085fe7ca8f81cb5f",
+      "run_id": "run-1783639378206",
+      "environment_hash": "155b66a41bbca1bdba441e301841baaa35fd08b6681c3ebc1d7158610a96f790",
       "index_hash": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
       "evaluation_fingerprint": "ddc5c865b7edbff73a2702ac1b1d2a00075baa6992f480d23d490fe2d551668e",
       "corpus_snapshot_id": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
@@ -67,6 +68,7 @@
       "e2_outcome": "FAILURE",
       "evaluation_resolution": "SCORED_FAILURE",
       "mean_episodic_lift": 0.0,
+      "cases_passed": "1/3",
       "artifact_paths": {
         "summary": "docs/baselines/artifacts/phase_e/run_02_summary.json",
         "benchmark_env": "docs/baselines/artifacts/phase_e/run_02_benchmark_env.json"
@@ -74,6 +76,10 @@
     }
   ],
   "artifact_bundle": "docs/baselines/artifacts/phase_e/",
+  "superseded_archives": [
+    "docs/baselines/artifacts/phase_e/superseded_pre_ep015/",
+    "docs/baselines/artifacts/phase_e/superseded_e228_fail_pre_fix/"
+  ],
   "run_record": "docs/benchmark_results/phase_e_strict_v1.md",
   "combined_jsonl": "docs/baselines/artifacts/phase_e/episodic_learning_benchmark_snapshot.jsonl"
 }
