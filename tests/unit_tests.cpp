@@ -10112,6 +10112,99 @@ static bool runE2Ep015Phase3Tests() {
     return true;
 }
 
+/**
+ * EP-01.5 Phase 5 — mock path + authoritative smoke regression after Phases 1–4.
+ * Confirms E2-29 / E2-30 still green; does not re-run full Phase 1–3 Ollama suites.
+ */
+static bool runE2Ep015Phase5Tests() {
+    std::cout << "E2-EP-01.5 Phase 5 — mock + authoritative smoke regression\n";
+    std::cout << "  gate: THOTH_E2_EP015_PHASE5\n";
+
+    if (!testE2Ep01MockRegressionPreservesE28()) {
+        std::cerr << "E2-EP-01.5 Phase 5: E2-29 mock regression failed\n";
+        return false;
+    }
+    std::cout << "  E2-29 mock regression pass\n";
+
+    if (!testE2B5OfficialFingerprintDeterminism()) {
+        std::cerr << "E2-EP-01.5 Phase 5: Phase D E2-28 spot-check failed\n";
+        return false;
+    }
+    std::cout << "  Phase D E2-28 spot-check pass\n";
+
+    if (!testE2Ep01AuthoritativeInferenceSmoke()) {
+        std::cerr << "E2-EP-01.5 Phase 5: E2-30 authoritative smoke failed\n";
+        return false;
+    }
+    std::cout << "  E2-30 authoritative smoke pass (zero official_scoring rows)\n";
+
+    // Phase 2 predicate still holds after later phases (no tier drift).
+    if (!testE2Ep015TierDeclarationAligned()) {
+        std::cerr << "E2-EP-01.5 Phase 5: E2-31b tier alignment regresssed\n";
+        return false;
+    }
+    std::cout << "  E2-31b tier declaration still aligned\n";
+
+    if (!testE2Ep015ExecutionGateRequiresTokens()) {
+        std::cerr << "E2-EP-01.5 Phase 5: execution-gate predicate regresssed\n";
+        return false;
+    }
+    std::cout << "  execution-gate predicate still requires tokens\n";
+    return true;
+}
+
+/**
+ * Full EP-01.5 close-out orchestrator (after Phases 1–5 land).
+ * Sequence: E2-29 → E2-28 spot → E2-30 → E2-31b → E2-31 → E2-32.
+ * Leave THOTH_E2_EP01 unchanged for historical EP-01 seal.
+ */
+static bool runE2Ep015Tests() {
+    std::cout << "E2-EP-01.5 authoritative LLM wiring close-out\n";
+    std::cout << "  gate: THOTH_E2_EP015\n";
+    std::cout << "  sequence: E2-29 -> E2-28 spot -> E2-30 -> E2-31b -> E2-31 -> E2-32\n";
+
+    if (!testE2Ep01MockRegressionPreservesE28()) {
+        std::cerr << "E2-EP-01.5: E2-29 mock regression failed\n";
+        return false;
+    }
+    std::cout << "  E2-29 mock regression pass\n";
+
+    if (!testE2B5OfficialFingerprintDeterminism()) {
+        std::cerr << "E2-EP-01.5: Phase D E2-28 spot-check failed\n";
+        return false;
+    }
+    std::cout << "  Phase D E2-28 spot-check pass\n";
+
+    if (!testE2Ep01AuthoritativeInferenceSmoke()) {
+        std::cerr << "E2-EP-01.5: E2-30 authoritative smoke failed\n";
+        return false;
+    }
+    std::cout << "  E2-30 authoritative smoke pass\n";
+
+    if (!testE2Ep015TierDeclarationAligned()) {
+        std::cerr << "E2-EP-01.5: E2-31b failed\n";
+        return false;
+    }
+    std::cout << "  E2-31b tier declaration pass\n";
+
+    if (!testE2Ep015AuthoritativeLlmWiring()) {
+        std::cerr << "E2-EP-01.5: E2-31 failed\n";
+        return false;
+    }
+    std::cout << "  E2-31 authoritative LLM wiring pass\n";
+
+    if (!testE2Ep015ExecutionGateRequiresTokens()) {
+        std::cerr << "E2-EP-01.5: execution-gate predicate failed\n";
+        return false;
+    }
+    if (!testE2Ep015FailClosedNoOfficialSummary()) {
+        std::cerr << "E2-EP-01.5: E2-32 fail-closed failed\n";
+        return false;
+    }
+    std::cout << "  E2-32 fail-closed pass\n";
+    return true;
+}
+
 static bool runE2Ep01Tests() {
     std::cout << "E2-EP-01 episodic authoritative inference harness proof\n";
     std::cout << "  gate: THOTH_E2_EP01\n";
@@ -10390,6 +10483,26 @@ int main() {
                 return 1;
             }
             std::cout << "E2-EP-01.5 Phase 3 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* ep015p5 = std::getenv("THOTH_E2_EP015_PHASE5")) {
+        if (ep015p5[0] != '0' && std::string(ep015p5) != "false") {
+            if (!runE2Ep015Phase5Tests()) {
+                return 1;
+            }
+            std::cout << "E2-EP-01.5 Phase 5 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* ep015 = std::getenv("THOTH_E2_EP015")) {
+        if (ep015[0] != '0' && std::string(ep015) != "false") {
+            if (!runE2Ep015Tests()) {
+                return 1;
+            }
+            std::cout << "E2-EP-01.5 gate passed.\n";
             return 0;
         }
     }

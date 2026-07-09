@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-09 (Phase E Step 2 complete — authoritative STRICT trio sealed)
+Last updated: 2026-07-09 (Phase E — EP-01.5 complete; Step 2 on investigation hold pending redo)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### E2 track — status at a glance
@@ -11,7 +11,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | **B** | Can measurement be trusted? | ✅ Complete 2026-07-04 | [`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md); fingerprint `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
 | **C** | Can trusted measurement become architecture? | ✅ Locked 2026-07-05 | [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) |
 | **D** | Can architecture evolve without losing trust? | ✅ Complete 2026-07-08 | [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md); D5 evolution trust proof |
-| **E** | Can we defend the results scientifically? | 🔶 In progress (2026-07-09) | E1 ✅ · EP-01 ✅ · Step 2 ✅ — see entries below |
+| **E** | Can we defend the results scientifically? | 🔶 In progress (2026-07-09) | E1 ✅ · EP-01 ✅ · EP-01.5 ✅ · Step 2 ⚠️ hold — see entries below |
 
 ### E2 Phase C — Integration tier ✅ locked (2026-07-05)
 
@@ -55,12 +55,28 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 - Isolated `inferTier()` branch for `episodic_learning_benchmark`
 - Infrastructure only — no Phase E benchmark evidence in EP-01
 
-### Phase E Step 2 — authoritative STRICT trio evidence ✅ (2026-07-09)
+### Phase E — EP-01.5 authoritative LLM wiring & planner contract ✅ (2026-07-09)
+
+**Authority:** `cursor_list.md` § E.0.0 EP-01.5  
+**Gates:** `THOTH_E2_EP015_PHASE1`…`PHASE5`; full close-out `THOTH_E2_EP015=1`
+
+| Phase | Deliverable | Gate |
+|-------|-------------|------|
+| 1 | Owned `LLMInterface` + `set_llm_interface` in harness only | E2-31 |
+| 2 | Declared tier `OLLAMA` at inputs boundary | E2-31b |
+| 3 | Execution + pre-summary fail-closed (`AUTHORITATIVE_LLM_NOOP`) | E2-32 |
+| 4 | Planner/LLM contract in `E2_PROTOCOL.md` | docs |
+| 5 | E2-29 / E2-30 regression preserved | `THOTH_E2_EP015_PHASE5=1` |
+
+- Does **not** change scoring formulas, corpus, or thresholds
+- Step 2 investigation-hold artifacts remain invalid until Step 2 **redo**
+
+### Phase E Step 2 — authoritative STRICT trio evidence ⚠️ HOLD (2026-07-09)
 
 **Authority:** `cursor_list.md` § E.0.0 Step 2 · [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md)  
 **Evidence scope:** `n=3_strict_trio`  
-**E2-28:** PASS (bucket #0) — Run A `run-1783628170667` vs Run B `run-1783628248447`  
-**Rollup:** `SCORED_FAILURE` / `mean_episodic_lift = 0` at authoritative tier (not comparable to Phase B mock SUCCESS)  
+**Status:** Sealed artifacts exist but pre-flight (1) failed (LLM no-op) — **not** valid empirical evidence until redo after EP-01.5  
+**E2-28:** PASS (bucket #0) on broken config only — Run A `run-1783628170667` vs Run B `run-1783628248447`  
 **Artifacts:** `docs/baselines/artifacts/phase_e/` · `docs/baselines/phase_e_run_manifest.json`
 
 ### E2 Phase D3 — Observability without influence ✅ complete (2026-07-07)
