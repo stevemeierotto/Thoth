@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-08 (E2 **Phase D complete** — `THOTH_E2_D5=1` ✅ · `PHASE_D_COMPLETE.md`)  
+**Last updated:** 2026-07-09 (Phase E — **EP-01 plan locked** · Step 2 blocked)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 📋 **EP-01 plan drafted** (episodic authoritative inference harness) — Step 2 **blocked**; paused for review (AGENTS.md gate).
+**Active E2 work:** 🔒 **EP-01 plan locked** (episodic authoritative inference harness) — Step 2 **blocked**; paused before implementation (AGENTS.md gate).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2253,7 +2253,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 |------|------|----------|
 | **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
 | **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.1 ✅ |
-| **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** draft |
+| **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** 🔒 |
 | **E2** | Authoritative STRICT runs (trio; B1 deferred) | E1-pinned artifacts — **blocked until EP-01** |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
@@ -2272,7 +2272,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **Planning format locked** (2026-07-09). **EP-01 plan drafted** — **Step 2 blocked** until EP-01 complete.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **Planning format locked** (2026-07-09). **EP-01 plan locked** (2026-07-09) — **Step 2 blocked** until EP-01 complete.
 
 ---
 
@@ -2329,7 +2329,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | Step | Plan status |
 |------|-------------|
 | **E1** | ✅ Complete (`E_ANALYSIS_PLAN.md` E-AP v1.1) — predates this format lock |
-| **EP-01** | 📋 Draft below — engineering prereq; **blocks E2** |
+| **EP-01** | 🔒 **v1 locked** (2026-07-09) — engineering prereq; **blocks E2** |
 | **E2** | 📋 Refined draft — **blocked until EP-01 complete** |
 | **E3** | 📋 Pending — must conform to this format before lock |
 | **E4** | 📋 Pending — must conform to this format before lock |
@@ -2559,9 +2559,9 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 
 ---
 
-##### E.0.0 EP-01 — episodic authoritative inference harness (**v1 draft — pending lock**)
+##### E.0.0 EP-01 — episodic authoritative inference harness (**v1 locked**)
 
-**Status:** 📋 **v1 draft for lock** (2026-07-09, refined 2026-07-09) — review pass: trajectory/kernel danger, isolated `inferTier`, fingerprint pin boundary, E2-29/E2-30, no-official-scoring exit.
+**Status:** 🔒 **v1 locked** (2026-07-09) — paused before implementation (AGENTS.md Planning/Implementation Gate). Review incorporated: trajectory/kernel danger, isolated `inferTier`, fingerprint pin boundary, E2-29/E2-30, no-official-scoring exit, verification gate order **9 → 11 → 10**.
 
 ###### Objective
 
@@ -2629,7 +2629,7 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 
 **Code review finding (2026-07-09):** Harness unconditionally sets `THOTH_MOCK_*`, uses TfIdf-only `EmbeddingEngine`, and pins `model_version_or_weights_hash = "mock"`. This is **intentional** for Phase B machinery proof — **not** a routing bug. EP-01 adds missing capability; Step 2 must **not** proceed without it.
 
-**Planning vs implementation:** This section is a **plan draft**. No code until plan is **locked** and explicitly approved.
+**Planning vs implementation:** This section is **locked**. No code until explicitly approved for implementation (AGENTS.md gate).
 
 ###### Files touched
 
@@ -2680,6 +2680,8 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 
 `runE2Ep01Tests()` / `THOTH_E2_EP01=1` orchestrator must invoke **E2-29 → Phase D E2-28 spot-check → E2-30** in that order.
 
+###### Dangers / failure modes / things that must not change
+
 | Risk | Mitigation |
 |------|------------|
 | **Trajectory score divergence (PRIMARY)** — live authoritative backend changes **Executive / planner / LLM trajectory scores** (`calculate_trajectory_score()` path) even though **`e2StrictRetrieve` does not call the LLM**. Mock-trio lift numbers are **not** comparable to authoritative-inference lift numbers without explicit backend + corpus tier labeling. Future readers may misread a Step 2 lift delta as apples-to-apples with Phase B mock baseline. | Name this risk in EP-01 docs; EP-01 smoke must **not** emit official scored rows; Step 2 run record must declare backend + `evidence_scope`; never compare Phase B mock rollup to Phase E authoritative rollup without tier label |
@@ -2720,8 +2722,8 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 4. **Authoritative mode** smoke completes — live backend contacted, metadata captured (**E2-30**)  
 5. **Zero official scoring in EP-01 smoke** — grep/audit of EP-01 authoritative smoke JSONL: **no** rows with `official_scoring: true` (A1-style NONE invariant; EP-01 does not produce benchmark evidence)  
 6. `inferTier()` episodic branch + sidecar record backend identity for authoritative runs  
-7. Phase D behavior preserved — E2-28 mock spot-check **green**  
-8. `THOTH_E2_EP01=1` green (E2-29 + E2-30)  
+7. Phase D behavior preserved — **item 11** E2-28 spot-check on mock path **green** (after E2-29, before E2-30)  
+8. `THOTH_E2_EP01=1` green — orchestrator ran **E2-29 → 11 → E2-30** in order  
 9. Documentation updated (E2 harness + benchmark_environment)  
 10. **No Phase E benchmark evidence** produced in EP-01  
 11. **Pause for review** before Phase E Step 2 lock/implementation  
@@ -2756,7 +2758,7 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 
 **STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
 
-EP-01 plan is **drafted only**. Do **not** modify harness code, run Phase E benchmarks, or implement Step 2 until this plan is **locked** and explicitly approved (AGENTS.md gate).
+EP-01 plan is **locked**. Do **not** modify harness code, run Phase E benchmarks, or implement Step 2 until explicitly approved for implementation (AGENTS.md gate).
 
 ---
 
@@ -3279,7 +3281,7 @@ Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) 
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 3 — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 4 — phase closure (`THOTH_E2_D5=1`) + `PHASE_D_COMPLETE.md` ✅ 2026-07-08
-Next 1  **Phase E Step 1** — analysis plan lock (`E_ANALYSIS_PLAN.md`; § **E.0.0 Step 1** draft — pending lock)
+Next 1  **Phase E EP-01** — episodic authoritative inference harness (§ **E.0.0 EP-01** 🔒 — awaiting implementation approval)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
