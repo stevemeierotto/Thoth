@@ -559,6 +559,7 @@ Both inference tiers use the **same** fixed plan topology (`EpisodicLearningMock
 | E2-31 | harness | EP-01.5 Phase 1 — live LLM wiring; tokens recorded (`THOTH_E2_EP015_PHASE1`) |
 | E2-31b | harness | EP-01.5 Phase 2 — authoritative episodic inputs; no `TIER_MISMATCH` |
 | E2-32 | harness | EP-01.5 Phase 3 — forced LLM no-op cannot emit official SUMMARY (`THOTH_E2_EP015_PHASE3`) |
+| E2-33 | harness | Authoritative completion sync — slow LLM under configured timeout → terminal, not INCOMPLETE (`THOTH_E2_EP015_SYNC`) |
 
 ---
 

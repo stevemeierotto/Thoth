@@ -10113,6 +10113,98 @@ static bool runE2Ep015Phase3Tests() {
 }
 
 /**
+ * E2-33 — Authoritative completion synchronization.
+ * Slow mock LLM (20s) exceeds the legacy ~15s wait but is under the configured
+ * arm budget (45s). Harness must record a terminal state, not INCOMPLETE.
+ */
+static bool testE2Ep015CompletionSynchronization() {
+    const std::string binary = findEpisodicHarnessBinary();
+    if (binary.empty()) {
+        std::cerr << "testE2Ep015CompletionSynchronization: harness binary not found\n";
+        return false;
+    }
+
+    FileHandler fh;
+    const fs::path logPath =
+        fs::path(fh.getProjectRoot()) / "logs" / "episodic_learning_benchmark.jsonl";
+    const std::string logBackup = logPath.string() + ".ep015_sync_backup";
+    if (fs::exists(logPath)) {
+        fs::copy_file(logPath, logBackup, fs::copy_options::overwrite_existing);
+        fs::remove(logPath);
+    }
+
+    // Delay 20s > legacy 15s wait; budget 45s > delay (configured-env safety margin).
+    const int rc = runShellCommand(
+        "THOTH_MOCK_LLM_DELAY_MS=20000 THOTH_E2_ARM_WAIT_MS=45000 "
+        "THOTH_E2_WIRING_STAGE=A2 \"" +
+        binary + "\" --mock >\"/tmp/thoth_ep015_sync.out\" 2>&1");
+    if (rc != 0) {
+        std::cerr << "testE2Ep015CompletionSynchronization: harness exit=" << rc << '\n';
+        std::ifstream errIn("/tmp/thoth_ep015_sync.out");
+        std::string errLine;
+        while (std::getline(errIn, errLine)) {
+            std::cerr << "  | " << errLine << '\n';
+        }
+        if (fs::exists(logBackup)) {
+            fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+            fs::remove(logBackup);
+        }
+        return false;
+    }
+
+    bool sawArm = false;
+    bool sawIncomplete = false;
+    bool sawTerminal = false;
+    for (const auto& row : readJsonlRows(logPath.string())) {
+        if (row.value("event", "") != "E2_STRICT_INJECTION_LOG_DIAG") {
+            continue;
+        }
+        if (row.value("wiring_stage", "") != "A2") {
+            continue;
+        }
+        sawArm = true;
+        const std::string state = row.value("terminal_state", "");
+        if (state == "INCOMPLETE") {
+            sawIncomplete = true;
+        }
+        if (state == "COMPLETED" || state == "FAILED" || state == "ABORTED") {
+            sawTerminal = true;
+        }
+    }
+
+    if (fs::exists(logBackup)) {
+        fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+        fs::remove(logBackup);
+    }
+
+    if (!sawArm) {
+        std::cerr << "testE2Ep015CompletionSynchronization: no A2 arm rows\n";
+        return false;
+    }
+    if (sawIncomplete) {
+        std::cerr << "testE2Ep015CompletionSynchronization: INCOMPLETE under slow LLM "
+                     "(sync bug not fixed)\n";
+        return false;
+    }
+    if (!sawTerminal) {
+        std::cerr << "testE2Ep015CompletionSynchronization: no terminal state recorded\n";
+        return false;
+    }
+    return true;
+}
+
+static bool runE2Ep015SyncTests() {
+    std::cout << "E2-EP-01.5 E2-33 — authoritative completion synchronization\n";
+    std::cout << "  gate: THOTH_E2_EP015_SYNC\n";
+    if (!testE2Ep015CompletionSynchronization()) {
+        std::cerr << "E2-EP-01.5: E2-33 completion sync failed\n";
+        return false;
+    }
+    std::cout << "  E2-33 completion sync pass (slow LLM → terminal, not INCOMPLETE)\n";
+    return true;
+}
+
+/**
  * EP-01.5 Phase 5 — mock path + authoritative smoke regression after Phases 1–4.
  * Confirms E2-29 / E2-30 still green; does not re-run full Phase 1–3 Ollama suites.
  */
@@ -10483,6 +10575,16 @@ int main() {
                 return 1;
             }
             std::cout << "E2-EP-01.5 Phase 3 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* ep015sync = std::getenv("THOTH_E2_EP015_SYNC")) {
+        if (ep015sync[0] != '0' && std::string(ep015sync) != "false") {
+            if (!runE2Ep015SyncTests()) {
+                return 1;
+            }
+            std::cout << "E2-EP-01.5 E2-33 sync gate passed.\n";
             return 0;
         }
     }
