@@ -2664,10 +2664,21 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 | **8** | **Env fingerprint** | Sidecar captures inference backend identifier + model ids per `benchmark_environment.md` |
 | **9** | **E2-28 mock regression (E2-29)** | Default/mock run reproduces Phase B scoped equivalence — bucket #0; preregistered test **E2-29** |
 | **10** | **Authoritative smoke (E2-30)** | Authoritative mode reaches live backend; harness completes smoke path; **no** `wiring_stage=B` scored official run; JSONL audited for **zero** `official_scoring: true` rows |
-| **11** | **Phase D spot-check** | E2-28 helper on **mock** path post-change — attestation that authority preserved |
+| **11** | **Phase D spot-check (gate — after 9, before 10)** | `testE2B5OfficialFingerprintDeterminism()` (E2-28 helper) on **mock** path — **hard gate** after E2-29, before E2-30; attests Phase D authority preserved post-`inferTier()` |
 | **12** | **Documentation** | E2 harness contract + benchmark_environment checklist + EP-01 evidence in `cursor_list.md` |
 
-###### Dangers / failure modes / things that must not change
+**Work sequencing (locked — verification gates are ordered, not parallel):**
+
+| Phase | Items | Gate rule |
+|-------|-------|-----------|
+| **Implementation** | **1 → 8** (sequential; **5** `inferTier()` episodic branch must land before any verification) | No `THOTH_E2_EP01=1` / E2-29 / E2-30 until items **1–8** complete |
+| **Verification** | **9 → 11 → 10** | Each step is a **hard gate** — failure stops EP-01; do not declare EP-01 done until all three pass |
+| ↳ | **9 — E2-29** | Mock path / E2-28 regression after full harness + `inferTier()` change |
+| ↳ | **11 — Phase D spot-check** | `testE2B5OfficialFingerprintDeterminism()` (or equivalent E2-28 helper) on **mock** path — runs **after 9**, **before 10**; confirms Phase D authority preserved post-`inferTier()` |
+| ↳ | **10 — E2-30** | Authoritative inference smoke — runs **last** among verification gates (mock path + authority already green) |
+| **Close-out** | **12** | Documentation + § E.0.0 EP-01 evidence record — only after **9, 11, 10** green |
+
+`runE2Ep01Tests()` / `THOTH_E2_EP01=1` orchestrator must invoke **E2-29 → Phase D E2-28 spot-check → E2-30** in that order.
 
 | Risk | Mitigation |
 |------|------------|
