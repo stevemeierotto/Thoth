@@ -2767,7 +2767,7 @@ EP-01 dual-mode harness is **green** for its locked scope. Pre-flight (1) on Ste
 
 ##### E.0.0 EP-01.5 — authoritative LLM wiring & planner contract (**v1 LOCKED**)
 
-**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-09) — Phase 1 ✅ · **Phase 2 gate green** (E2-31b) · Phases 3–5 blocked.
+**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-09) — Phase 1 ✅ · Phase 2 ✅ · **Phase 3 gate green** (E2-32) · Phases 4–5 blocked.
 
 **Context:** Step 2 investigation hold — pre-flight (1) failed. Authoritative `--authoritative` + `wiring_stage=B` runs produced `total_tokens=0` / `terminal_state=FAILED` because `runCaseArm()` never wired `LLMInterface`. Failure mode = **harness infrastructure**, not a falsified benchmark result. See [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) § Investigation hold.
 
@@ -2958,9 +2958,9 @@ Mandatory pre-seal gates on redo: all 6 arms pass **execution gate**; E2-28 buck
 
 ###### Pause
 
-**STATUS: EP-01.5 PHASE 1 GATE GREEN — SHOW DIFF; DO NOT START PHASE 2**
+**STATUS: EP-01.5 PHASE 2 GATE GREEN — DO NOT START PHASE 3**
 
-Phase 1 verification: `THOTH_E2_EP015_PHASE1=1` → E2-31 pass (tokens recorded; `official_scoring=false`). Do **not** auto-continue to Phase 2.
+Phase 2 verification: `THOTH_E2_EP015_PHASE2=1` → E2-31b pass (`hasTierMismatch() == false`). Do **not** auto-continue to Phase 3.
 
 ---
 

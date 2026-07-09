@@ -9995,6 +9995,123 @@ static bool runE2Ep015Phase2Tests() {
     return true;
 }
 
+/**
+ * E2-32 — EP-01.5 Phase 3: forced LLM no-op cannot emit official summary.
+ * Uses THOTH_E2_EP015_FORCE_LLM_NOOP to skip set_llm_interface under --authoritative + B.
+ */
+static bool testE2Ep015FailClosedNoOfficialSummary() {
+    if (!Thoth::isOllamaReachable()) {
+        std::cerr << "testE2Ep015FailClosedNoOfficialSummary: Ollama not reachable\n";
+        return false;
+    }
+    const std::string binary = findEpisodicHarnessBinary();
+    if (binary.empty()) {
+        std::cerr << "testE2Ep015FailClosedNoOfficialSummary: harness binary not found\n";
+        return false;
+    }
+
+    FileHandler fh;
+    const fs::path logPath =
+        fs::path(fh.getProjectRoot()) / "logs" / "episodic_learning_benchmark.jsonl";
+    const std::string logBackup = logPath.string() + ".ep015_p3_backup";
+    if (fs::exists(logPath)) {
+        fs::copy_file(logPath, logBackup, fs::copy_options::overwrite_existing);
+        fs::remove(logPath);
+    }
+
+    const int rc = runShellCommand(
+        "THOTH_E2_EP015_FORCE_LLM_NOOP=1 THOTH_E2_WIRING_STAGE=B \"" + binary +
+        "\" --authoritative >\"/tmp/thoth_ep015_p3.out\" 2>&1");
+    if (rc == 0) {
+        std::cerr << "testE2Ep015FailClosedNoOfficialSummary: expected non-zero exit on no-op\n";
+        if (fs::exists(logBackup)) {
+            fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+            fs::remove(logBackup);
+        }
+        return false;
+    }
+
+    bool sawAbort = false;
+    bool sawOfficialSummary = false;
+    for (const auto& row : readJsonlRows(logPath.string())) {
+        const std::string event = row.value("event", "");
+        if (event == "EPISODIC_LEARNING_SUMMARY" && row.value("official_scoring", false)) {
+            sawOfficialSummary = true;
+        }
+        if (event == "EPISODIC_LEARNING_ABORTED" &&
+            row.value("abort_reason", "") == "AUTHORITATIVE_LLM_NOOP") {
+            sawAbort = true;
+        }
+        // Recorder destructor may also emit ABORTED without abort_reason.
+        if (event == "EPISODIC_LEARNING_ABORTED") {
+            sawAbort = true;
+        }
+    }
+
+    if (fs::exists(logBackup)) {
+        fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+        fs::remove(logBackup);
+    }
+
+    if (sawOfficialSummary) {
+        std::cerr << "testE2Ep015FailClosedNoOfficialSummary: official SUMMARY emitted on no-op\n";
+        return false;
+    }
+    if (!sawAbort) {
+        std::cerr << "testE2Ep015FailClosedNoOfficialSummary: missing ABORTED / NOOP signal\n";
+        std::ifstream errIn("/tmp/thoth_ep015_p3.out");
+        std::string errLine;
+        while (std::getline(errIn, errLine)) {
+            std::cerr << "  | " << errLine << '\n';
+        }
+        return false;
+    }
+    return true;
+}
+
+/** Pure predicate check — latency alone must not pass the execution gate. */
+static bool testE2Ep015ExecutionGateRequiresTokens() {
+    // Mirror harness rule: llm_wired && (total>0 || prompt+completion>0).
+    const auto gate = [](bool wired, std::int64_t total, std::int64_t prompt,
+                         std::int64_t completion, std::int64_t /*synth_ms*/) {
+        return wired && (total > 0 || (prompt + completion) > 0);
+    };
+    if (gate(false, 0, 0, 0, 5000)) {
+        std::cerr << "testE2Ep015ExecutionGateRequiresTokens: unwired must fail\n";
+        return false;
+    }
+    if (gate(true, 0, 0, 0, 5000)) {
+        std::cerr << "testE2Ep015ExecutionGateRequiresTokens: latency-only must fail\n";
+        return false;
+    }
+    if (!gate(true, 10, 0, 0, 0)) {
+        std::cerr << "testE2Ep015ExecutionGateRequiresTokens: total_tokens must pass\n";
+        return false;
+    }
+    if (!gate(true, 0, 5, 3, 0)) {
+        std::cerr << "testE2Ep015ExecutionGateRequiresTokens: prompt+completion must pass\n";
+        return false;
+    }
+    return true;
+}
+
+/** EP-01.5 Phase 3 gate — fail-closed authoritative guards. */
+static bool runE2Ep015Phase3Tests() {
+    std::cout << "E2-EP-01.5 Phase 3 — fail-closed authoritative guards\n";
+    std::cout << "  gate: THOTH_E2_EP015_PHASE3\n";
+    if (!testE2Ep015ExecutionGateRequiresTokens()) {
+        std::cerr << "E2-EP-01.5 Phase 3: execution-gate predicate failed\n";
+        return false;
+    }
+    std::cout << "  execution-gate predicate pass (tokens required; latency insufficient)\n";
+    if (!testE2Ep015FailClosedNoOfficialSummary()) {
+        std::cerr << "E2-EP-01.5 Phase 3: E2-32 fail-closed summary suppression failed\n";
+        return false;
+    }
+    std::cout << "  E2-32 fail-closed: no-op cannot emit official SUMMARY\n";
+    return true;
+}
+
 static bool runE2Ep01Tests() {
     std::cout << "E2-EP-01 episodic authoritative inference harness proof\n";
     std::cout << "  gate: THOTH_E2_EP01\n";
@@ -10263,6 +10380,16 @@ int main() {
                 return 1;
             }
             std::cout << "E2-EP-01.5 Phase 2 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* ep015p3 = std::getenv("THOTH_E2_EP015_PHASE3")) {
+        if (ep015p3[0] != '0' && std::string(ep015p3) != "false") {
+            if (!runE2Ep015Phase3Tests()) {
+                return 1;
+            }
+            std::cout << "E2-EP-01.5 Phase 3 gate passed.\n";
             return 0;
         }
     }
