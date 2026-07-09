@@ -2326,7 +2326,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | Step | Plan status |
 |------|-------------|
 | **E1** | ✅ Complete (`E_ANALYSIS_PLAN.md` E-AP v1.1) — predates this format lock |
-| **E2** | 📋 Draft below — await lock approval |
+| **E2** | 📋 Refined draft below — await lock approval |
 | **E3** | 📋 Pending — must conform to this format before lock |
 | **E4** | 📋 Pending — must conform to this format before lock |
 | **E5** | 📋 Pending — must conform to this format before lock |
@@ -2557,7 +2557,7 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 
 ##### E.0.0 Step 2 — authoritative STRICT runs (**v1 draft — pending lock**)
 
-**Status:** 📋 **Draft for lock** (2026-07-09) — planning format § E.0.0 applied; await review and lock approval before implementation.
+**Status:** 📋 **v1 draft for lock** (2026-07-09, refined 2026-07-09) — planning format § E.0.0 applied; await review and lock approval before implementation.
 
 ###### Objective
 
@@ -2565,7 +2565,9 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 
 ###### Core invariant
 
-> **Does executing the frozen protocol on the declared corpus produce pinned, authoritative STRICT evidence without redefining success?**
+> **Execute the frozen protocol without modifying protocol definitions, scoring authority, evaluation semantics, or benchmark success criteria.**
+
+Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbatim** — collecting pinned STRICT evidence only. Success/failure is judged by the **preregistered** rules, not by post-hoc interpretation.
 
 ###### What this step proves
 
@@ -2600,7 +2602,7 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 | Extract + freeze JSONL summary rows + env sidecars to immutable artifact paths | Full unit-test suite / G2 `ctest` (optional hygiene) |
 | E2-28 scoped equivalence check on Phase E artifacts | Claims audit writing |
 | Run manifest / Phase E strict run record (`docs/benchmark_results/phase_e_strict_v1.md` or equivalent) | Protocol constant changes |
-| **Minimal harness fix** only if pre-flight proves mock-tier hardcoding blocks authoritative inference tier | INTEGRATION runs as official evidence |
+| **Backend selection fix only** (see §9) — if pre-flight proves harness cannot reach pinned authoritative inference backend | INTEGRATION runs as official evidence |
 | `cursor_list.md` § E.0.0 Step 2 status update | `PHASE_E_COMPLETE.md` |
 
 **Planning vs implementation:** This section is a **plan draft**. No runs until plan is **locked** and **explicit implementation approval** is given.
@@ -2611,10 +2613,10 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 |------|----------------------------|
 | `docs/benchmark_results/phase_e_strict_v1.md` | **New** — authoritative run record (rollup, fingerprint, env pins, backend declaration) |
 | `docs/baselines/artifacts/phase_e/` | **New** — frozen JSONL excerpts + env sidecar copies (immutable) |
-| `docs/baselines/phase_e_run_manifest.json` | **New** — run_id, commit SHA, corpus, tier, backend, artifact paths |
+| `docs/baselines/phase_e_run_manifest.json` | **New** — L4-ready reproduction fields (see Deliverables § manifest schema) |
 | `docs/cursor_list.md` | § E.0.0 Step 2 status + evidence artifact |
 | `docs/phases/E_ANALYSIS_PLAN.md` | **None** — frozen; amend only via protocol amendment process |
-| `external/basic_agent/src/run_episodic_learning_benchmark.cpp` | **Only if pre-flight finds authoritative inference tier blocked** — minimal env/tier wiring; no scoring semantic changes |
+| `external/basic_agent/src/run_episodic_learning_benchmark.cpp` | **Only if pre-flight blocked** — **backend selection mechanism only** (see §9 constraint); default: **none** |
 | `external/basic_agent/*` (other) | **None** by default |
 | `tests/unit_tests.cpp` | **Optional** — Phase E E2-28 attestation wrapper only if not covered by harness two-run; default: use existing `testE2B5OfficialFingerprintDeterminism()` pattern |
 | `logs/episodic_learning_benchmark.jsonl` | Runtime append — extract to `docs/baselines/artifacts/phase_e/` for seal |
@@ -2624,7 +2626,7 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 
 | # | Work item | Detail |
 |---|-----------|--------|
-| **1** | **Pre-flight — authoritative inference tier** | Confirm harness + config path reaches **authoritative inference tier** (not mock/TfIdf CI stub). Record **pinned authoritative backend** in pre-flight note. If blocked: stop and amend plan (harness minimal fix) before runs. |
+| **1** | **Pre-flight — authoritative inference tier** | Confirm harness reaches **authoritative inference tier** (not mock/TfIdf CI stub). Record **pinned authoritative backend** in pre-flight note. If blocked: **stop** — apply only the §9 backend-selection constraint or amend plan before runs. |
 | **2** | **Pre-flight — git + workspace** | Clean or documented tree; git SHA ≠ `unknown`; workspace paths per `benchmark_environment.md` checklist |
 | **3** | **Run A — STRICT trio** | `THOTH_E2_WIRING_STAGE=B` · `./build/debug/external/basic_agent/run_episodic_learning_benchmark` · L2 pinning active · trio cases only |
 | **4** | **Run B — STRICT trio (reproduction)** | Identical config/build to Run A · second consecutive authoritative run |
@@ -2642,9 +2644,14 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 | **Mock tier masquerading as authoritative** | Pre-flight must confirm **authoritative inference tier**; mock-only runs **invalid** for external episodic claims per E-AP |
 | **Silent generalization** — wording or artifacts imply beyond trio | Mandatory `n=3_strict_trio` label on all Step 2 deliverables |
 | **E2-28 failure** | Stop per falsification clause — do not publish Phase B numbers as Phase E current |
-| **Harness semantic change** | Any harness edit: scoring loop body, `evaluation_resolution` meaning, STRICT kernel — **forbidden** |
+| **Harness “small fix” creep** — tier/env wiring expands into benchmark modification | **Hard constraint (§9):** only backend **selection mechanism** may be corrected — nothing else |
+| **Harness semantic change** | Scoring loop body, `evaluation_resolution`, STRICT kernel, metrics, thresholds, reporting — **forbidden** |
 | **Backend coupling in protocol docs** | Record backend in manifest only — do not amend E-AP to require a vendor |
-| **Things that must not change** | `LIFT_MARGIN`, case table, pass/fail rules, Phase D authority boundaries, `evaluation_resolution` / `e2_outcome` export contract |
+| **Things that must not change** | Protocol definitions · scoring authority · evaluation semantics · benchmark success criteria · `LIFT_MARGIN` · case table · corpus membership · pass/fail rules · reporting rules · Phase D authority boundaries · `evaluation_resolution` / `e2_outcome` export contract |
+
+**Backend-selection constraint (locked — only permitted pre-flight code change):**
+
+If pre-flight detects that the benchmark cannot access the **pinned authoritative inference backend**, **only the backend selection mechanism** may be corrected (e.g. tier inference / env flag routing to the declared authoritative LLM backend). **Forbidden** even in a “small fix”: scoring logic, benchmark semantics, evaluation authority, corpus, metrics, thresholds, or reporting rules.
 
 ###### Forbidden changes
 
@@ -2656,7 +2663,8 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 - Full-suite regression as Step 2 gate requirement  
 - Claim E-Q2 complete (L4 is Step 3) or Phase E complete  
 - Couple Phase E protocol text to a specific LLM vendor  
-- Production Executive / subscriber behavior changes unless pre-flight proves wiring defect blocking authoritative tier (then minimal fix only)  
+- **Backend-selection fix beyond scope** — any harness/production change other than routing to the pinned authoritative inference backend (see §9 constraint)  
+- Modify scoring logic, evaluation authority, corpus, metrics, thresholds, or reporting rules under guise of wiring fix  
 
 ###### Exit criteria
 
@@ -2665,9 +2673,10 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 3. Two consecutive authoritative STRICT trio runs complete with L2 sidecars  
 4. E2-28 scoped equivalence **green** on Phase E artifact pair  
 5. Frozen artifacts + manifest + `phase_e_strict_v1.md` committed  
-6. All STRICT outcomes reported (including failures if any)  
-7. `evidence_scope: n=3_strict_trio` on run record  
-8. **Pause for review** before Step 3  
+6. Run manifest contains **all mandatory fields** (protocol revision, backend, model, env hash, run_id, corpus id, evaluation fingerprint)  
+7. All STRICT outcomes reported (including failures if any)  
+8. `evidence_scope: n=3_strict_trio` on run record  
+9. **Pause for review** before Step 3  
 
 ###### Deliverables / evidence produced
 
@@ -2681,16 +2690,38 @@ Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_AN
 | E-Q2 partial | L2 + L3 on trio — pointer in `cursor_list.md` |
 | E-Q3 partial | Protocol adherence + reporting — pointer in run record |
 
+**Run manifest — mandatory fields (confirm present per run):**
+
+| Field | Source / example |
+|-------|------------------|
+| `protocol_revision` | `E-AP v1.1` + `E2_PROTOCOL.md v1.2` |
+| `analysis_plan_commit` | Git SHA of locked `E_ANALYSIS_PLAN.md` |
+| `step2_plan_commit` | Git SHA of locked Step 2 plan (this section) |
+| `inference_backend_identifier` | Provider id from env sidecar (backend-agnostic) |
+| `model_identifier` | LLM + embedding model ids from `BenchmarkEnvironment` |
+| `environment_hash` | `env_hash` from L2 sidecar |
+| `index_hash` | Post-bind index hash |
+| `run_id` | Per-run `BenchmarkAttribution.run_id` |
+| `benchmark_corpus_identifier` | `v1.2_strict_trio` (E2-01..03) + `corpus_snapshot_id` |
+| `evaluation_fingerprint` | `fingerprint_hash` from STRICT summary row |
+| `wiring_stage` | `B` |
+| `scoring_tier` | `STRICT` |
+| `evidence_scope` | `n=3_strict_trio` |
+| `artifact_paths` | Frozen JSONL + sidecar paths under `docs/baselines/artifacts/phase_e/` |
+| `git_sha` | Thoth (+ submodule if applicable) at run time |
+
 ###### Dependencies on previous steps
 
 | Dependency | Reference |
 |------------|-----------|
 | **E0** | [`E_PHASE_PROTOCOL.md`](E_PHASE_PROTOCOL.md) v0.1 🔒 |
-| **E1** | [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) E-AP v1.1 🔒 — Step 2 handoff table |
+| **E1 — locked (hard gate)** | [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) **E-AP v1.1 🔒 committed** (`2cd1427` / `142fecf`) — Step 2 **executes the frozen protocol verbatim**; a drafted or uncommitted analysis plan is **insufficient** |
 | **Phase D** | [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) — authority preserved |
 | **Phase B** | E2-28 contract + fingerprint discipline (historical baseline — not substituted for Phase E runs) |
 | **Benchmark E1** | [`benchmark_environment.md`](benchmark_environment.md) — L2 pinning spec |
 | **E2 protocol** | [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 — STRICT rules frozen |
+
+> **Preregistration rule:** Step 2 may not begin until E1 artifact is **locked in git**. Step 2 does not reinterpret, extend, or amend the analysis plan — it runs it.
 
 ###### Pause
 
