@@ -5,7 +5,7 @@
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** **Phase D ✅ complete** (2026-07-08) — evolution trust proof sealed. **Paused before Phase E.**
+**Active E2 work:** 🔒 **Phase E protocol locked** — Step 1 analysis plan drafted (§ **E.0.0 Step 1**); await Step 1 lock approval.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2166,7 +2166,224 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | `docs/D_PHASE_PROTOCOL.md` | D5 complete pointer |
 | `external/basic_agent/*` | **None** |
 
-**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 ✅** — **Step 4 ✅** — **Phase D complete** — paused before Phase E.
+**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 ✅** — **Step 4 ✅** — **Phase D complete** — paused before Phase E (empirical validation).
+
+---
+
+### E.0.0 — E2 Phase E (Empirical Validation Tier)
+
+**Authority:** [`docs/E_PHASE_PROTOCOL.md`](E_PHASE_PROTOCOL.md) v0.1 🔒  
+**Prerequisite:** Phase D sealed — [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) (`e0a9ba5`)
+
+**Goal:** Establish **empirical confidence** in published benchmark claims — separate from **engineering confidence** (Phase D).
+
+**One sentence:** Phase D proved the evaluator preserved trust; Phase E proves empirical claims made with that evaluator are specification-complete, reproducible, defensible, evidence-mapped, and publication-ready.
+
+##### Phase E proof ladder (canonical — locked)
+
+| Step | Work | Artifact | Primary question |
+|------|------|----------|------------------|
+| **0** | Protocol lock | `E_PHASE_PROTOCOL.md` 🔒 | — |
+| **1** | Analysis plan lock | `phases/E_ANALYSIS_PLAN.md` | E-Q1 |
+| **2** | Authoritative STRICT runs | Pinned-env run artifacts | E-Q2 (partial), E-Q3 |
+| **3** | L4 reproducibility package | Manifests + verification doc | E-Q2 |
+| **4** | Claims audit | Claim → evidence tier map | E-Q4 |
+| **5** | Phase close-out | `PHASE_E_COMPLETE.md` | E-Q5 |
+
+**Verification scope:** Documentation + pinned authoritative runs for in-scope claims. Full suite / G2 optional post-E hygiene.
+
+##### Current maturity (honest)
+
+| Area | Assessment |
+|------|------------|
+| Engineering rigor | Strong |
+| Reproducibility infrastructure | Strong |
+| Benchmark methodology | Good but limited |
+| Statistical rigor | Early — inference intentionally deferred |
+| Publication readiness | Not yet |
+
+##### Five questions Phase E must answer (locked intent — see protocol)
+
+| ID | Question |
+|----|----------|
+| **E-Q1** | Is the evaluation protocol completely specified? |
+| **E-Q2** | Can an independent lab reproduce every published benchmark? |
+| **E-Q3** | Are reported results methodologically defensible? |
+| **E-Q4** | Do all published claims map to benchmark evidence? |
+| **E-Q5** | Is the project ready for external publication? |
+
+##### Metric definition vs validation (locked distinction)
+
+| Layer | Phase E claim |
+|-------|---------------|
+| **Definition** | `LIFT_MARGIN`, `evaluation_resolution`, `mean_episodic_lift`, etc. — specified in `E2_PROTOCOL.md` |
+| **Validation** | Whether constants are meaningful/optimal/stable at scale — **open**; B1 or v1.3+ |
+
+> Phase E validates **protocol correctness**, not universal optimality of engineering constants.
+
+##### Reproducibility levels
+
+| Level | Status |
+|-------|--------|
+| L1 Source reproducible | ✅ A–D |
+| L2 Environment reproducible | ✅ E1 |
+| L3 Benchmark reproducible | ✅ B (v1.2 trio) |
+| L4 Publication package reproducible | 📋 Phase E target |
+
+##### Publication targets (separate)
+
+| Target | Question | Status |
+|--------|----------|--------|
+| **Architecture** | Built correctly? Authority preserved? Deterministic? | Phase D ✅ |
+| **Empirical** | Does memory improve learning? How much? Uncertainty? | Phase E 📋 |
+
+##### Threats to validity (document in close-out)
+
+| Threat | Current answer |
+|--------|----------------|
+| Internal | Yes — STRICT isolates intended variable |
+| Construct | Partial — lift ≠ full “learning” construct |
+| External | Not yet — n=3 official corpus |
+| Conclusion | Descriptive only — inference deferred |
+
+##### Proposed checkpoint ladder
+
+| Step | Work | Delivers |
+|------|------|----------|
+| **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
+| **E1** | Analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — § **E.0.0 Step 1** draft |
+| **E2** | Authoritative STRICT runs (B1 if in scope) | E1-pinned artifacts |
+| **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
+| **E4** | Claims audit | Paper sentence → evidence tier |
+| **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
+
+**Time estimate (rough):** E0 ✅ — E1 **2–4 h** — E2 **4–8 h** + Ollama runtime — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
+
+**Status:** 🔒 **E0 locked** (2026-07-09). **Step 1 draft** — paused before Step 1 lock.
+
+---
+
+##### E.0.0 Step 1 — analysis plan lock (**v1 draft — pending lock**)
+
+**Status:** 📋 **Draft for lock** (2026-07-09) — E0 complete; awaiting explicit lock approval before implementation.
+
+###### Core invariant (why Step 1 exists)
+
+> **Is the evaluation protocol completely specified before any expanded authoritative runs?**
+
+Step 1 is the **preregistration gate** for empirical validation. It locks what will be measured, on what corpus, under what exclusions, and with what validity caveats — **before** Step 2 executes authoritative STRICT runs. Step 1 delivers **E-Q1**; it does not run benchmarks.
+
+###### Step 1 question (locked boundary)
+
+> **Step 1 answers: “Is there a single, reviewer-auditable document that fully specifies definitions, metrics, corpus scope, exclusions, authority tiers, validity threats, and reporting rules for Phase E empirical claims?”**
+
+| Step 1 proves | Step 1 does **not** prove (deferred) |
+|---------------|--------------------------------------|
+| Evaluation protocol **completely specified** for in-scope claims (**E-Q1**) | Authoritative benchmark runs (Step 2) |
+| Metric **definitions** referenced and bounded (not redefined ad hoc) | Metric **validation** / optimality of constants |
+| Corpus scope **explicitly declared** (v1.2 trio; B1 in/out decision locked) | External validity beyond declared corpus |
+| Exclusions documented (INTEGRATION, v1.1, mock-only, organic path) | L4 reproducibility package (Step 3) |
+| Threats to validity documented (four types) | Claims audit / paper mapping (Step 4) |
+| Statistical posture locked (**inference intentionally deferred**) | Formal significance testing |
+| Publication target scope declared (architecture vs empirical) | Phase E complete (Step 5) |
+| | Universal optimality of `LIFT_MARGIN`, `0.25`, etc. |
+
+> **Phase E Step 1 validates protocol completeness — not universal optimality of engineering constants.**
+
+###### Analysis plan contract (draft)
+
+**Artifact:** [`docs/phases/E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) — preregistered before Step 2 runs.
+
+**Naming note:** File is `E_ANALYSIS_PLAN.md` (Phase **E** Step 1) — not benchmark environment pinning ([`benchmark_environment.md`](benchmark_environment.md) “E1” track).
+
+**Mandatory sections (all required before Step 1 lock):**
+
+| Section | Content |
+|---------|---------|
+| **Header** | Date, protocol version (`E_PHASE_PROTOCOL.md` v0.1, `E2_PROTOCOL.md` v1.2), Phase D seal ref |
+| **Publication scope** | Architecture vs empirical targets; which external docs are in scope (e.g. `MYPAPER.md`, thesis) |
+| **Research questions** | Primary + secondary — map to `E2_PROTOCOL.md` research question |
+| **Hypotheses** | Descriptive expectations under STRICT — no causal inference claims |
+| **Corpus declaration** | Explicit case set: v1.2 trio (E2-01..03) **required**; B1 (30-case) **in or out** — decision locked here |
+| **Metrics (definition)** | Reference `E2_PROTOCOL.md` constants — `LIFT_MARGIN`, `evaluation_resolution`, `mean_episodic_lift`, etc. |
+| **Constants posture** | Acknowledge provisional `0.25` inclusion threshold; **not** claiming optimality |
+| **Exclusions** | INTEGRATION non-scoring; v1.1 retraction; mock/TfIdf CI as sole external evidence; organic consolidation path |
+| **Evidence tiers** | STRICT official · INTEGRATION diagnostic · Phase D machinery proof · GRAG bucket rules |
+| **Reporting rules** | All STRICT outcomes including failures; bucket citation discipline for GRAG |
+| **Threats to validity** | Internal · construct · external · conclusion — current answers + Step 2 obligations |
+| **Statistical posture** | Inference intentionally deferred; descriptive-only claims in v0.1 |
+| **Reproducibility prerequisites** | L2 (benchmark E1 env pinning) required for Step 2 runs; L4 target for close-out |
+| **Authority** | Who may emit `official_scoring`; Phase D “who has scoring authority?” pointer |
+| **Step 2 handoff** | Exact runs Step 2 will execute (harness, tier, corpus, env tier) |
+
+**Consume prior evidence (reference only — no re-execution in Step 1):**
+
+| Attested | Reference |
+|----------|-----------|
+| Phase D sealed | `PHASE_D_COMPLETE.md` (`e0a9ba5`) |
+| E2 protocol | `E2_PROTOCOL.md` v1.2 🔒 |
+| Phase B baseline | `PHASE_B_COMPLETE.md`; fingerprint `1ce31c6a…` |
+| Benchmark env pinning | `benchmark_environment.md` (E1 track ✅) |
+
+###### Step 1 forbidden (draft)
+
+- Execute authoritative STRICT runs (Step 2) before analysis plan is locked  
+- Redefine `E2_PROTOCOL.md` pass/fail rules without v1.3+ protocol revision  
+- Present engineering constants as theoretically optimal  
+- Include INTEGRATION results as official benchmark evidence in the plan  
+- Claim Phase E or empirical publication complete  
+- Production code changes — Step 1 is **documentation only**  
+- New harness env gates (Step 1 is plan lock + commit — no `THOTH_*` gate)  
+
+###### Proposed work (Phase E Step 1)
+
+| Work | Detail |
+|------|--------|
+| `docs/phases/E_ANALYSIS_PLAN.md` | Preregistered analysis plan — all mandatory sections |
+| `docs/cursor_list.md` | § E.0.0 Step 1 status |
+| `docs/E_PHASE_PROTOCOL.md` | Step 1 artifact pointer (post-lock) |
+
+**No production or harness changes expected.**
+
+###### Step 1 implementation discipline
+
+- Documentation only — no code, no benchmark execution  
+- **B1 in/out decision must be explicit** before Step 2 — do not defer silently  
+- Plan must be committed **before** any Step 2 authoritative Ollama-tier runs used for external claims  
+- Estimated effort: **2–4 h** (writing + review)  
+- On scope ambiguity: stop and amend plan before Step 2 — do not run first and document later  
+
+###### Step 1 evidence artifact
+
+On Step 1 lock + implementation, record:
+
+1. `E_ANALYSIS_PLAN.md` committed with all mandatory sections  
+2. E-Q1 checklist satisfied (definitions, metrics, corpus, exclusions, authority)  
+3. B1 corpus scope decision recorded (in scope for Step 2 **or** explicitly deferred with justification)  
+4. Threats to validity documented  
+5. Statistical posture: inference intentionally deferred  
+6. **Conclusion:** evaluation protocol completely specified for declared empirical scope  
+7. **Deferred:** Step 2 authoritative runs · Step 3 L4 package · Step 4 claims audit · Step 5 close-out  
+
+###### Step 1 exit criteria
+
+1. Plan locked in § E.0.0 Step 1 — committed before implementation  
+2. `E_ANALYSIS_PLAN.md` contains all mandatory sections  
+3. B1 in/out decision explicit  
+4. E-Q1 answerable **yes** from the plan alone  
+5. **Pause for review** before Step 2  
+
+###### Step 1 files (expected touch)
+
+| File | Change |
+|------|--------|
+| `docs/phases/E_ANALYSIS_PLAN.md` | **New** — preregistered analysis plan |
+| `docs/cursor_list.md` | § E.0.0 Step 1 status |
+| `docs/E_PHASE_PROTOCOL.md` | Step 1 artifact pointer (optional cross-ref) |
+| `external/basic_agent/*` | **None** |
+| `tests/unit_tests.cpp` | **None** |
+
+---
 
 ### Separation debt (acknowledged)
 
@@ -2490,7 +2707,7 @@ Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) 
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 3 — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 4 — phase closure (`THOTH_E2_D5=1`) + `PHASE_D_COMPLETE.md` ✅ 2026-07-08
-Next 1  **Phase E** — scientific defense (planned)
+Next 1  **Phase E Step 1** — analysis plan lock (`E_ANALYSIS_PLAN.md`; § **E.0.0 Step 1** draft — pending lock)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
