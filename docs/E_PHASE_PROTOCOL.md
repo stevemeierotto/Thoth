@@ -330,4 +330,4 @@ E2 does **not** silently wait on B1 — the wait/fork is **explicit in E1**, not
 
 **Review incorporated:** Engineering vs empirical confidence; metric definition vs validation; reproducibility levels L1–L4; statistical inference deferred; architecture vs empirical publication; threats to validity; five core questions; empirical validation terminology. **Amendment 2026-07-09:** n=3 corpus tier labeling + E4/E5 gates; falsification/negative-result path; B1/E2 timing fork; E4 cold-read audit discipline; forbid citing D-phase machinery proofs as empirical evidence.
 
-**Status:** 🔒 **v0.1 locked** (2026-07-09, amended 2026-07-09). E1 complete — EP-01 complete — **Step 2 complete** (2026-07-09); paused before Step 3.
+**Status:** 🔒 **v0.1 locked** (2026-07-09, amended 2026-07-09). E1 · EP-01 · EP-01.5 · E2-33 complete — **Step 2 sealed** (2026-07-09, post-sync redo); paused before Step 3.

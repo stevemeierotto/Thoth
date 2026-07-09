@@ -20,9 +20,13 @@
 
 **E2-28:** PASS — scoped snapshot deep-equal; diagnosis bucket **#0**.
 
-**Per-case (A = B):** E2-01/E2-02 `SCORED_SUCCESS` with `passes=false` (cold=1, warm=1 → lift 0); E2-03 `SCORED_SUCCESS` `passes=true` (negative control). Under live LLM the model answers E2-01/E2-02 correctly on the cold arm, so episodic lift is zero — tier-labeled empirical outcome, not an instrument gap.
+**Per-case (A = B):** E2-01/E2-02 `SCORED_SUCCESS` with `passes=false` (cold=1, warm=1 → lift 0); E2-03 `SCORED_SUCCESS` `passes=true` (negative control). Under live LLM the model answers E2-01/E2-02 correctly on the cold arm, so episodic lift is zero.
 
 **Repairs that unblocked this seal:** EP-01.5 (live LLM wiring) → metrics `run_id` filter (`649d32c`/`9bf8fd5`) → controller-first arm wait + E2-33 (`77508c4`/`0a38f22`).
+
+### Step 2 conclusion
+
+After completion of EP-01.5 and synchronization repairs, the authoritative harness produced reproducible results with no instrumentation defects. The current authoritative model configuration exhibited no measurable episodic-learning lift on the E2 corpus (`lift = 0.0`). **This is an observed benchmark outcome, not a benchmark failure** — and not a protocol expectation that lift must be nonzero under live inference.
 
 ---
 

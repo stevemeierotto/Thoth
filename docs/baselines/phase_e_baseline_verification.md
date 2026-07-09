@@ -78,4 +78,8 @@ E2-28 diagnostic bucket: **0 (equivalent)**.
 
 **Semantic equivalence confirmed** between consecutive authoritative STRICT builds after EP-01.5 + completion sync. Step 2 reproducibility gate **green**.
 
-**Note:** Authoritative tier rollup is `FAILURE` (`mean_episodic_lift = 0`). Under live LLM, cold and warm arms both score 1.0 on E2-01/E2-02 (model answers without needing the planted episode) → lift 0. This is a **tier-labeled empirical outcome**, not an instrument gap. Do not compare to Phase B mock `SUCCESS` baseline without tier labels.
+### Step 2 conclusion (empirical observation)
+
+After completion of EP-01.5 and synchronization repairs, the authoritative harness produced reproducible results with no instrumentation defects. The current authoritative model configuration exhibited no measurable episodic-learning lift on the E2 corpus (`lift = 0.0`). **This is an observed benchmark outcome, not a benchmark failure** — and not a protocol expectation that lift must be nonzero under live inference.
+
+Under live LLM, cold and warm arms both score 1.0 on E2-01/E2-02 (model answers without needing the planted episode) → lift 0. Do not compare to Phase B mock `SUCCESS` baseline without tier labels.
