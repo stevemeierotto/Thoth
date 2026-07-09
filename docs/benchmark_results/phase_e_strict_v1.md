@@ -1,10 +1,41 @@
 # Phase E STRICT v1 — Authoritative Inference Trio (Step 2)
 
+> **⚠️ INVESTIGATION HOLD (2026-07-09)** — Pre-flight (1) check **failed**. Step 2 sealed artifacts are **not** valid authoritative-inference **empirical** evidence until resolved. See § Investigation hold below. Do **not** treat rollup `FAILURE` / `lift=0` as a falsification finding yet. Do **not** proceed to Step 3 on this evidence base.
+
 **Evidence scope:** `n=3_strict_trio`  
 **Locked:** 2026-07-09  
 **Wiring stage:** `B` (official STRICT)  
 **Inference tier:** authoritative (`--authoritative`; External embeddings + pinned LLM metadata)  
 **Protocol:** E-AP v1.1 · E2 v1.2  
+
+---
+
+## Investigation hold (2026-07-09 — pre Step 3)
+
+**Bucket classification:** Case-level arm outcomes in the scored loop (bucket 3) — **not** EP-01 test failure (E2-29/E2-30 were green at implementation) and **not** a reported Phase D regression suite failure.
+
+**Pre-flight (1) result: FAIL — silent LLM no-op, not live executive scoring.**
+
+Evidence from Run A (`run-1783628170667`) `logs/cognitive_metrics.jsonl` (all 6 goal arms):
+
+| Signal | Observed | Expected if live LLM/planner exercised |
+|--------|----------|----------------------------------------|
+| `plan_id` | `e2-plan` (always) | Mock planner ID — unchanged in `--authoritative` mode |
+| `total_tokens` | **0** (all arms) | Nonzero if Ollama LLM invoked |
+| `planning_tokens` / `prompt_tokens` / `completion_tokens` | **0** | Nonzero |
+| `planning_time_ms` | **0–1** | Real planning latency if LLM planner used |
+| `llm_synthesis_time_ms` | **0–1** | Real synthesis latency if Ollama called |
+| `total_wall_clock_ms` | ~3100–4600 | Consistent with embedding I/O + executive loop, not LLM |
+| `terminal_state` | `FAILED` (all arms) | Phase B mock warm arms were `COMPLETED` |
+| `final_success_score` / `trajectory_score` | **0.0** | Phase B mock warm arms were **1.0** |
+
+**Root cause (harness, not protocol):** EP-01 `--authoritative` clears `THOTH_MOCK_LLM` and switches embeddings to External, but `runCaseArm()` still uses `EpisodicLearningMockPlanner` and **never** calls `ExecutiveController::set_llm_interface()`. With mock LLM off and no `LLMInterface`, `WorkflowEngine::executeLLM()` returns `"LLMInterface not available for LLM step"` → plan fails → trajectory score 0. STRICT retrieval still works (`warm_retrieval_hit: true` on E2-01/02).
+
+**Implication:** The `FAILURE` / `lift=0` rollup is an **instrument gap** artifact, not a confirmed falsification of episodic lift under live inference. E2-28 bucket #0 only proves reproducibility of this **broken** configuration.
+
+**Secondary flag:** Both runs emitted `TIER_MISMATCH` (`declared_tier: FULL`, `inferred_tier: OLLAMA`) in `logs/benchmark_env.jsonl`.
+
+**Required before sealing as finding:** Complete **EP-01.5** (authoritative LLM wiring + planner contract — see `cursor_list.md` § E.0.0 EP-01.5), then redo Step 2 pair with token-count execution gate. **Do not** adjust `LIFT_MARGIN` or episode threshold. **Do not** re-run chasing pass on the current broken path.
 
 ---
 

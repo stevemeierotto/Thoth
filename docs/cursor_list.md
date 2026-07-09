@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **Step 2 complete** · Step 3 pending)  
+**Last updated:** 2026-07-09 (Phase E — **EP-01.5 plan revised** · Step 2 on investigation hold · Step 3 blocked)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **Step 2 complete** (2026-07-09) — authoritative STRICT trio evidence sealed; paused before Step 3.
+**Active E2 work:** ⚠️ **Step 2 UNDER INVESTIGATION HOLD** — EP-01.5 (authoritative LLM wiring) required before Step 2 redo; Step 3 blocked.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2186,7 +2186,8 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **0** | Protocol lock | `E_PHASE_PROTOCOL.md` 🔒 | — |
 | **1** | Analysis plan lock | `phases/E_ANALYSIS_PLAN.md` | E-Q1 |
 | **EP-01** | Episodic authoritative inference harness | Live-backend path in `run_episodic_learning_benchmark` | — (engineering prereq) |
-| **2** | Authoritative STRICT runs | [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) ✅ | E-Q2 (partial), E-Q3 |
+| **EP-01.5** | Authoritative LLM wiring + planner contract | Live `LLMInterface` on `--authoritative` + `wiring_stage=B` | — (harness repair; § **E.0.0 EP-01.5**) |
+| **2** | Authoritative STRICT runs | [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) ⚠️ hold | E-Q2 (partial), E-Q3 |
 | **3** | L4 reproducibility package | Manifests + verification doc | E-Q2 |
 | **4** | Claims audit | Claim → evidence tier map | E-Q4 |
 | **5** | Phase close-out | `PHASE_E_COMPLETE.md` | E-Q5 |
@@ -2254,7 +2255,8 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
 | **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.1 ✅ |
 | **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** ✅ |
-| **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ |
+| **EP-01.5** | Authoritative LLM wiring + planner contract | Harness repair — § **E.0.0 EP-01.5** 🔒 Phase 1 |
+| **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ⚠️ hold |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
@@ -2267,12 +2269,13 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 |------|------|
 | **E1** | Freeze the protocol (what will be measured) |
 | **EP-01** | Add episodic harness authoritative inference capability (infrastructure only) |
-| **E2** | Execute the frozen protocol (collect evidence) |
+| **EP-01.5** | Wire live `LLMInterface` so authoritative mode actually invokes inference (harness repair only) |
+| **E2** | Execute the frozen protocol (collect evidence) — redo after EP-01.5 |
 | **E3** | Assemble the reproducibility package (others can reproduce it) |
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **Step 2 complete** (2026-07-09) — paused before Step 3.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **EP-01.5 LOCKED** (2026-07-09) — Phase 1 in progress. **Step 2 UNDER INVESTIGATION HOLD** — Step 3 blocked.
 
 ---
 
@@ -2756,15 +2759,214 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 
 ###### Pause
 
-**STATUS: EP-01 COMPLETE — STEP 2 LOCKED**
+**STATUS: EP-01 COMPLETE — EP-01.5 REQUIRED BEFORE STEP 2 REDO**
 
-EP-01 harness infrastructure is **green**. Step 2 plan is **locked** — do **not** execute authoritative STRICT evidence runs until explicitly approved for implementation (AGENTS.md gate).
+EP-01 dual-mode harness is **green** for its locked scope. Pre-flight (1) on Step 2 showed authoritative mode still short-circuits LLM synthesis (no `set_llm_interface`). **EP-01.5** repairs that gap. Do **not** redo Step 2 until EP-01.5 exit criteria are green.
+
+---
+
+##### E.0.0 EP-01.5 — authoritative LLM wiring & planner contract (**v1 LOCKED**)
+
+**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-09) — **Phase 1 gate green** (E2-31); awaiting Phase 1 commit review before Phase 2.
+
+**Context:** Step 2 investigation hold — pre-flight (1) failed. Authoritative `--authoritative` + `wiring_stage=B` runs produced `total_tokens=0` / `terminal_state=FAILED` because `runCaseArm()` never wired `LLMInterface`. Failure mode = **harness infrastructure**, not a falsified benchmark result. See [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) § Investigation hold.
+
+###### Objective
+
+Make the authoritative episodic harness **actually authoritative**: wire live `LLMInterface` for `--authoritative` + `wiring_stage=B`, clarify the planner contract, fix declared-tier mismatch at the inputs boundary, and add execution gates that prove inference occurred — **without** amending scoring, corpus, thresholds, or Phase B fingerprints.
+
+###### Core invariant
+
+> **EP-01.5 makes the authoritative harness actually authoritative; it does not make the benchmark easier.**
+
+Wire live LLM execution for authoritative mode while preserving STRICT scoring authority, evaluation semantics, case table, and mock-tier behavior. EP-01.5 is **harness infrastructure only** — not a protocol amendment, not a metric/threshold change, not Step 2 evidence collection.
+
+###### Non-goals (locked — proof boundary)
+
+EP-01.5 does **not**:
+
+- change scoring formulas
+- change trajectory quality thresholds
+- change goal corpus
+- change retrieval behavior
+- change planner selection semantics
+- change Phase B fingerprints
+- modify existing EP-01 artifacts
+- improve benchmark outcomes
+
+This section protects the integrity argument: EP-01.5 must not accidentally become a benchmark amendment.
+
+###### Planner contract (locked)
+
+| Tier | Planner | LLM execution | Plan topology | Trajectory scoring |
+|------|---------|---------------|---------------|-------------------|
+| **Mock** (`--mock`) | `EpisodicLearningMockPlanner` | `THOTH_MOCK_LLM` — mock validates `required_token` in prior RETRIEVAL context | Fixed: RETRIEVAL → LLM | `calculate_trajectory_score()` on mock success/failure |
+| **Authoritative** (`--authoritative`) | **Same** `EpisodicLearningMockPlanner` | **Live** `LLMInterface` (pinned `config.llm_model`) | **Same** fixed topology | **Same** `calculate_trajectory_score()` on real plan completion |
+
+**Contract rules:**
+
+1. **`EpisodicLearningMockPlanner` is retained in authoritative mode exclusively as a deterministic topology provider. It MUST NOT influence LLM execution success, trajectory quality, or scoring outcomes.**
+2. Do **not** switch authoritative arms to `LLMPlanner` — non-deterministic plan shape would break the E2 lab corpus contract.
+3. Do **not** port mock `required_token` gating to the live path — that is mock-tier instrumentation, not authoritative scoring semantics.
+4. In authoritative mode, the class name “Mock” is historical: the planner supplies RETRIEVAL→LLM structure only.
+
+**Authoritative arm is “live” when** the execution gate below passes (actual inference, not mere latency).
+
+###### What this milestone proves
+
+| Proves | Mechanism |
+|--------|-----------|
+| Authoritative `runCaseArm` invokes live LLM | `set_llm_interface` + E2-31 token proof |
+| Planner is topology-only in authoritative mode | Contract above + no live `required_token` gate |
+| Failed LLM startup cannot seal official summary | Execution + pre-summary gates |
+| Declared tier matches `inferTier` for episodic authoritative inputs | Inputs-boundary fix (E2-31b) |
+| Mock path / Phase B fingerprints unchanged | E2-29 first in orchestrator |
+
+###### What this milestone does not prove
+
+| Deferred | Owner |
+|----------|-------|
+| Empirical lift / SUCCESS/FAILURE as claim | Step 2 **redo** (separate approval) |
+| That live LLM “working” equals benchmark pass | Explicitly **not** — see execution gate vs trajectory success |
+| Protocol / threshold / corpus changes | Forbidden |
+| Step 3 L4 package | Blocked until Step 2 redo |
+
+###### Scope
+
+| In scope | Out of scope |
+|----------|--------------|
+| `LLMInterface` wiring in authoritative `runCaseArm` | Step 2 evidence pair / new sealed lift numbers |
+| Planner contract documentation | Scoring / kernel / case table edits |
+| Declared-tier fix at `makeEpisodicBenchmarkInputs` | Reordering shared `inferTier()` predicates |
+| Execution + pre-summary gates (inference proof) | Tuning generation params to chase pass |
+| E2-31 / E2-31b + `THOTH_E2_EP015=1` | Full G2 as required gate |
+| Stepwise Phases 1–5 below | One-shot “giant” implementation without phase stops |
+
+**Planning vs implementation:** 🔒 Locked. Implementation follows AGENTS.md + **phase-commit discipline** below.
+
+###### Implementation discipline (locked)
+
+| Rule | Meaning |
+|------|---------|
+| **One phase at a time** | Do not implement Phases 2–5 until the current phase’s verification gate passes |
+| **Commit per phase** | Each phase is committed **only after** its stated verification gate passes |
+| **No automatic continuation** | After a partial implementation, **stop** — do not proceed to the next phase without explicit go-ahead |
+| **Gate failure** | If a gate fails: **stop**, report findings, wait for repair approval (AGENTS.md Build/Test Failure Rule) |
+| **Harness localization** | `LLMInterface` wiring stays in `run_episodic_learning_benchmark.cpp` only — do **not** change `ExecutiveController` constructors or make production paths depend on benchmark-only wiring |
+| **Phase 1 review checkpoint** | After Phase 1: show the diff; **do not** continue to Phase 2 until approved |
+
+**Final implementation sequence (locked):**
+
+| Phase | Work | Verification gate |
+|-------|------|-------------------|
+| **1 — Live LLM wiring** | `LLMInterface` ownership on `HarnessRuntimeContext`; inject via `set_llm_interface` / `set_config` in `runCaseArm`; E2-31 | `LLMInterface::query` path executed; tokens recorded; **no** scoring changes |
+| **2 — Tier declaration** | Authoritative input construction only (`makeEpisodicBenchmarkInputs`) | E2-31b |
+| **3 — Fail-closed guards** | Execution gate + pre-summary rollup gate | Invalid/no-op runs cannot generate official summaries |
+| **4 — Documentation** | Protocol / historical references | Contract text matches locked planner rules |
+| **5 — Regression** | Mock preservation + authoritative smoke | E2-29 + E2-30 green |
+
+###### Files touched (on implementation)
+
+| File | Change |
+|------|--------|
+| `external/basic_agent/src/run_episodic_learning_benchmark.cpp` | LLM ownership + wiring; tier declaration; execution / rollup gates; optional smoke env |
+| `tests/unit_tests.cpp` | E2-31, E2-31b, `runE2Ep015Tests()`, `THOTH_E2_EP015=1` |
+| `docs/E2_PROTOCOL.md` | Harness § planner contract |
+| `docs/cursor_list.md` | § E.0.0 EP-01.5 status + evidence |
+| `docs/completed_improvements_log.md` | Close-out entry only |
+| `docs/benchmark_results/phase_e_strict_v1.md` | **Not** in EP-01.5 — superseded note belongs to Step 2 redo |
+| `episodic_learning_eval.*`, `e2_eval_kernel`, case table, `LIFT_MARGIN` | **Forbidden** |
+| Existing non-episodic `inferTier()` branches | **Forbidden** |
+
+###### Detailed work items
+
+| # | Work item | Detail |
+|---|-----------|--------|
+| **1** | **`HarnessRuntimeContext` LLM ownership** | `HarnessRuntimeContext` **owns** the `LLMInterface` lifetime for the duration of a **single** authoritative benchmark execution. Sequential arm reuse is permitted **only if** `LLMInterface` is proven stateless between arms (e.g. session token reset / no cross-arm prompt state). Prefer deterministic isolation over optimization. |
+| **2** | **Wire executive in `runCaseArm()`** | When `!runtime.useMockInference()`: `controller.set_config(&cfg)`; `controller.set_llm_interface(...)` **before** `execute_goal()`. Mock path unchanged (no live `LLMInterface`). Pattern: `testE1RobustnessBenchmarkSmoke` (~3241–3244). |
+| **3** | **Harness-local temperature pin only** | Authoritative arms: harness-local `Config` override `temperature = 0.0` for E2-28 reproducibility. **No other generation parameter changes** are permitted under EP-01.5 unless required to initialize the existing configured backend. Model identity, context limits, token limits, prompts, and planner topology remain unchanged. |
+| **4** | **Fix `TIER_MISMATCH` at inputs boundary** | In `makeEpisodicBenchmarkInputs()` authoritative branch: set `inputs.tier = BenchmarkTier::OLLAMA` when External + Ollama reachable (align declared with `inferTier()`). **Do not** reorder or alter shared / generic `inferTier()` logic — fix the declaration where benchmark inputs are created. |
+| **5** | **Authoritative execution gate** | After each goal arm in authoritative scored loop (`wiring_stage=B`), require proof of **actual inference**: `authoritative_llm_invoked == true` **AND** (`token_count > 0` where available). If no single `token_count` field: `llm_synthesis_time_ms > 0` **AND** `(prompt_tokens + completion_tokens) > 0`. Latency alone is **insufficient** (failed requests can consume time). On failure: abort with clear error (`AUTHORITATIVE_LLM_NOOP`) — fail closed; do not emit sealable official summary. **Execution gate success is independent from trajectory success.** A completed LLM invocation may still produce `FAILED` `terminal_state` due to downstream cognitive failure. |
+| **6** | **Pre-summary rollup gate** | Before `EPISODIC_LEARNING_SUMMARY` in authoritative official mode: all 6 goal arms (3 × cold/warm) must have **passed the execution gate** (inference proof), not “passed the benchmark.” Prevents repeating Step 2’s silent-zero artifact. |
+| **7** | **Document harness contract** | Update `E2_PROTOCOL.md` harness § with planner contract. Update this § on close-out. Prior Step 2 artifacts remain under investigation hold until redo. |
+| **8** | **Mock path regression** | Confirm mock still sets `THOTH_MOCK_*`; mock `runCaseArm` does not instantiate live `LLMInterface`. E2-29 / Phase B fingerprint behavior unchanged. |
+
+###### Implementation order (locked — see Implementation discipline)
+
+Same as **Final implementation sequence** above. Work items **1–2** (+ harness-local `temperature=0.0` on owned config when constructing authoritative `LLMInterface`) → Phase 1; **4** → Phase 2; **5–6** → Phase 3; **7** → Phase 4; **8** → Phase 5.
+
+**Orchestrator (after Phases 1–5 complete):** `runE2Ep015Tests()` / `THOTH_E2_EP015=1` — sequence **E2-29 → E2-28 spot → E2-30 → E2-31** (and E2-31b). Leave `THOTH_E2_EP01=1` unchanged for historical EP-01 seal.
+
+###### Tests
+
+| ID | Purpose |
+|----|---------|
+| **E2-29** (existing) | Mock regression — must stay green |
+| **E2-30** (existing) | Authoritative A2 smoke, zero `official_scoring` |
+| **E2-31** (new) | Authoritative LLM wiring — Ollama required; prove tokens / invocation (Phase 1) |
+| **E2-31b** (new) | Tier alignment — no mismatch after inputs fix (Phase 2) |
+
+###### Dangers / failure modes
+
+| Risk | Mitigation |
+|------|------------|
+| EP-01.5 becomes a silent benchmark amendment | Non-goals + Forbidden; no threshold/corpus/scoring edits |
+| Lifetime / shared-state bugs across arms | Ownership rule: context owns LLM; reuse only if proven stateless |
+| “Fixing” reliability via generation tuning | Temperature pin only; all other gen params frozen |
+| Latency mistaken for inference | Token-count required in execution gate |
+| LLM worked ⇒ benchmark passed | Execution gate independent of trajectory success |
+| Touching shared `inferTier()` | Inputs-boundary declaration fix only |
+| Scope creep into Step 2 | No sealable Step 2 pair; no new official lift numbers in EP-01.5 |
+| Live non-determinism vs E2-28 | `temperature=0.0` only; if bucket ≠ 0 after wiring, treat as real variance (falsification path) — do not chase pass |
+
+###### Forbidden changes
+
+- Scoring formulas, `evaluation_resolution`, export rollups  
+- Trajectory quality thresholds (`LIFT_MARGIN`, episode inclusion `0.25`)  
+- Goal corpus / case table / retrieval behavior  
+- Planner selection semantics (no switch to `LLMPlanner`)  
+- Phase B fingerprints / mock-path scoring  
+- Existing EP-01 sealed artifacts  
+- Shared / non-episodic `inferTier()` branch logic  
+- Generation-parameter tuning beyond harness-local `temperature=0.0`  
+- Step 2 redo or Step 3 work disguised as EP-01.5  
+- Adjusting outcomes to make the benchmark easier  
+
+###### Exit criteria
+
+1. Plan locked in § E.0.0 EP-01.5 — committed before implementation  
+2. Phases 1–5 complete with per-phase verification stops  
+3. Authoritative `runCaseArm` invokes live LLM — E2-31 green (Ollama up)  
+4. Execution gate requires invocation **and** nonzero tokens (not latency alone)  
+5. Pre-summary gate blocks official summary if any arm fails execution gate  
+6. `hasTierMismatch()` false for authoritative episodic inputs (E2-31b)  
+7. `THOTH_E2_EP015=1` green (E2-29 → E2-28 spot → E2-30 → E2-31)  
+8. Mock path / E2-29 unchanged  
+9. Planner contract documented in `E2_PROTOCOL.md`  
+10. **No** new Phase E sealed lift evidence in EP-01.5  
+11. Step 2 investigation hold remains until **separate** Step 2 redo approval  
+
+###### Step 2 redo handoff (after EP-01.5 — separate approval)
+
+Same locked invocation:
+
+```bash
+THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning_benchmark --authoritative
+```
+
+Mandatory pre-seal gates on redo: all 6 arms pass **execution gate**; E2-28 bucket #0; no unexplained `TIER_MISMATCH`; release investigation hold and mark prior run IDs superseded. **Still forbidden:** adjusting `LIFT_MARGIN` / episode threshold, or re-running until pass.
+
+###### Pause
+
+**STATUS: EP-01.5 PHASE 1 GATE GREEN — SHOW DIFF; DO NOT START PHASE 2**
+
+Phase 1 verification: `THOTH_E2_EP015_PHASE1=1` → E2-31 pass (tokens recorded; `official_scoring=false`). Do **not** auto-continue to Phase 2.
 
 ---
 
 ##### E.0.0 Step 2 — authoritative STRICT runs (**v1 locked — complete**)
 
-**Status:** ✅ **Step 2 complete** (2026-07-09) — two authoritative `--authoritative` + `wiring_stage=B` runs; E2-28 bucket #0; rollup `FAILURE` at authoritative tier (not comparable to Phase B mock). Paused before Step 3.
+**Status:** ⚠️ **Step 2 complete — UNDER INVESTIGATION HOLD** (2026-07-09) — artifacts sealed but pre-flight (1) failed: authoritative runs did not invoke live LLM (zero tokens); evidence **not** valid for empirical claims until **EP-01.5** + Step 2 redo.
 
 **Evidence:** [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) · [`phase_e_run_manifest.json`](baselines/phase_e_run_manifest.json) · [`phase_e_baseline_verification.md`](baselines/phase_e_baseline_verification.md)
 

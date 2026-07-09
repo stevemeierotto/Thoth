@@ -9866,6 +9866,98 @@ static bool testE2Ep01AuthoritativeInferenceSmoke() {
     return true;
 }
 
+/** E2-31 — EP-01.5 Phase 1: authoritative LLM wiring; tokens prove live query path. */
+static bool testE2Ep015AuthoritativeLlmWiring() {
+    if (!Thoth::isOllamaReachable()) {
+        std::cerr << "testE2Ep015AuthoritativeLlmWiring: Ollama not reachable\n";
+        return false;
+    }
+    const std::string binary = findEpisodicHarnessBinary();
+    if (binary.empty()) {
+        std::cerr << "testE2Ep015AuthoritativeLlmWiring: harness binary not found\n";
+        return false;
+    }
+
+    FileHandler fh;
+    const fs::path logPath =
+        fs::path(fh.getProjectRoot()) / "logs" / "episodic_learning_benchmark.jsonl";
+    const std::string logBackup = logPath.string() + ".ep015_backup";
+    if (fs::exists(logPath)) {
+        fs::copy_file(logPath, logBackup, fs::copy_options::overwrite_existing);
+        fs::remove(logPath);
+    }
+
+    const int rc = runShellCommand(
+        "THOTH_E2_EP015_SMOKE=1 \"" + binary +
+        "\" --authoritative >\"/tmp/thoth_ep015_smoke.out\" 2>&1");
+    if (rc != 0) {
+        std::cerr << "testE2Ep015AuthoritativeLlmWiring: smoke exit=" << rc << '\n';
+        std::ifstream errIn("/tmp/thoth_ep015_smoke.out");
+        std::string errLine;
+        while (std::getline(errIn, errLine)) {
+            std::cerr << "  | " << errLine << '\n';
+        }
+        if (fs::exists(logBackup)) {
+            fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+            fs::remove(logBackup);
+        }
+        return false;
+    }
+
+    bool sawSmoke = false;
+    bool tokensOk = false;
+    for (const auto& row : readJsonlRows(logPath.string())) {
+        if (row.value("official_scoring", false) == true) {
+            std::cerr << "testE2Ep015AuthoritativeLlmWiring: official_scoring row found\n";
+            if (fs::exists(logBackup)) {
+                fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+                fs::remove(logBackup);
+            }
+            return false;
+        }
+        if (row.value("event", "") == "E2_EP015_LLM_WIRING_SMOKE") {
+            sawSmoke = true;
+            tokensOk = row.value("tokens_ok", false);
+            const auto total = row.value("total_tokens", 0);
+            if (total <= 0 && !tokensOk) {
+                std::cerr << "testE2Ep015AuthoritativeLlmWiring: tokens not recorded\n";
+                if (fs::exists(logBackup)) {
+                    fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+                    fs::remove(logBackup);
+                }
+                return false;
+            }
+        }
+    }
+
+    if (fs::exists(logBackup)) {
+        fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+        fs::remove(logBackup);
+    }
+
+    if (!sawSmoke) {
+        std::cerr << "testE2Ep015AuthoritativeLlmWiring: missing E2_EP015_LLM_WIRING_SMOKE row\n";
+        return false;
+    }
+    if (!tokensOk) {
+        std::cerr << "testE2Ep015AuthoritativeLlmWiring: tokens_ok=false\n";
+        return false;
+    }
+    return true;
+}
+
+/** EP-01.5 Phase 1 gate only — full EP-015 orchestrator lands after Phases 2–5. */
+static bool runE2Ep015Phase1Tests() {
+    std::cout << "E2-EP-01.5 Phase 1 — authoritative LLM wiring\n";
+    std::cout << "  gate: THOTH_E2_EP015_PHASE1\n";
+    if (!testE2Ep015AuthoritativeLlmWiring()) {
+        std::cerr << "E2-EP-01.5 Phase 1: E2-31 failed\n";
+        return false;
+    }
+    std::cout << "  E2-31 authoritative LLM wiring pass (tokens recorded)\n";
+    return true;
+}
+
 static bool runE2Ep01Tests() {
     std::cout << "E2-EP-01 episodic authoritative inference harness proof\n";
     std::cout << "  gate: THOTH_E2_EP01\n";
@@ -10114,6 +10206,16 @@ int main() {
                 return 1;
             }
             std::cout << "E2-EP-01 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* ep015p1 = std::getenv("THOTH_E2_EP015_PHASE1")) {
+        if (ep015p1[0] != '0' && std::string(ep015p1) != "false") {
+            if (!runE2Ep015Phase1Tests()) {
+                return 1;
+            }
+            std::cout << "E2-EP-01.5 Phase 1 gate passed.\n";
             return 0;
         }
     }
