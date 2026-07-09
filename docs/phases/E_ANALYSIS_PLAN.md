@@ -393,4 +393,4 @@ Step 2 delivers partial **E-Q2** (L2/L3 on trio) and **E-Q3** (methodological ad
 ---
 
 **Supersedes:** E-AP v1.0 (`48e7511`) — v1.1 wording clarification only  
-**Commit:** (recorded on v1.1 amendment commit)
+**Commit:** `2cd1427` (v1.1 amendment); v1.0 initial lock `48e7511`
