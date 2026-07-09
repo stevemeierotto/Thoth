@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **EP-01 plan locked** · Step 2 blocked)  
+**Last updated:** 2026-07-09 (Phase E — **EP-01 complete** · **Step 2 plan locked**)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **EP-01 plan locked** (episodic authoritative inference harness) — Step 2 **blocked**; paused before implementation (AGENTS.md gate).
+**Active E2 work:** 🔒 **Step 2 plan locked** (authoritative STRICT runs) — paused before implementation (AGENTS.md gate).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2254,7 +2254,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
 | **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.1 ✅ |
 | **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** 🔒 |
-| **E2** | Authoritative STRICT runs (trio; B1 deferred) | E1-pinned artifacts — **blocked until EP-01** |
+| **E2** | Authoritative STRICT runs (trio; B1 deferred) | E1-pinned artifacts — § **E.0.0 Step 2** 🔒 |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
@@ -2272,7 +2272,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **Planning format locked** (2026-07-09). **EP-01 plan locked** (2026-07-09) — **Step 2 blocked** until EP-01 complete.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **Step 2 plan locked** (2026-07-09) — paused before implementation.
 
 ---
 
@@ -2329,8 +2329,8 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | Step | Plan status |
 |------|-------------|
 | **E1** | ✅ Complete (`E_ANALYSIS_PLAN.md` E-AP v1.1) — predates this format lock |
-| **EP-01** | 🔒 **v1 locked** (2026-07-09) — engineering prereq; **blocks E2** |
-| **E2** | 📋 Refined draft — **blocked until EP-01 complete** |
+| **EP-01** | ✅ Complete (2026-07-09) — `THOTH_E2_EP01=1` |
+| **E2** | 🔒 **v1 locked** (2026-07-09) — authoritative STRICT trio evidence runs |
 | **E3** | 📋 Pending — must conform to this format before lock |
 | **E4** | 📋 Pending — must conform to this format before lock |
 | **E5** | 📋 Pending — must conform to this format before lock |
@@ -2559,9 +2559,9 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 
 ---
 
-##### E.0.0 EP-01 — episodic authoritative inference harness (**v1 locked**)
+##### E.0.0 EP-01 — episodic authoritative inference harness (**v1 locked — complete**)
 
-**Status:** 🔒 **v1 locked** (2026-07-09) — paused before implementation (AGENTS.md Planning/Implementation Gate). Review incorporated: trajectory/kernel danger, isolated `inferTier`, fingerprint pin boundary, E2-29/E2-30, no-official-scoring exit, verification gate order **9 → 11 → 10**.
+**Status:** ✅ **EP-01 complete** (2026-07-09) — dual inference mode harness + `inferTier()` episodic branch + `THOTH_E2_EP01=1` (E2-29 → E2-28 → E2-30).
 
 ###### Objective
 
@@ -2756,15 +2756,15 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 
 ###### Pause
 
-**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+**STATUS: EP-01 COMPLETE — STEP 2 LOCKED**
 
-EP-01 plan is **locked**. Do **not** modify harness code, run Phase E benchmarks, or implement Step 2 until explicitly approved for implementation (AGENTS.md gate).
+EP-01 harness infrastructure is **green**. Step 2 plan is **locked** — do **not** execute authoritative STRICT evidence runs until explicitly approved for implementation (AGENTS.md gate).
 
 ---
 
-##### E.0.0 Step 2 — authoritative STRICT runs (**v1 draft — blocked on EP-01**)
+##### E.0.0 Step 2 — authoritative STRICT runs (**v1 locked**)
 
-**Status:** 📋 **v1 draft — blocked on EP-01** (2026-07-09) — do **not** lock or implement until EP-01 complete; await EP-01 lock + implementation first.
+**Status:** 🔒 **v1 locked** (2026-07-09) — EP-01 prerequisite **satisfied** (`THOTH_E2_EP01=1` green 2026-07-09). Paused before implementation (AGENTS.md Planning/Implementation Gate).
 
 ###### Objective
 
@@ -2809,9 +2809,20 @@ Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbat
 | Extract + freeze JSONL summary rows + env sidecars to immutable artifact paths | Full unit-test suite / G2 `ctest` (optional hygiene) |
 | E2-28 scoped equivalence check on Phase E artifacts | Claims audit writing |
 | Run manifest / Phase E strict run record | Protocol constant changes |
-| `cursor_list.md` § E.0.0 Step 2 status update | Harness backend work (**EP-01**) |
+| `cursor_list.md` § E.0.0 Step 2 status update | Harness backend work (**EP-01** — ✅ complete) |
 
-**Planning vs implementation:** This section is a **plan draft**. No runs until plan is **locked** and **explicit implementation approval** is given.
+**Planning vs implementation:** This section is **locked**. No authoritative evidence runs until explicitly approved for implementation (AGENTS.md gate).
+
+**Canonical invocation (locked — Run A and Run B must use identical flags/build):**
+
+```bash
+THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning_benchmark --authoritative
+```
+
+- **`--authoritative`** (or `--full`) — authoritative inference tier per EP-01; **`--mock` is forbidden** for Step 2 evidence.
+- **`THOTH_E2_WIRING_STAGE=B`** — official STRICT scoring only.
+- Ollama must be reachable; abort if `inferTier` ≠ OLLAMA/FULL or `TIER_MISMATCH` appears unexplained.
+- **Not comparable:** Phase B mock-tier rollups — Step 2 lift is authoritative-tier only; manifest must label `evidence_scope: n=3_strict_trio` + backend fields.
 
 ###### Files touched
 
@@ -2832,11 +2843,11 @@ Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbat
 
 | # | Work item | Detail |
 |---|-----------|--------|
-| **1** | **Pre-flight — EP-01 complete** | EP-01 exit criteria green; authoritative inference mode available in harness; **stop** if not |
+| **1** | **Pre-flight — EP-01 complete** | ✅ Satisfied 2026-07-09 (`THOTH_E2_EP01=1`); re-verify if harness changed since lock |
 | **2** | **Pre-flight — git + workspace** | Clean or documented tree; git SHA ≠ `unknown`; workspace paths per `benchmark_environment.md` checklist |
-| **3** | **Pre-flight — authoritative mode** | Run harness in **authoritative inference** mode (not mock default); confirm `inferTier` + sidecar backend metadata |
-| **4** | **Run A — STRICT trio** | `THOTH_E2_WIRING_STAGE=B` · authoritative mode · L2 pinning · trio only |
-| **5** | **Run B — STRICT trio (reproduction)** | Identical config/build to Run A |
+| **3** | **Pre-flight — authoritative mode** | Dry-run: `--authoritative` + `inferTier` → OLLAMA/FULL; sidecar has real `llm_model` / embedding ids; **no** `--mock` |
+| **4** | **Run A — STRICT trio** | `THOTH_E2_WIRING_STAGE=B` + `--authoritative` (canonical invocation above) · L2 pinning · trio only |
+| **5** | **Run B — STRICT trio (reproduction)** | **Identical** command, build, and config to Run A — no drift between runs |
 | **6** | **E2-28 equivalence** | Scoped snapshots Run A vs Run B — bucket #0 |
 | **7** | **Artifact freeze** | Extract to `docs/baselines/artifacts/phase_e/` · write manifest |
 | **8** | **Run record** | `phase_e_strict_v1.md` — `evidence_scope: n=3_strict_trio` |
@@ -2848,7 +2859,8 @@ Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbat
 |------|------------|
 | **Authority leakage** — INTEGRATION or subscriber path influences `official_scoring` | Runs use `wiring_stage=B` only; verify envelope fields post-run |
 | **Protocol drift** — constants/corpus changed mid-run | E-AP v1.1 frozen; E2 v1.2 locked; stop if mismatch |
-| **Mock tier masquerading as authoritative** | Step 2 runs **authoritative inference mode** only (EP-01); mock invalid for external episodic claims per E-AP |
+| **Trajectory / lift tier mismatch** — comparing Phase E authoritative lift to Phase B mock baseline | Manifest `evidence_scope` + backend fields; never claim apples-to-apples with Phase B mock rollup |
+| **Mock tier masquerading as authoritative** | Step 2 runs **`--authoritative` only** (EP-01); `--mock` invalid for external episodic claims per E-AP |
 | **Silent generalization** — wording or artifacts imply beyond trio | Mandatory `n=3_strict_trio` label on all Step 2 deliverables |
 | **E2-28 failure** | Stop per falsification clause — do not publish Phase B numbers as Phase E current |
 | **Harness semantic change** | Scoring loop body, `evaluation_resolution`, STRICT kernel, metrics, thresholds, reporting — **forbidden** (harness changes belong to EP-01 only) |
@@ -2870,16 +2882,16 @@ Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbat
 
 ###### Exit criteria
 
-1. **EP-01 complete** — episodic authoritative inference harness green  
+1. **EP-01 complete** — episodic authoritative inference harness green ✅ (2026-07-09)  
 2. Plan locked in § E.0.0 Step 2 — committed before implementation  
-3. Pre-flight confirms **authoritative inference mode** (not mock default)  
-3. Two consecutive authoritative STRICT trio runs complete with L2 sidecars  
-4. E2-28 scoped equivalence **green** on Phase E artifact pair  
-5. Frozen artifacts + manifest + `phase_e_strict_v1.md` committed  
-6. Run manifest contains **all mandatory fields** (protocol revision, backend, model, env hash, run_id, corpus id, evaluation fingerprint)  
-7. All STRICT outcomes reported (including failures if any)  
-8. `evidence_scope: n=3_strict_trio` on run record  
-9. **Pause for review** before Step 3  
+3. Pre-flight confirms **`--authoritative`** inference (not `--mock` default)  
+4. Two consecutive authoritative STRICT trio runs complete with L2 sidecars  
+5. E2-28 scoped equivalence **green** on Phase E artifact pair (Run A vs Run B)  
+6. Frozen artifacts + manifest + `phase_e_strict_v1.md` committed  
+7. Run manifest contains **all mandatory fields** (protocol revision, backend, model, env hash, run_id, corpus id, evaluation fingerprint)  
+8. All STRICT outcomes reported (including failures if any)  
+9. `evidence_scope: n=3_strict_trio` on run record  
+10. **Pause for review** before Step 3  
 
 ###### Deliverables / evidence produced
 
@@ -2919,7 +2931,7 @@ Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbat
 |------------|-----------|
 | **E0** | [`E_PHASE_PROTOCOL.md`](E_PHASE_PROTOCOL.md) v0.1 🔒 |
 | **E1 — locked (hard gate)** | [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) **E-AP v1.1 🔒 committed** — Step 2 executes frozen protocol verbatim |
-| **EP-01 — complete (hard gate)** | § E.0.0 EP-01 — episodic harness authoritative inference path **green** before any Step 2 run |
+| **EP-01 — complete (hard gate)** | § E.0.0 EP-01 ✅ — `THOTH_E2_EP01=1` green (2026-07-09) |
 | **Phase D** | [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) — authority preserved |
 | **Phase B** | E2-28 contract + fingerprint discipline (historical baseline — not substituted for Phase E runs) |
 | **Benchmark E1** | [`benchmark_environment.md`](benchmark_environment.md) — L2 pinning spec |
@@ -2929,9 +2941,9 @@ Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbat
 
 ###### Pause
 
-**STATUS: BLOCKED ON EP-01 — WAITING FOR EP-01 IMPLEMENTATION APPROVAL FIRST**
+**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
 
-Step 2 plan is **drafted** but **blocked**. Do **not** execute authoritative runs until **EP-01** is complete and Step 2 plan is **locked** with explicit implementation approval (AGENTS.md gate).
+Step 2 plan is **locked**. Do **not** execute authoritative STRICT evidence runs until explicitly approved for implementation (AGENTS.md gate).
 
 ---
 
@@ -3281,7 +3293,7 @@ Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) 
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 3 — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 4 — phase closure (`THOTH_E2_D5=1`) + `PHASE_D_COMPLETE.md` ✅ 2026-07-08
-Next 1  **Phase E EP-01** — episodic authoritative inference harness (§ **E.0.0 EP-01** 🔒 — awaiting implementation approval)
+Next 1  **Phase E Step 2** — authoritative STRICT runs (§ **E.0.0 Step 2** 🔒 — awaiting implementation approval)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
