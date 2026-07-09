@@ -275,12 +275,13 @@ E2 does **not** silently wait on B1 — the wait/fork is **explicit in E1**, not
 |------|------|----------|------------------|
 | **E0** | Lock this protocol + § E.0.0 | Terminology, five questions, validity frame | — |
 | **E1** | Protocol + analysis plan lock | [`phases/E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) — E-AP v1.1 ✅ | **E-Q1** |
-| **E2** | Authoritative STRICT runs | Pinned-env artifacts on **corpus declared in E1** (trio re-run **or** B1 registry) | **E-Q2** (partial), **E-Q3** |
+| **EP-01** | Episodic authoritative inference harness | Engineering prereq — § E.0.0 EP-01 | — |
+| **E2** | Authoritative STRICT runs | Pinned-env artifacts on **corpus declared in E1** (trio; B1 deferred) | **E-Q2** (partial), **E-Q3** |
 | **E3** | Reproducibility package (L4) | Manifests + verification doc for **every cited run** in E4 scope | **E-Q2** |
 | **E4** | Claims audit (cold-read discipline) | Paper ↔ evidence tier map + `n=3_strict_trio` labels | **E-Q4** |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + max evidence scope statement | **E-Q5** |
 
-**Step dependency rule:** E2 corpus = E1 declaration. E3 L4 scope = E4 cited runs. E5 cannot claim generalization scope beyond E1/E4 tier labels.
+**Step dependency rule:** E2 requires **EP-01** complete. E2 corpus = E1 declaration. E3 L4 scope = E4 cited runs. E5 cannot claim generalization scope beyond E1/E4 tier labels.
 
 ---
 
