@@ -2561,7 +2561,7 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 
 ##### E.0.0 EP-01 — episodic authoritative inference harness (**v1 draft — pending lock**)
 
-**Status:** 📋 **v1 draft for lock** (2026-07-09) — engineering prerequisite **before Phase E Step 2**; code review confirmed `run_episodic_learning_benchmark` is **mock-only by design** (no live-backend path). Planning only — **no implementation**.
+**Status:** 📋 **v1 draft for lock** (2026-07-09, refined 2026-07-09) — review pass: trajectory/kernel danger, isolated `inferTier`, fingerprint pin boundary, E2-29/E2-30, no-official-scoring exit.
 
 ###### Objective
 
@@ -2617,11 +2617,15 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 |----------|--------------|
 | Authoritative inference tier path for `run_episodic_learning_benchmark` | Phase E benchmark execution (Step 2) |
 | Mock mode **preserved** as default for CI / Phase B regression | Scoring loop / kernel / case table changes |
-| CLI or config selection (`--mock` / `--full` or equivalent) | Protocol amendment to drop authoritative inference requirement |
-| `BenchmarkEnvironmentInputs` + `inferTier()` integration for episodic harness | INTEGRATION tier work |
-| Model/version capture in env sidecar | New JSON library or second pinning system |
-| Unit/regression tests proving mock unchanged + authoritative path smoke | Full G2 `ctest` as EP-01 gate |
+| CLI or config selection (`--mock` default · `--full` / `--authoritative` for live path) | Protocol amendment to drop authoritative inference requirement |
+| **Isolated** `inferTier()` branch for `harness == "episodic_learning_benchmark"` only | Modifying existing `inferTier()` branches for `test_suite`, `chat_rag_benchmark`, `grag_benchmark`, `robustness_suite` |
+| `BenchmarkEnvironmentInputs` population for episodic harness | INTEGRATION tier work |
+| Model/version **metadata** capture in env sidecar | Fingerprint **derivation** / `computeFingerprint()` semantics changes |
+| Unit tests **E2-29**, **E2-30** (+ mock E2-28 regression) | Full G2 `ctest` as EP-01 gate |
+| Authoritative smoke — **non-scoring** path only (see exit § no `official_scoring`) | `wiring_stage=B` official scoring runs in EP-01 |
 | Documentation of backend selection contract | Phase E run manifests / `phase_e_strict_v1.md` |
+
+**`inferTier()` discipline (locked):** `benchmark_environment.cpp` is **shared** across every harness. EP-01 adds a **new isolated branch** keyed on `inputs.harness == "episodic_learning_benchmark"` — mirroring how `chat_rag_benchmark` / `grag_benchmark` / `test_suite` each have their own branches. **Do not** refactor, reorder, or alter predicates in existing harness branches; treat any change outside the new episodic branch as a **Phase D regression risk** requiring explicit justification and broader regression.
 
 **Code review finding (2026-07-09):** Harness unconditionally sets `THOTH_MOCK_*`, uses TfIdf-only `EmbeddingEngine`, and pins `model_version_or_weights_hash = "mock"`. This is **intentional** for Phase B machinery proof — **not** a routing bug. EP-01 adds missing capability; Step 2 must **not** proceed without it.
 
@@ -2632,13 +2636,13 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 | Category | File | Change (on implementation) |
 |----------|------|----------------------------|
 | **Harness** | `external/basic_agent/src/run_episodic_learning_benchmark.cpp` | Backend mode selection; conditional mock env; authoritative `BenchmarkEnvironmentInputs`; shared engine lifecycle for `runCaseArm` |
-| **Infrastructure** | `external/basic_agent/src/benchmark_environment.cpp` | `inferTier()` branch for `harness == "episodic_learning_benchmark"` (mirror `test_suite` / `chat_rag_benchmark` patterns) |
+| **Infrastructure** | `external/basic_agent/src/benchmark_environment.cpp` | **Add isolated** `inferTier()` branch for `harness == "episodic_learning_benchmark"` only — **no edits** to existing harness branches |
 | **Infrastructure** | `external/basic_agent/include/benchmark_environment.h` | Only if new enum/helper needed — prefer reuse |
 | **Infrastructure** | `external/basic_agent/src/benchmark_context.cpp` | Only if episodic-specific env flags needed |
 | **Infrastructure** | `external/basic_agent/src/ollama_snapshot.cpp` | **Reuse only** — no change unless gap found |
 | **Configuration** | `external/basic_agent/include/config.h` | **Reuse only** — read `llm_model`, `embedding_model` for authoritative path |
 | **Build** | `external/basic_agent/CMakeLists.txt` | **None** expected |
-| **Tests** | `tests/unit_tests.cpp` | EP-01 regression gates (mock preserved, authoritative smoke, tier metadata) |
+| **Tests** | `tests/unit_tests.cpp` | **E2-29** (mock regression / E2-28 preserved) · **E2-30** (authoritative smoke + no-official-scoring invariant); orchestrator `runE2Ep01Tests()` · gate `THOTH_E2_EP01=1` |
 | **Documentation** | `docs/E2_PROTOCOL.md` | Harness § — document mock vs authoritative inference modes |
 | **Documentation** | `docs/benchmark_environment.md` | Episodic harness row in tier / checklist tables |
 | **Documentation** | `docs/cursor_list.md` | § E.0.0 EP-01 status + evidence |
@@ -2654,27 +2658,30 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 | **2** | **Backend selection mechanism** | Add CLI (`--mock` default · `--full` or `--authoritative` for live path) and/or documented env contract; **do not** invent parallel architecture |
 | **3** | **Remove unconditional mock forcing** | `main()` and `runCaseArm()` must not `setenv(THOTH_MOCK_*)` when authoritative mode selected |
 | **4** | **Authoritative `BenchmarkEnvironmentInputs`** | `harness = "episodic_learning_benchmark"`; `tier = FULL` or harness-specific; real `llm_model` / embedding method; `ollama_reachable` + snapshot probe where applicable; backend-agnostic hook points for future providers |
-| **5** | **`inferTier()` integration** | Classify episodic authoritative runs correctly; emit `TIER_MISMATCH` on declared vs inferred mismatch |
+| **5** | **`inferTier()` — isolated episodic branch** | Add **new** branch for `harness == "episodic_learning_benchmark"` only; classify mock vs authoritative inference tier; emit `TIER_MISMATCH` on mismatch. **Forbidden:** changing `test_suite`, `chat_rag_benchmark`, `grag_benchmark`, or `reflection_ab` / `robustness_suite` branch logic |
 | **6** | **Embedding / engine lifecycle** | Authoritative path: `EmbeddingEngine::External` (or config-driven) shared into `runCaseArm`; mock path: preserve current TfIdf behavior |
-| **7** | **Version pins** | `strictConfig.versions.*` from pinned environment in authoritative mode; mock pins unchanged in mock mode |
-| **8** | **Env fingerprint** | Ensure sidecar captures inference backend identifier + model ids per `benchmark_environment.md` |
-| **9** | **Mock regression** | Default/mock run reproduces Phase B scoped equivalence / fingerprint discipline (E2-28 bucket #0 on mock) |
-| **10** | **Authoritative smoke** | Authoritative mode reaches live backend, completes harness exit without semantic changes to envelope schema; **not** a Phase E evidence run |
-| **11** | **Phase D spot-check** | `THOTH_E2_D5_DETERMINISM=1` or E2-28 helper on **mock** path post-change — attestation that authority preserved |
-| **12** | **Documentation** | E2 harness contract + benchmark_environment checklist + EP-01 evidence note in `cursor_list.md` |
+| **7** | **Version pins (metadata only)** | Authoritative mode: populate `strictConfig.versions.*` with real backend pins (replace literal `"mock"`). Mock mode: unchanged pins. **Do not** alter `computeFingerprint()` / B5.0b1 derivation contract |
+| **8** | **Env fingerprint** | Sidecar captures inference backend identifier + model ids per `benchmark_environment.md` |
+| **9** | **E2-28 mock regression (E2-29)** | Default/mock run reproduces Phase B scoped equivalence — bucket #0; preregistered test **E2-29** |
+| **10** | **Authoritative smoke (E2-30)** | Authoritative mode reaches live backend; harness completes smoke path; **no** `wiring_stage=B` scored official run; JSONL audited for **zero** `official_scoring: true` rows |
+| **11** | **Phase D spot-check** | E2-28 helper on **mock** path post-change — attestation that authority preserved |
+| **12** | **Documentation** | E2 harness contract + benchmark_environment checklist + EP-01 evidence in `cursor_list.md` |
 
 ###### Dangers / failure modes / things that must not change
 
 | Risk | Mitigation |
 |------|------------|
+| **Trajectory score divergence (PRIMARY)** — live authoritative backend changes **Executive / planner / LLM trajectory scores** (`calculate_trajectory_score()` path) even though **`e2StrictRetrieve` does not call the LLM**. Mock-trio lift numbers are **not** comparable to authoritative-inference lift numbers without explicit backend + corpus tier labeling. Future readers may misread a Step 2 lift delta as apples-to-apples with Phase B mock baseline. | Name this risk in EP-01 docs; EP-01 smoke must **not** emit official scored rows; Step 2 run record must declare backend + `evidence_scope`; never compare Phase B mock rollup to Phase E authoritative rollup without tier label |
 | **Accidental scoring changes** | No edits to `runScoredEvaluationLoop`, `evaluateCase`, `summarize`, pass/fail table |
-| **Evaluation authority drift** | `wiring_stage=B` only emits `official_scoring: true`; mock regression proves envelope unchanged |
-| **Benchmark semantics drift** | EP-01 exit requires E2-28 mock regression green |
+| **Evaluation authority drift** | EP-01 smoke forbids `wiring_stage=B` official scoring runs; E2-30 asserts **no** `official_scoring: true` in smoke JSONL |
+| **Shared `inferTier()` regression** | New episodic branch only — existing harness branches untouched; grep audit in E2-29 |
+| **Benchmark semantics drift** | EP-01 exit requires E2-28 / E2-29 mock regression green |
+| **Fingerprint meaning drift** | Version **pin values** may change per backend; `computeFingerprint()` / canonical JSON **derivation** must not (see Forbidden) |
 | **Protocol changes** | E-AP v1.1 not amended to drop authoritative inference tier |
-| **Phase D regressions** | Targeted determinism/authority spot-check after harness change |
-| **Backend behavior in STRICT kernel** | `e2StrictRetrieve` remains token-overlap kernel — live backend affects Executive/LLM path only |
+| **Phase D regressions** | E2-28 mock spot-check after harness change |
+| **Backend behavior leaking into STRICT kernel** | `e2StrictRetrieve` remains token-overlap kernel — no LLM in kernel path |
 | **Loss of deterministic mock metadata** | Mock mode remains default; CI path unchanged |
-| **Reproducibility degradation** | Authoritative mode must populate full L2 sidecar; `TIER_MISMATCH` on lie |
+| **Reproducibility degradation** | Authoritative mode populates full L2 sidecar; `TIER_MISMATCH` on lie |
 | **Scope creep into Step 2** | No trio evidence runs, no `phase_e_strict_v1.md` in EP-01 |
 | **Things that must not change** | See Core invariant list |
 
@@ -2686,6 +2693,9 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 - Changing authority model (`official_scoring`, subscriber firewalls, Phase D boundaries)  
 - Changing protocol definitions or reporting rules in `E2_PROTOCOL.md` without v1.3+ amendment  
 - Changing benchmark success criteria or fingerprint **meaning**  
+- **Changing `computeEvaluationFingerprint()` / canonical fingerprint derivation** (B5.0b1 contract) — authoritative mode may supply **real** `strictConfig.versions.*` pin **values** in place of `"mock"`; the pin **mechanism** and fingerprint **semantics** must not change  
+- Modifying existing `inferTier()` branches for non-episodic harnesses  
+- Running `wiring_stage=B` official scoring smoke in EP-01 (infrastructure only — no `official_scoring: true` rows)  
 - Changing Phase D guarantees or re-running full D5 as EP-01 gate  
 - Weakening E-AP authoritative inference requirement to “mock is enough”  
 - Phase E benchmark execution disguised as harness work  
@@ -2695,14 +2705,15 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 
 1. Plan locked in § E.0.0 EP-01 — committed before implementation  
 2. Episodic harness supports **selectable** mock (default) and **authoritative inference** modes  
-3. **Mock mode** still functions — Phase B / E2-28 mock regression **green**  
-4. **Authoritative mode** smoke completes — live backend contacted, metadata captured, no envelope schema violation  
-5. `inferTier()` + sidecar record backend identity for authoritative runs  
-6. Phase D behavior preserved — targeted authority/determinism spot-check **green**  
-7. EP-01 regression gate(s) green (see Deliverables)  
-8. Documentation updated (E2 harness + benchmark_environment)  
-9. **No Phase E benchmark evidence** produced in EP-01  
-10. **Pause for review** before Phase E Step 2 lock/implementation  
+3. **Mock mode** still functions — **E2-29** / E2-28 mock regression **green**  
+4. **Authoritative mode** smoke completes — live backend contacted, metadata captured (**E2-30**)  
+5. **Zero official scoring in EP-01 smoke** — grep/audit of EP-01 authoritative smoke JSONL: **no** rows with `official_scoring: true` (A1-style NONE invariant; EP-01 does not produce benchmark evidence)  
+6. `inferTier()` episodic branch + sidecar record backend identity for authoritative runs  
+7. Phase D behavior preserved — E2-28 mock spot-check **green**  
+8. `THOTH_E2_EP01=1` green (E2-29 + E2-30)  
+9. Documentation updated (E2 harness + benchmark_environment)  
+10. **No Phase E benchmark evidence** produced in EP-01  
+11. **Pause for review** before Phase E Step 2 lock/implementation  
 
 ###### Deliverables / evidence produced
 
@@ -2710,7 +2721,9 @@ Changing the inference backend must **never** redefine benchmark behavior — on
 |-------------|-----------|
 | Updated episodic harness | `run_episodic_learning_benchmark.cpp` — dual mode |
 | Backend selection documentation | `docs/E2_PROTOCOL.md` § Harness + `docs/benchmark_environment.md` |
-| EP-01 regression gate | Proposed: `THOTH_E2_EP01=1` → mock regression + authoritative smoke (plan lock chooses exact gate ID) |
+| **E2-29** — mock regression preserved | `testE2Ep01MockRegressionPreservesE28()` — Phase B / E2-28 discipline on default mock path |
+| **E2-30** — authoritative smoke + no official scoring | `testE2Ep01AuthoritativeInferenceSmoke()` — live backend path; asserts **zero** `official_scoring: true` in smoke JSONL |
+| EP-01 orchestrator | `runE2Ep01Tests()` · gate `THOTH_E2_EP01=1` in `main()` |
 | Compatibility note | `docs/baselines/BASELINE_PROVENANCE.md` or EP-01 evidence block in `cursor_list.md` |
 | EP-01 evidence record | § E.0.0 EP-01 status in `cursor_list.md` — modes proven, commits, gates green |
 
