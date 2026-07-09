@@ -1,7 +1,7 @@
 # E — Empirical Validation Protocol
 
 **Protocol version:** E v0.1  
-**Status:** 🔒 **LOCKED** (2026-07-09) — Step 1 plan § E.0.0 may proceed; await explicit implementation approval  
+**Status:** 🔒 **LOCKED** (2026-07-09) — Step 1 plan § E.0.0 🔒 locked (2026-07-09); await explicit Step 1 implementation approval  
 **Supersedes:** Informal “Phase E scientific defense” label (deprecated in favor of **empirical validation**)  
 **Depends on:** [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) (Phase D sealed 2026-07-08), [`D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒, [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 🔒, [`benchmark_environment.md`](benchmark_environment.md) (benchmark E1 ✅)  
 **Checkpoint tracking:** `cursor_list.md` § **E.0.0** (implementation plan — E0 locked 2026-07-09)
@@ -90,8 +90,12 @@ See **Reproducibility levels** below.
 | Rule | Enforcement |
 |------|-------------|
 | Every paper sentence → evidence tier | Claims audit (Step E4) |
+| **n=3 corpus tier explicit** | Any claim backed only by v1.2 trio MUST carry `evidence_scope: n=3_strict_trio` in audit — never presented as general |
 | No INTEGRATION-only claims as benchmark results | STRICT firewall + audit |
-| No v1.1 / mock-tier sole evidence | E1 tier discipline |
+| No v1.1 / mock-tier sole evidence | Benchmark env-pinning (E1 track) tier discipline |
+| **No machinery proof as effect evidence** | D5 / C5 equivalence gates ≠ empirical lift claims (see Forbidden) |
+
+**E4 audit discipline (locked):** Claims audit must be performed **cold** — re-read each in-scope sentence without drafting context, **or** after a **≥24 h gap** from last edit to the sentence under audit, **or** by a **second reviewer** who did not author the claim text. Self-audit in the same session as writing is **not** sufficient for E-Q4 green.
 
 ### E-Q5 — Is the project ready for external publication?
 
@@ -196,7 +200,20 @@ Phase E targets **L4** for claims in external publications.
 | **External validity** | Generalizes beyond declared corpus? | **Not yet** — n=3 official; B1 required for broader claims |
 | **Conclusion validity** | Can statistical conclusions be drawn? | **Descriptive only** — inference intentionally deferred |
 
-Phase E must **document** these explicitly in `PHASE_E_COMPLETE.md` — not hide behind engineering gate pass.
+### n=3 corpus consequence (locked)
+
+The v1.2 STRICT trio (E2-01..03) is a **lab demonstration corpus**, not a generalization sample.
+
+| Rule | Meaning |
+|------|---------|
+| **Tier label** | Claims supported only by trio runs MUST be tagged `n=3_strict_trio` in E4 audit and external text |
+| **No silent generalization** | Wording like “episodic memory improves learning” without scope qualifier is **forbidden** unless B1-scale (or larger declared) evidence is in scope |
+| **E4 gate** | Claims audit MUST list corpus tier per claim; trio-only claims cannot pass as unqualified empirical publication claims |
+| **E5 gate** | `PHASE_E_COMPLETE.md` MUST state maximum evidence scope achieved (trio only vs B1-inclusive) |
+
+> B1 expansion is a **hard dependency** for any external claim that implies generalization beyond the trio. E4/E5 may still green **scoped** trio claims — they must be **labeled**, not upgraded.
+
+Phase E must **document** threats to validity explicitly in `PHASE_E_COMPLETE.md` — not hide behind engineering gate pass.
 
 ---
 
@@ -213,15 +230,40 @@ Phase E must **document** these explicitly in `PHASE_E_COMPLETE.md` — not hide
 
 ---
 
+## Falsification and negative results (locked)
+
+Phase E must specify what happens when evidence **does not** support a claim — not only when it does.
+
+| Event | Required response |
+|-------|-------------------|
+| **L3 reproduction fails** (E2-28 mismatch on declared corpus) | Stop; diagnose per Build/Test Failure Rule; **do not** publish prior numbers as current; amend analysis plan before re-run |
+| **L4 reproduction fails** (independent package cannot reproduce cited run) | E-Q2 = **no** until resolved; claim remains **unpublished** or explicitly retracted |
+| **B1 expansion contradicts trio pattern** (lift absent or inverted on expanded corpus) | Report descriptively per `E2_PROTOCOL.md` reporting policy; **do not** quiet-soften claims under time pressure; update E4 audit with negative tier |
+| **STRICT FAILURE on preregistered case** | Valid outcome — log with preregistered criteria not met; not a protocol violation |
+| **Claim fails claims audit (E4)** | Remove, narrow scope (e.g. to `n=3_strict_trio`), or defer publication — no rubber-stamp |
+
+> Negative results are **successful experiments** when logged honestly. Phase E forbids retroactive claim narrowing without updating `E_ANALYSIS_PLAN.md` (amendment + justification) and E4 audit.
+
+---
+
 ## Relationship to adjacent tracks
 
 | Track | Relationship to Phase E |
 |-------|-------------------------|
-| **B1** | Corpus expansion for empirical publication scope — likely E2 input |
+| **B1** | **Corpus scope fork** — locked in E1 `E_ANALYSIS_PLAN.md`. If B1 is **in** publication scope, E2 authoritative runs use B1 case registry; if **out**, E2 re-runs trio only and all external claims remain `n=3_strict_trio` tier |
 | **V3 Zenodo** | Deliverable **after** E-Q4/Q5 green — not Phase E core |
 | **E3** (improvements.md) | SCR harness — **separate eval ID**, not E2 “Phase E” |
 | **C6 Phase 3** | Longitudinal metrics — parallel thesis honesty track |
 | **G1d** | Trajectory diagnostic — not STRICT official evidence |
+
+**B1 / E2 timing (locked):**
+
+| E1 decision | E2 runs | L4 target |
+|-------------|---------|-----------|
+| B1 **in scope** | Authoritative STRICT on **B1 registry** (after B1 case table lands) | L4 on every **cited** B1 run + trio if still cited |
+| B1 **deferred** | Authoritative STRICT **re-run of v1.2 trio only** | L4 on trio runs only; generalization claims **forbidden** |
+
+E2 does **not** silently wait on B1 — the wait/fork is **explicit in E1**, not discovered mid-Phase-E.
 
 **Naming:** E2 track **Phase E** ≠ improvements.md **E3** (SCR).
 
@@ -232,11 +274,13 @@ Phase E must **document** these explicitly in `PHASE_E_COMPLETE.md` — not hide
 | Step | Work | Delivers | Primary question |
 |------|------|----------|------------------|
 | **E0** | Lock this protocol + § E.0.0 | Terminology, five questions, validity frame | — |
-| **E1** | Analysis plan lock | [`phases/E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) — § E.0.0 Step 1 | **E-Q1** |
-| **E2** | Authoritative STRICT runs | E1-pinned artifacts | **E-Q2** (partial), **E-Q3** |
-| **E3** | Reproducibility package (L4) | Manifests, verification doc | **E-Q2** |
-| **E4** | Claims audit | Paper ↔ evidence tier mapping | **E-Q4** |
-| **E5** | Close-out | `PHASE_E_COMPLETE.md` + seal | **E-Q5** |
+| **E1** | Protocol + analysis plan lock | [`phases/E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) — Part I + Part II; § E.0.0 Step 1 🔒 locked | **E-Q1** (+ B1 in/out fork) |
+| **E2** | Authoritative STRICT runs | Pinned-env artifacts on **corpus declared in E1** (trio re-run **or** B1 registry) | **E-Q2** (partial), **E-Q3** |
+| **E3** | Reproducibility package (L4) | Manifests + verification doc for **every cited run** in E4 scope | **E-Q2** |
+| **E4** | Claims audit (cold-read discipline) | Paper ↔ evidence tier map + `n=3_strict_trio` labels | **E-Q4** |
+| **E5** | Close-out | `PHASE_E_COMPLETE.md` + max evidence scope statement | **E-Q5** |
+
+**Step dependency rule:** E2 corpus = E1 declaration. E3 L4 scope = E4 cited runs. E5 cannot claim generalization scope beyond E1/E4 tier labels.
 
 ---
 
@@ -244,10 +288,14 @@ Phase E must **document** these explicitly in `PHASE_E_COMPLETE.md` — not hide
 
 - Claiming Phase E complete without all five questions answered
 - Using INTEGRATION results as official benchmark evidence
+- **Citing Phase D machinery proofs (D5 meta-proof, C5 equivalence, authority/determinism gates) as empirical evidence of learning lift or generalization** — engineering trust ≠ effect evidence
+- Presenting trio-only (`n=3_strict_trio`) evidence as unqualified general empirical claims
 - Presenting engineering constants as theoretically optimal without protocol revision
 - Mock/TfIdf CI as sole evidence for external empirical claims
 - Silent protocol constant changes mid-run
 - Conflating architecture publication readiness with empirical publication readiness
+- Rubber-stamping E4 claims audit in the same session as claim authoring (see E-Q4 cold-read rule)
+- Quiet claim-softening after failed L3/L4 reproduction or negative B1 results without plan amendment
 
 ---
 
@@ -262,6 +310,7 @@ Phase E must **document** these explicitly in `PHASE_E_COMPLETE.md` — not hide
 - D1–D5 + Phase E evidence references
 - Commit hash(es)
 - Threats to validity summary
+- **Maximum evidence scope** (`n=3_strict_trio` only vs B1-inclusive)
 - Reproducibility level achieved (L1–L4)
 - Final conclusion: empirical validation green — **descriptive claims only unless inference protocol added later**
 - **Paused before** next external action (e.g. Zenodo V3)
@@ -278,6 +327,6 @@ Phase E must **document** these explicitly in `PHASE_E_COMPLETE.md` — not hide
 
 ---
 
-**Review incorporated:** Engineering vs empirical confidence; metric definition vs validation; reproducibility levels L1–L4; statistical inference deferred; architecture vs empirical publication; threats to validity; five core questions; empirical validation terminology.
+**Review incorporated:** Engineering vs empirical confidence; metric definition vs validation; reproducibility levels L1–L4; statistical inference deferred; architecture vs empirical publication; threats to validity; five core questions; empirical validation terminology. **Amendment 2026-07-09:** n=3 corpus tier labeling + E4/E5 gates; falsification/negative-result path; B1/E2 timing fork; E4 cold-read audit discipline; forbid citing D-phase machinery proofs as empirical evidence.
 
-**Status:** 🔒 **v0.1 locked** (2026-07-09). E0 complete — Step 1 plan drafted — paused before Step 1 lock.
+**Status:** 🔒 **v0.1 locked** (2026-07-09, amended 2026-07-09). E0 complete — **Step 1 plan locked** (2026-07-09) — paused before Step 1 implementation (await explicit approval).
