@@ -5,7 +5,7 @@
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **Phase E Step 1 plan locked** — paused before Step 1 implementation (AGENTS.md gate).
+**Active E2 work:** ✅ **Phase E Step 1 complete** — `E_ANALYSIS_PLAN.md` locked; paused before Step 2 (AGENTS.md gate).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2251,7 +2251,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | Step | Work | Delivers |
 |------|------|----------|
 | **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
-| **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — Part I + Part II; § **E.0.0 Step 1** 🔒 locked |
+| **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.0 ✅ |
 | **E2** | Authoritative STRICT runs (B1 if in scope) | E1-pinned artifacts |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
@@ -2269,13 +2269,13 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **Step 1 plan locked** (2026-07-09) — paused before Step 1 implementation.
+**Status:** 🔒 **E0 locked** (2026-07-09). **Step 1 complete** (2026-07-09) — paused before Step 2.
 
 ---
 
 ##### E.0.0 Step 1 — evaluation protocol + analysis plan lock (**v1 locked**)
 
-**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-09) — E0 complete; plan locked; await explicit implementation approval before writing `E_ANALYSIS_PLAN.md`.
+**Status:** ✅ **Step 1 complete** (2026-07-09) — [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) E-AP v1.0 locked; B1 **deferred**; paused before Step 2.
 
 ###### Core invariant (why Step 1 exists)
 
@@ -2461,26 +2461,26 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 
 ###### Step 1 evidence artifact
 
-On Step 1 implementation (after explicit approval), record:
+✅ **Step 1 complete** (2026-07-09):
 
-1. `E_ANALYSIS_PLAN.md` committed — Preamble + Part I + Part II + all mandatory sections  
+1. [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) committed — Preamble + Part I + Part II + all mandatory sections (E-AP v1.0)  
 2. **Normative document precedence** present in Preamble  
 3. **Protocol freeze** + **protocol amendments** clauses present in Part I  
-4. E-Q1 checklist satisfied (definitions, corpus, exclusions, authority, tier definitions)  
-5. B1 corpus scope decision recorded in Part I (in scope for Step 2 **or** explicitly deferred with justification)  
+4. E-Q1 checklist satisfied  
+5. B1 corpus scope: **deferred** (trio only for Step 2; generalization claims forbidden)  
 6. Threats to validity **and mitigations** documented in Part II  
 7. **Claim taxonomy** table present in Part II  
-8. Statistical posture: inference deferred + descriptive-only scope sentence (no CIs/bootstrap/tests)  
-9. **Conclusion:** evaluation protocol completely specified and frozen for declared empirical scope  
+8. Statistical posture: inference deferred + descriptive-only (no CIs/bootstrap/tests)  
+9. **Conclusion:** evaluation protocol completely specified and frozen — `evidence_scope: n=3_strict_trio`  
 10. **Deferred:** Step 2 authoritative runs · Step 3 L4 package · Step 4 claims audit · Step 5 close-out  
 
 ###### Step 1 exit criteria
 
 1. ✅ Plan locked in § E.0.0 Step 1 (v1) — 2026-07-09  
-2. `E_ANALYSIS_PLAN.md` contains Preamble + Part I + Part II and all mandatory sections (on implementation)  
-3. Protocol freeze + amendments + claim taxonomy + precedence present (on implementation)  
-4. B1 in/out decision explicit in Part I (on implementation)  
-5. E-Q1 answerable **yes** from the artifact alone (on implementation)  
+2. ✅ `E_ANALYSIS_PLAN.md` contains Preamble + Part I + Part II and all mandatory sections  
+3. ✅ Protocol freeze + amendments + claim taxonomy + precedence present  
+4. ✅ B1 in/out decision explicit in Part I — **deferred**  
+5. ✅ E-Q1 answerable **yes** from the artifact alone  
 6. **Pause for review** before Step 2  
 
 ###### Step 1 files (expected touch)

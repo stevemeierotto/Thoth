@@ -1,7 +1,7 @@
 # E — Empirical Validation Protocol
 
 **Protocol version:** E v0.1  
-**Status:** 🔒 **LOCKED** (2026-07-09) — Step 1 plan § E.0.0 🔒 locked (2026-07-09); await explicit Step 1 implementation approval  
+**Status:** 🔒 **LOCKED** (2026-07-09) — E1 complete (`E_ANALYSIS_PLAN.md` E-AP v1.0, 2026-07-09); await explicit Step 2 approval  
 **Supersedes:** Informal “Phase E scientific defense” label (deprecated in favor of **empirical validation**)  
 **Depends on:** [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) (Phase D sealed 2026-07-08), [`D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒, [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 🔒, [`benchmark_environment.md`](benchmark_environment.md) (benchmark E1 ✅)  
 **Checkpoint tracking:** `cursor_list.md` § **E.0.0** (implementation plan — E0 locked 2026-07-09)
@@ -274,7 +274,7 @@ E2 does **not** silently wait on B1 — the wait/fork is **explicit in E1**, not
 | Step | Work | Delivers | Primary question |
 |------|------|----------|------------------|
 | **E0** | Lock this protocol + § E.0.0 | Terminology, five questions, validity frame | — |
-| **E1** | Protocol + analysis plan lock | [`phases/E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) — Part I + Part II; § E.0.0 Step 1 🔒 locked | **E-Q1** (+ B1 in/out fork) |
+| **E1** | Protocol + analysis plan lock | [`phases/E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) — E-AP v1.0 ✅ | **E-Q1** |
 | **E2** | Authoritative STRICT runs | Pinned-env artifacts on **corpus declared in E1** (trio re-run **or** B1 registry) | **E-Q2** (partial), **E-Q3** |
 | **E3** | Reproducibility package (L4) | Manifests + verification doc for **every cited run** in E4 scope | **E-Q2** |
 | **E4** | Claims audit (cold-read discipline) | Paper ↔ evidence tier map + `n=3_strict_trio` labels | **E-Q4** |
@@ -329,4 +329,4 @@ E2 does **not** silently wait on B1 — the wait/fork is **explicit in E1**, not
 
 **Review incorporated:** Engineering vs empirical confidence; metric definition vs validation; reproducibility levels L1–L4; statistical inference deferred; architecture vs empirical publication; threats to validity; five core questions; empirical validation terminology. **Amendment 2026-07-09:** n=3 corpus tier labeling + E4/E5 gates; falsification/negative-result path; B1/E2 timing fork; E4 cold-read audit discipline; forbid citing D-phase machinery proofs as empirical evidence.
 
-**Status:** 🔒 **v0.1 locked** (2026-07-09, amended 2026-07-09). E0 complete — **Step 1 plan locked** (2026-07-09) — paused before Step 1 implementation (await explicit approval).
+**Status:** 🔒 **v0.1 locked** (2026-07-09, amended 2026-07-09). E0 complete — **E1 complete** (`E_ANALYSIS_PLAN.md` E-AP v1.0, 2026-07-09) — paused before Step 2 (await explicit approval).
