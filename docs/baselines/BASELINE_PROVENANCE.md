@@ -33,6 +33,8 @@ Records **how** the Phase B baseline came to exist.
 | **Unit tests** | `./build/debug/tests/thoth-unit-tests` — all passed (2026-07-04) |
 | **Mock tier** | `THOTH_MOCK_EPISODIC=1`, `THOTH_MOCK_LLM=true` (harness default) |
 
+> **EP-01 / EP-01.5 note (2026-07-09):** Phase B baseline remains **mock-tier** evidence. Authoritative inference (`--authoritative`) is additive (EP-01 dual mode + EP-01.5 live `LLMInterface` wiring). Mock and authoritative lift numbers are **not** comparable without explicit tier labels — see `E2_PROTOCOL.md` § Harness contract · Planner / LLM contract.
+
 ---
 
 ## Protocol
@@ -67,3 +69,4 @@ Executed twice consecutively; exit code 0 both times.
 - Baseline uses mock-tier episodic learning harness (no Ollama).
 - Corpus fingerprint mode: FAST (TfIdf probe index at harness init).
 - A5 equivalence regression verified separately (`THOTH_E2_WIRING_STAGE=A5`, `equivalence=yes`).
+- **EP-01 / EP-01.5 (2026-07-09):** Authoritative inference (`--authoritative`) is additive. Phase B mock-tier lift is **not** comparable to Phase E authoritative lift without explicit tier labels — see `E2_PROTOCOL.md` § Planner / LLM contract (EP-01.5).

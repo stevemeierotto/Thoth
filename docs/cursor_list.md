@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **EP-01.5 plan revised** · Step 2 on investigation hold · Step 3 blocked)  
+**Last updated:** 2026-07-09 (Phase E — **EP-01.5 Phase 4 docs** · Phase 5 pending · Step 2 on investigation hold)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ⚠️ **Step 2 UNDER INVESTIGATION HOLD** — EP-01.5 (authoritative LLM wiring) required before Step 2 redo; Step 3 blocked.
+**Active E2 work:** ⚠️ **Step 2 UNDER INVESTIGATION HOLD** — EP-01.5 Phases 1–4 done; Phase 5 regression then Step 2 redo; Step 3 blocked.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2255,7 +2255,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
 | **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.1 ✅ |
 | **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** ✅ |
-| **EP-01.5** | Authoritative LLM wiring + planner contract | Harness repair — § **E.0.0 EP-01.5** 🔒 Phase 1 |
+| **EP-01.5** | Authoritative LLM wiring + planner contract | Harness repair — § **E.0.0 EP-01.5** 🔒 Phases 1–4 |
 | **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ⚠️ hold |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
@@ -2275,7 +2275,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **EP-01.5 LOCKED** (2026-07-09) — Phase 1 in progress. **Step 2 UNDER INVESTIGATION HOLD** — Step 3 blocked.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **EP-01.5** Phases 1–4 ✅ (2026-07-09) — Phase 5 pending. **Step 2 UNDER INVESTIGATION HOLD** — Step 3 blocked.
 
 ---
 
@@ -2767,7 +2767,7 @@ EP-01 dual-mode harness is **green** for its locked scope. Pre-flight (1) on Ste
 
 ##### E.0.0 EP-01.5 — authoritative LLM wiring & planner contract (**v1 LOCKED**)
 
-**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-09) — Phase 1 ✅ · Phase 2 ✅ · **Phase 3 gate green** (E2-32) · Phases 4–5 blocked.
+**Status:** 🔒 **LOCKED FOR IMPLEMENTATION** (2026-07-09) — Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · **Phase 4 docs** · Phase 5 blocked.
 
 **Context:** Step 2 investigation hold — pre-flight (1) failed. Authoritative `--authoritative` + `wiring_stage=B` runs produced `total_tokens=0` / `terminal_state=FAILED` because `runCaseArm()` never wired `LLMInterface`. Failure mode = **harness infrastructure**, not a falsified benchmark result. See [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) § Investigation hold.
 
@@ -2958,9 +2958,9 @@ Mandatory pre-seal gates on redo: all 6 arms pass **execution gate**; E2-28 buck
 
 ###### Pause
 
-**STATUS: EP-01.5 PHASE 2 GATE GREEN — DO NOT START PHASE 3**
+**STATUS: EP-01.5 PHASE 4 COMPLETE — DO NOT START PHASE 5**
 
-Phase 2 verification: `THOTH_E2_EP015_PHASE2=1` → E2-31b pass (`hasTierMismatch() == false`). Do **not** auto-continue to Phase 3.
+Phase 4: planner / LLM contract documented in `E2_PROTOCOL.md` § Harness contract; historical pointers updated (`BASELINE_PROVENANCE.md`, `phase_e_strict_v1.md`, this §). Do **not** auto-continue to Phase 5 regression until approved.
 
 ---
 

@@ -487,6 +487,27 @@ No changes to scoring function during an in-flight STRICT run.
 | Diagnostic mode | `--tier integration` (non-scoring) |
 | E1 | One `run_id`; attribution on all STRICT arms |
 
+### Planner / LLM contract (EP-01.5 — locked)
+
+Both inference tiers use the **same** fixed plan topology (`EpisodicLearningMockPlanner`: RETRIEVAL → LLM). Scoring still uses `ExecutiveController::calculate_trajectory_score()`. Inference backend differs; planner selection does **not**.
+
+| Tier | Planner | LLM execution | Notes |
+|------|---------|---------------|-------|
+| **Mock** (`--mock`) | `EpisodicLearningMockPlanner` | `THOTH_MOCK_LLM` — may validate `required_token` in prior RETRIEVAL context | Phase B / CI machinery proof |
+| **Authoritative** (`--authoritative`) | **Same** `EpisodicLearningMockPlanner` | Live `LLMInterface` (pinned `config.llm_model`) via `set_llm_interface` | External embeddings; mock env unset |
+
+**Rules:**
+
+1. **`EpisodicLearningMockPlanner` is retained in authoritative mode exclusively as a deterministic topology provider. It MUST NOT influence LLM execution success, trajectory quality, or scoring outcomes.**
+2. Do **not** switch authoritative arms to `LLMPlanner` (non-deterministic plan shape would break the lab corpus contract).
+3. Do **not** port mock `required_token` gating to the live path — that is mock-tier instrumentation only.
+4. In authoritative mode, the class name “Mock” is historical: the planner supplies RETRIEVAL→LLM structure only.
+5. **Execution gate ≠ trajectory / benchmark pass.** Authoritative official (`wiring_stage=B`) runs require proof of actual inference (`llm_wired` and nonzero tokens — latency alone is insufficient). A completed LLM invocation may still yield `FAILED` `terminal_state` or case `passes=false`. Failed inference proof aborts with `AUTHORITATIVE_LLM_NOOP` and **must not** emit `EPISODIC_LEARNING_SUMMARY` with `official_scoring: true`.
+6. Harness-local `temperature=0.0` on authoritative arms is allowed for E2-28 reproducibility; **no other** generation-parameter changes under EP-01.5.
+7. Declared env tier for authoritative episodic inputs must align with `inferTier()` (typically `OLLAMA` when External + reachable) — fix at inputs boundary; do not reorder shared `inferTier()` for other harnesses.
+
+**Tier labeling:** Phase B mock-tier lift numbers are **not** comparable to Phase E authoritative-inference lift numbers without explicit backend + `evidence_scope` labels.
+
 ### STRICT artifact fields (required)
 
 - `scoring_tier`: `"STRICT"`
@@ -533,6 +554,11 @@ No changes to scoring function during an in-flight STRICT run.
 | E2-05 | STRICT | Cognitive metrics attribution |
 | E2-06 | INTEGRATION | Diagnostic run; `official_scoring: false`; no `e2_outcome` |
 | E2-07 | STRICT | `validateStrictConfigForOfficialRun` + evaluation fingerprint |
+| E2-29 | harness | EP-01 mock regression / E2-28 preserved (`THOTH_E2_EP01`) |
+| E2-30 | harness | EP-01 authoritative A2 smoke; zero `official_scoring` rows |
+| E2-31 | harness | EP-01.5 Phase 1 — live LLM wiring; tokens recorded (`THOTH_E2_EP015_PHASE1`) |
+| E2-31b | harness | EP-01.5 Phase 2 — authoritative episodic inputs; no `TIER_MISMATCH` |
+| E2-32 | harness | EP-01.5 Phase 3 — forced LLM no-op cannot emit official SUMMARY (`THOTH_E2_EP015_PHASE3`) |
 
 ---
 

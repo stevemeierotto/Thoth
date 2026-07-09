@@ -35,7 +35,9 @@ Evidence from Run A (`run-1783628170667`) `logs/cognitive_metrics.jsonl` (all 6 
 
 **Secondary flag:** Both runs emitted `TIER_MISMATCH` (`declared_tier: FULL`, `inferred_tier: OLLAMA`) in `logs/benchmark_env.jsonl`.
 
-**Required before sealing as finding:** Complete **EP-01.5** (authoritative LLM wiring + planner contract — see `cursor_list.md` § E.0.0 EP-01.5), then redo Step 2 pair with token-count execution gate. **Do not** adjust `LIFT_MARGIN` or episode threshold. **Do not** re-run chasing pass on the current broken path.
+**Required before sealing as finding:** Complete **EP-01.5** (Phases 1–3 harness repair ✅ 2026-07-09; Phase 4 docs; Phase 5 regression pending), then **redo** Step 2 pair with the execution gate. Prior run IDs remain **invalid empirical evidence** (instrument gap). **Do not** adjust `LIFT_MARGIN` or episode threshold. **Do not** re-run chasing pass on the pre-EP-01.5 path.
+
+**Planner contract (historical clarification):** `plan_id: e2-plan` / `EpisodicLearningMockPlanner` is expected under authoritative mode — topology provider only; it does not imply mock LLM. See `E2_PROTOCOL.md` § Planner / LLM contract (EP-01.5).
 
 ---
 
