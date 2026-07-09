@@ -2251,13 +2251,13 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | Step | Work | Delivers |
 |------|------|----------|
 | **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
-| **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.0 ✅ |
+| **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.1 ✅ |
 | **E2** | Authoritative STRICT runs (B1 if in scope) | E1-pinned artifacts |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
 
-**Time estimate (rough):** E0 ✅ — E1 **3–5 h** — E2 **4–8 h** + Ollama runtime — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
+**Time estimate (rough):** E0 ✅ — E1 **3–5 h** — E2 **4–8 h** + live LLM runtime (Ollama used to date) — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
 
 **Phase E flow (locked — post Step 1):**
 
@@ -2275,7 +2275,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 
 ##### E.0.0 Step 1 — evaluation protocol + analysis plan lock (**v1 locked**)
 
-**Status:** ✅ **Step 1 complete** (2026-07-09) — [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) E-AP v1.0 locked; B1 **deferred**; paused before Step 2.
+**Status:** ✅ **Step 1 complete** (2026-07-09) — [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) E-AP v1.1; B1 **deferred**; paused before Step 2.
 
 ###### Core invariant (why Step 1 exists)
 
@@ -2455,7 +2455,7 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 - Documentation only — no code, no benchmark execution  
 - **Two-part structure required** — Part I (protocol) before Part II (analysis) in the artifact  
 - **B1 in/out decision must be explicit** in Part I before Step 2 — do not defer silently  
-- Plan must be committed **before** any Step 2 authoritative Ollama-tier runs used for external claims  
+- Plan must be committed **before** any Step 2 **authoritative evaluation-backend** runs (`--full` / live tier, L2 env-pinned) used for external claims — **Ollama used to date**; stack is backend-agnostic (llama.cpp, OpenAI, etc. when declared and pinned)  
 - Estimated effort: **3–5 h** (writing + review — v2 adds claim taxonomy, tier definitions, mitigations)  
 - On scope ambiguity: stop and amend plan before Step 2 — do not run first and document later  
 
@@ -2463,7 +2463,7 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 
 ✅ **Step 1 complete** (2026-07-09):
 
-1. [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) committed — Preamble + Part I + Part II + all mandatory sections (E-AP v1.0)  
+1. [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) committed — Preamble + Part I + Part II + all mandatory sections (**E-AP v1.1** — v1.1 clarifies LLM-backend-agnostic wording)  
 2. **Normative document precedence** present in Preamble  
 3. **Protocol freeze** + **protocol amendments** clauses present in Part I  
 4. E-Q1 checklist satisfied  

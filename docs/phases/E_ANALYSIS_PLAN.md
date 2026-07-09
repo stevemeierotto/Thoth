@@ -1,9 +1,11 @@
 # E — Evaluation Protocol and Analysis Plan
 
-**Document revision:** E-AP v1.0  
-**Locked:** 2026-07-09  
+**Document revision:** E-AP v1.1  
+**Locked:** 2026-07-09 (v1.0); amended 2026-07-09 (v1.1)  
 **Phase E Step:** E1 (analysis plan lock)  
 **Status:** 🔒 **LOCKED** — preregistered before Phase E Step 2 authoritative runs
+
+> **Amendment v1.1:** Clarifies LLM **backend-agnostic** architecture vs **authoritative evaluation backend** designation. No change to metrics, corpus, hypotheses, exclusions, or pass/fail rules. Supersedes E-AP v1.0 (`48e7511`) on wording only.
 
 | Governing protocol | Version |
 |--------------------|---------|
@@ -34,7 +36,7 @@ Phase E closes the gap between **engineering trust** (Phases A–D) and **empiri
 | [`E_PHASE_PROTOCOL.md`](../E_PHASE_PROTOCOL.md) | Phase E contract and five questions (E-Q1..E-Q5) |
 | Thesis / grant materials (when cited) | Must map to claim taxonomy below |
 
-**Out of scope for official episodic benchmark claims in v1.0:** organic consolidation path (M1.5), INTEGRATION diagnostics, Phase D machinery proofs cited as learning lift, v1.1 retracted runs, mock/TfIdf CI as sole evidence.
+**Out of scope for official episodic benchmark claims in v1.0:** organic consolidation path (M1.5), INTEGRATION diagnostics, Phase D machinery proofs cited as learning lift, v1.1 retracted runs, mock/TfIdf CI as sole evidence (see **Authoritative evaluation backend** below).
 
 ## Normative document precedence
 
@@ -119,7 +121,7 @@ The following are **excluded** from official episodic benchmark evidence in Phas
 |-----------|--------|
 | **E2-INTEGRATION** outputs | Non-scoring diagnostic mode only |
 | **Protocol v1.1** runs | Retracted — `official_scoring: false`, superseded by v1.2 |
-| **Mock / TfIdf CI tier** as sole external evidence | Not Ollama-pinned authoritative environment |
+| **Mock / TfIdf CI tier** as sole external evidence | Not a **live evaluation-backend** run with L2 env pinning (see below) |
 | **Organic consolidation path** | M1.5 scope — E2-STRICT uses frozen injection log, not live consolidation |
 | **Phase D machinery proofs** (D5 authority, C5 equivalence, determinism gates) | Engineering trust ≠ effect evidence |
 | **GRAG bucket diagnostics** | Retrieval characterization — not STRICT official episodic lift |
@@ -187,6 +189,25 @@ Amendments must be committed, cite what they supersede, and state justification 
 | **L4 — Publication package** | Independent lab reproduces every cited run | Target Step 3 (Phase E) |
 
 Step 2 runs MUST use L2 env pinning. Phase B fingerprint `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` is historical reference — Step 2 produces fresh pinned-env artifacts for Phase E L4 scope.
+
+## Authoritative evaluation backend (LLM-agnostic)
+
+Thoth’s cognitive stack is **LLM-backend agnostic**. The runtime may use **Ollama**, **llama.cpp**, **OpenAI**, or other providers via the existing abstraction — none is architecturally required for STRICT evaluation.
+
+Phase E distinguishes:
+
+| Term | Meaning |
+|------|---------|
+| **Authoritative evaluation backend** | The **live** LLM/embedding provider designated for a pinned STRICT run — model id, API endpoint, and version pins captured in the L2 environment sidecar (`env_hash`, `run_id`) |
+| **`--full` / live runtime tier** | Harness tier that invokes a real backend — contrast with mock/TfIdf CI stubs used for fast regression |
+| **Backend used in this project (to date)** | **Ollama** — Phase B baseline and planned Step 2 runs use Ollama as the operational evaluation backend; this is a **recorded operational choice**, not a dependency of the evaluation protocol |
+
+**Rules:**
+
+1. Official episodic benchmark claims require STRICT runs on the **declared authoritative evaluation backend** with L2 pinning — not mock/TfIdf CI as sole evidence.  
+2. The sidecar and run manifest MUST record **which backend** was used so L4 reproduction targets that backend (or an explicitly declared equivalent under amendment).  
+3. Wording like “Ollama-tier runs” is **deprecated** in Phase E docs — use **authoritative evaluation-backend runs** (live `--full` tier, env-pinned).  
+4. Switching backends (e.g. Ollama → llama.cpp) for new authoritative runs requires declaring the new backend in the run manifest; it is not a protocol violation if env pins and STRICT rules are unchanged.
 
 ## B1 / E2 timing
 
@@ -333,7 +354,8 @@ Exact runs Phase E Step 2 will execute (frozen by this document):
 | **Corpus** | v1.2 trio only — E2-01, E2-02, E2-03 |
 | **B1 fork** | **Deferred** — no B1 cases in Step 2 |
 | **Environment** | L2 — `BenchmarkContext::create()`; `run_id`, `env_hash`, `index_hash`; sidecar `logs/benchmark_env.latest.json` |
-| **Runtime tier** | Ollama full tier (not mock/TfIdf CI) for authoritative external claims |
+| **Runtime tier** | **`--full` / live evaluation backend** — not mock/TfIdf CI stubs |
+| **Authoritative evaluation backend** | **Ollama** (project default to date); backend-agnostic stack — llama.cpp, OpenAI, or others permitted when declared and L2-pinned |
 | **Protocol** | `E2_PROTOCOL.md` v1.2 constants — no mid-run changes |
 | **Artifacts** | `logs/episodic_learning_benchmark.jsonl`; evaluation fingerprint; sealed episode snapshots |
 | **Validation** | E2-28 scoped equivalence across two consecutive identical STRICT builds on trio |
@@ -370,5 +392,5 @@ Step 2 delivers partial **E-Q2** (L2/L3 on trio) and **E-Q3** (methodological ad
 
 ---
 
-**Supersedes:** None (initial lock)  
-**Commit:** `48e7511`
+**Supersedes:** E-AP v1.0 (`48e7511`) — v1.1 wording clarification only  
+**Commit:** (recorded on v1.1 amendment commit)
