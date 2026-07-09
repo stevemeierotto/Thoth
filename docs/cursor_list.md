@@ -5,7 +5,7 @@
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **Phase E Step 1 complete** — `E_ANALYSIS_PLAN.md` locked; paused before Step 2 (AGENTS.md gate).
+**Active E2 work:** 🔒 **Phase E planning format locked** — Step 2 plan drafted; paused before Step 2 lock/implementation (AGENTS.md gate).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2257,7 +2257,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
 
-**Time estimate (rough):** E0 ✅ — E1 **3–5 h** — E2 **4–8 h** + live LLM runtime (Ollama used to date) — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
+**Time estimate (rough):** E0 ✅ — E1 **3–5 h** — E2 **4–8 h** + authoritative inference runtime — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
 
 **Phase E flow (locked — post Step 1):**
 
@@ -2269,7 +2269,67 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **Step 1 complete** (2026-07-09) — paused before Step 2.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **Planning format locked** (2026-07-09). **Step 2 plan drafted** — paused before Step 2 lock.
+
+---
+
+##### E.0.0 — Phase E planning format lock (**v1 locked**)
+
+**Status:** 🔒 **LOCKED** (2026-07-09) — applies to **Steps 2–5** (Step 1 complete under prior format; not rewritten).
+
+**Objective:** Restore the structured planning style used successfully in Phases C and D. Every remaining Phase E step plan must be **reviewable, implementation-independent, and lockable before any work begins** — without inventing a new format.
+
+**Scope:** Documentation and workflow lock only. **No code, no benchmark runs, no harness gates** until a step plan is locked **and** explicit implementation approval is given per AGENTS.md.
+
+###### Mandatory section ordering (locked — every E.0.0 Step N plan)
+
+Each step subsection under § E.0.0 **must** contain these sections **in this exact order** (use `######` headings):
+
+| # | Section | Purpose |
+|---|---------|---------|
+| 1 | **Step title and status** | Name, version, lock state, completion state |
+| 2 | **Objective** | One paragraph — what the step accomplishes |
+| 3 | **Core invariant** | Single quoted question — why this step exists |
+| 4 | **What this step proves** | Table or bullets — positive proof obligations |
+| 5 | **What this step does not prove** | Table or bullets — explicit deferrals to later steps |
+| 6 | **Scope** | In / out of scope; planning vs implementation boundary |
+| 7 | **Files touched** | Exact paths; **None** for planning-only locks |
+| 8 | **Detailed work items** | Numbered or table — implementation tasks when approved |
+| 9 | **Dangers / failure modes / things that must not change** | Architectural risks, authority-preservation risks, protocol freeze violations |
+| 10 | **Forbidden changes** | Implementation shortcuts that are not allowed |
+| 11 | **Exit criteria** | Objective, checkable conditions for step complete |
+| 12 | **Deliverables / evidence produced** | Artifacts, manifests, gate results, doc paths |
+| 13 | **Dependencies on previous steps** | Required seals, documents, and prior step outcomes |
+| 14 | **Pause** | **STOP** — await explicit implementation approval (AGENTS.md gate) |
+
+**Consistency requirements (locked):**
+
+- Identical section ordering for Steps 2–5 — no reordering, no omitted sections  
+- Planning **clearly separated** from implementation (`Planning artifact only` when applicable)  
+- Every step identifies **exactly which documents** are modified  
+- Every step lists **architectural risks** and **authority-preservation risks** in §9  
+- Every step lists **forbidden shortcuts** in §10  
+- Every step ends with **pause for explicit approval** before implementation  
+
+**Terminology lock (Phase E — backend-neutral):**
+
+| Use | Do not use (Phase E planning/docs) |
+|-----|-------------------------------------|
+| **authoritative inference tier** | “Ollama tier,” “Ollama-tier runs” |
+| **authoritative LLM backend** | Coupling evaluation protocol to a specific provider |
+| **pinned authoritative backend** | Implying Thoth requires one vendor |
+
+**Ollama** (or other provider names) appear **only** for historical implementation detail, legacy CI docs, or recorded env sidecar fields — not as a protocol requirement. See [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) § Authoritative evaluation backend.
+
+**Step plan index (format lock applies):**
+
+| Step | Plan status |
+|------|-------------|
+| **E1** | ✅ Complete (`E_ANALYSIS_PLAN.md` E-AP v1.1) — predates this format lock |
+| **E2** | 📋 Draft below — await lock approval |
+| **E3** | 📋 Pending — must conform to this format before lock |
+| **E4** | 📋 Pending — must conform to this format before lock |
+| **E5** | 📋 Pending — must conform to this format before lock |
 
 ---
 
@@ -2455,7 +2515,7 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 - Documentation only — no code, no benchmark execution  
 - **Two-part structure required** — Part I (protocol) before Part II (analysis) in the artifact  
 - **B1 in/out decision must be explicit** in Part I before Step 2 — do not defer silently  
-- Plan must be committed **before** any Step 2 **authoritative evaluation-backend** runs (`--full` / live tier, L2 env-pinned) used for external claims — **Ollama used to date**; stack is backend-agnostic (llama.cpp, OpenAI, etc. when declared and pinned)  
+- Plan must be committed **before** any Step 2 **pinned authoritative backend** runs at the **authoritative inference tier** (`--full` / live tier, L2 env-pinned) used for external claims  
 - Estimated effort: **3–5 h** (writing + review — v2 adds claim taxonomy, tier definitions, mitigations)  
 - On scope ambiguity: stop and amend plan before Step 2 — do not run first and document later  
 
@@ -2492,6 +2552,175 @@ Each of the four validity types gets **threat** + **mitigation** subsections (no
 | `docs/E_PHASE_PROTOCOL.md` | Step 1 artifact pointer (optional cross-ref) |
 | `external/basic_agent/*` | **None** |
 | `tests/unit_tests.cpp` | **None** |
+
+---
+
+##### E.0.0 Step 2 — authoritative STRICT runs (**v1 draft — pending lock**)
+
+**Status:** 📋 **Draft for lock** (2026-07-09) — planning format § E.0.0 applied; await review and lock approval before implementation.
+
+###### Objective
+
+Execute the **frozen** evaluation protocol in [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) (E-AP v1.1) on the **v1.2 STRICT trio** (E2-01..03) at the **authoritative inference tier** with **L2 environment pinning**, producing sealed run artifacts that partially satisfy **E-Q2** (reproducibility) and **E-Q3** (methodological defensibility). Step 2 **collects evidence** — it does not audit paper claims or close Phase E.
+
+###### Core invariant
+
+> **Does executing the frozen protocol on the declared corpus produce pinned, authoritative STRICT evidence without redefining success?**
+
+###### What this step proves
+
+| This step proves | Mechanism |
+|------------------|-----------|
+| Authoritative STRICT runs executed per frozen E-AP v1.1 Step 2 handoff | `run_episodic_learning_benchmark` · `wiring_stage=B` · trio only |
+| L2 environment pinning on every authoritative run | `BenchmarkContext::create()` · `run_id` · `env_hash` · `index_hash` · sidecar |
+| **Pinned authoritative backend** recorded in env manifest | Model/provider fields in sidecar — backend-agnostic |
+| All STRICT outcomes reported (including FAILURE) | Per E2 reporting policy + E-AP Part II |
+| L3 reproduction on declared corpus (trio) | E2-28 scoped equivalence across two consecutive identical STRICT builds |
+| `evidence_scope: n=3_strict_trio` on collected lift evidence | Corpus tier label on run record |
+| Phase D authority boundaries **unchanged** by benchmark execution | No INTEGRATION → official scoring leakage |
+
+###### What this step does not prove
+
+| Deferred | Step |
+|----------|------|
+| L4 publication package (independent lab reproduction doc) | **E3** |
+| Claims audit / paper sentence mapping | **E4** |
+| Phase E complete / E-Q5 seal | **E5** |
+| Generalization beyond trio | Forbidden — B1 deferred in E-AP |
+| Inferential statistics (CIs, bootstrap, hypothesis tests) | Out of scope v0.1 |
+| Metric validation / optimality of `LIFT_MARGIN`, `0.25` | Open — not Phase E claim |
+| Architecture correctness or machinery trust | Phase D — reference only |
+| INTEGRATION diagnostic value | Non-scoring — not Step 2 evidence |
+
+###### Scope
+
+| In scope | Out of scope |
+|----------|--------------|
+| Two (minimum) consecutive authoritative STRICT harness runs on trio | B1 corpus expansion |
+| Extract + freeze JSONL summary rows + env sidecars to immutable artifact paths | Full unit-test suite / G2 `ctest` (optional hygiene) |
+| E2-28 scoped equivalence check on Phase E artifacts | Claims audit writing |
+| Run manifest / Phase E strict run record (`docs/benchmark_results/phase_e_strict_v1.md` or equivalent) | Protocol constant changes |
+| **Minimal harness fix** only if pre-flight proves mock-tier hardcoding blocks authoritative inference tier | INTEGRATION runs as official evidence |
+| `cursor_list.md` § E.0.0 Step 2 status update | `PHASE_E_COMPLETE.md` |
+
+**Planning vs implementation:** This section is a **plan draft**. No runs until plan is **locked** and **explicit implementation approval** is given.
+
+###### Files touched
+
+| File | Change (on implementation) |
+|------|----------------------------|
+| `docs/benchmark_results/phase_e_strict_v1.md` | **New** — authoritative run record (rollup, fingerprint, env pins, backend declaration) |
+| `docs/baselines/artifacts/phase_e/` | **New** — frozen JSONL excerpts + env sidecar copies (immutable) |
+| `docs/baselines/phase_e_run_manifest.json` | **New** — run_id, commit SHA, corpus, tier, backend, artifact paths |
+| `docs/cursor_list.md` | § E.0.0 Step 2 status + evidence artifact |
+| `docs/phases/E_ANALYSIS_PLAN.md` | **None** — frozen; amend only via protocol amendment process |
+| `external/basic_agent/src/run_episodic_learning_benchmark.cpp` | **Only if pre-flight finds authoritative inference tier blocked** — minimal env/tier wiring; no scoring semantic changes |
+| `external/basic_agent/*` (other) | **None** by default |
+| `tests/unit_tests.cpp` | **Optional** — Phase E E2-28 attestation wrapper only if not covered by harness two-run; default: use existing `testE2B5OfficialFingerprintDeterminism()` pattern |
+| `logs/episodic_learning_benchmark.jsonl` | Runtime append — extract to `docs/baselines/artifacts/phase_e/` for seal |
+| `logs/benchmark_env.latest.json` | Runtime — copy to artifact dir per run |
+
+###### Detailed work items
+
+| # | Work item | Detail |
+|---|-----------|--------|
+| **1** | **Pre-flight — authoritative inference tier** | Confirm harness + config path reaches **authoritative inference tier** (not mock/TfIdf CI stub). Record **pinned authoritative backend** in pre-flight note. If blocked: stop and amend plan (harness minimal fix) before runs. |
+| **2** | **Pre-flight — git + workspace** | Clean or documented tree; git SHA ≠ `unknown`; workspace paths per `benchmark_environment.md` checklist |
+| **3** | **Run A — STRICT trio** | `THOTH_E2_WIRING_STAGE=B` · `./build/debug/external/basic_agent/run_episodic_learning_benchmark` · L2 pinning active · trio cases only |
+| **4** | **Run B — STRICT trio (reproduction)** | Identical config/build to Run A · second consecutive authoritative run |
+| **5** | **E2-28 equivalence** | `episodicLearningScopedEquivalenceEqual` on scoped snapshots from Run A vs Run B — bucket #0 · or existing `testE2B5OfficialFingerprintDeterminism()` contract on Phase E artifacts |
+| **6** | **Artifact freeze** | Extract summary rows + sidecars to `docs/baselines/artifacts/phase_e/` · write manifest |
+| **7** | **Run record** | `phase_e_strict_v1.md` — rollup, per-case resolution, fingerprint, env hashes, **backend declaration**, `evidence_scope: n=3_strict_trio` |
+| **8** | **Regression spot-check** | `THOTH_E2_D5=1` or `THOTH_E2_D5_DETERMINISM=1` **attestation-only** optional — not full D5 re-run unless E2-28 failure implicates authority |
+
+###### Dangers / failure modes / things that must not change
+
+| Risk | Mitigation |
+|------|------------|
+| **Authority leakage** — INTEGRATION or subscriber path influences `official_scoring` | Runs use `wiring_stage=B` only; verify envelope fields post-run |
+| **Protocol drift** — constants/corpus changed mid-run | E-AP v1.1 frozen; E2 v1.2 locked; stop if mismatch |
+| **Mock tier masquerading as authoritative** | Pre-flight must confirm **authoritative inference tier**; mock-only runs **invalid** for external episodic claims per E-AP |
+| **Silent generalization** — wording or artifacts imply beyond trio | Mandatory `n=3_strict_trio` label on all Step 2 deliverables |
+| **E2-28 failure** | Stop per falsification clause — do not publish Phase B numbers as Phase E current |
+| **Harness semantic change** | Any harness edit: scoring loop body, `evaluation_resolution` meaning, STRICT kernel — **forbidden** |
+| **Backend coupling in protocol docs** | Record backend in manifest only — do not amend E-AP to require a vendor |
+| **Things that must not change** | `LIFT_MARGIN`, case table, pass/fail rules, Phase D authority boundaries, `evaluation_resolution` / `e2_outcome` export contract |
+
+###### Forbidden changes
+
+- Redefine E2 pass/fail or case expectations without protocol amendment  
+- Use INTEGRATION results as Step 2 official evidence  
+- Cite Phase D machinery proofs as empirical lift evidence  
+- Run B1 cases (deferred in E-AP)  
+- Quiet-soften STRICT FAILURE outcomes  
+- Full-suite regression as Step 2 gate requirement  
+- Claim E-Q2 complete (L4 is Step 3) or Phase E complete  
+- Couple Phase E protocol text to a specific LLM vendor  
+- Production Executive / subscriber behavior changes unless pre-flight proves wiring defect blocking authoritative tier (then minimal fix only)  
+
+###### Exit criteria
+
+1. Plan locked in § E.0.0 Step 2 — committed before implementation  
+2. Pre-flight documents **pinned authoritative backend** and **authoritative inference tier** confirmation  
+3. Two consecutive authoritative STRICT trio runs complete with L2 sidecars  
+4. E2-28 scoped equivalence **green** on Phase E artifact pair  
+5. Frozen artifacts + manifest + `phase_e_strict_v1.md` committed  
+6. All STRICT outcomes reported (including failures if any)  
+7. `evidence_scope: n=3_strict_trio` on run record  
+8. **Pause for review** before Step 3  
+
+###### Deliverables / evidence produced
+
+| Deliverable | Path / ID |
+|-------------|-----------|
+| Phase E STRICT run record | `docs/benchmark_results/phase_e_strict_v1.md` |
+| Immutable artifact bundle | `docs/baselines/artifacts/phase_e/` |
+| Run manifest | `docs/baselines/phase_e_run_manifest.json` |
+| L2 env sidecars | Copied per run in artifact bundle |
+| E2-28 equivalence result | Recorded in run record (PASS/FAIL + diagnosis bucket) |
+| E-Q2 partial | L2 + L3 on trio — pointer in `cursor_list.md` |
+| E-Q3 partial | Protocol adherence + reporting — pointer in run record |
+
+###### Dependencies on previous steps
+
+| Dependency | Reference |
+|------------|-----------|
+| **E0** | [`E_PHASE_PROTOCOL.md`](E_PHASE_PROTOCOL.md) v0.1 🔒 |
+| **E1** | [`E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) E-AP v1.1 🔒 — Step 2 handoff table |
+| **Phase D** | [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) — authority preserved |
+| **Phase B** | E2-28 contract + fingerprint discipline (historical baseline — not substituted for Phase E runs) |
+| **Benchmark E1** | [`benchmark_environment.md`](benchmark_environment.md) — L2 pinning spec |
+| **E2 protocol** | [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 — STRICT rules frozen |
+
+###### Pause
+
+**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+
+Step 2 plan is **drafted only**. Do **not** execute authoritative runs, modify harness code, or freeze artifacts until this plan is **locked** and the human explicitly approves implementation (AGENTS.md gate).
+
+---
+
+##### E.0.0 Step 3 — L4 reproducibility package (**plan pending**)
+
+**Status:** 📋 **Plan pending** — must conform to § **E.0.0 Planning format lock** before draft.
+
+*Placeholder: L4 manifests, verification doc, baseline compare tooling — delivers E-Q2 complete.*
+
+---
+
+##### E.0.0 Step 4 — claims audit (**plan pending**)
+
+**Status:** 📋 **Plan pending** — must conform to § **E.0.0 Planning format lock** before draft.
+
+*Placeholder: cold-read audit · paper sentence → evidence tier map — delivers E-Q4.*
+
+---
+
+##### E.0.0 Step 5 — phase close-out (**plan pending**)
+
+**Status:** 📋 **Plan pending** — must conform to § **E.0.0 Planning format lock** before draft.
+
+*Placeholder: `PHASE_E_COMPLETE.md` · E-Q1..Q5 seal · max evidence scope — delivers E-Q5.*
 
 ---
 
