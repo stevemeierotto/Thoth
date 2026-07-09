@@ -9721,7 +9721,8 @@ static Thoth::BenchmarkEnvironmentInputs makeEpisodicMockHarnessInputs() {
 static Thoth::BenchmarkEnvironmentInputs makeEpisodicAuthoritativeHarnessInputs() {
     Thoth::BenchmarkEnvironmentInputs inputs;
     inputs.harness = "episodic_learning_benchmark";
-    inputs.tier = Thoth::BenchmarkTier::FULL;
+    // EP-01.5 Phase 2: declared tier must match inferTier() (External + reachable → OLLAMA).
+    inputs.tier = Thoth::BenchmarkTier::OLLAMA;
     Config cfg;
     inputs.model.llm_model = cfg.llm_model;
     inputs.model.embedding_model = cfg.embedding_model;
@@ -9955,6 +9956,42 @@ static bool runE2Ep015Phase1Tests() {
         return false;
     }
     std::cout << "  E2-31 authoritative LLM wiring pass (tokens recorded)\n";
+    return true;
+}
+
+/** E2-31b — EP-01.5 Phase 2: authoritative episodic inputs have no TIER_MISMATCH. */
+static bool testE2Ep015TierDeclarationAligned() {
+    const auto inputs = makeEpisodicAuthoritativeHarnessInputs();
+    const Thoth::BenchmarkTier inferred = Thoth::inferTier(inputs);
+    if (inferred != Thoth::BenchmarkTier::OLLAMA) {
+        std::cerr << "testE2Ep015TierDeclarationAligned: expected inferred OLLAMA\n";
+        return false;
+    }
+    if (inputs.tier != Thoth::BenchmarkTier::OLLAMA) {
+        std::cerr << "testE2Ep015TierDeclarationAligned: expected declared OLLAMA\n";
+        return false;
+    }
+    if (Thoth::hasTierMismatch(inputs)) {
+        std::cerr << "testE2Ep015TierDeclarationAligned: unexpected TIER_MISMATCH\n";
+        return false;
+    }
+    // Mock path must remain mismatch-free (no collateral from Phase 2).
+    if (Thoth::hasTierMismatch(makeEpisodicMockHarnessInputs())) {
+        std::cerr << "testE2Ep015TierDeclarationAligned: mock path now mismatches\n";
+        return false;
+    }
+    return true;
+}
+
+/** EP-01.5 Phase 2 gate — tier declaration only. */
+static bool runE2Ep015Phase2Tests() {
+    std::cout << "E2-EP-01.5 Phase 2 — tier declaration alignment\n";
+    std::cout << "  gate: THOTH_E2_EP015_PHASE2\n";
+    if (!testE2Ep015TierDeclarationAligned()) {
+        std::cerr << "E2-EP-01.5 Phase 2: E2-31b failed\n";
+        return false;
+    }
+    std::cout << "  E2-31b tier declaration aligned (no TIER_MISMATCH)\n";
     return true;
 }
 
@@ -10216,6 +10253,16 @@ int main() {
                 return 1;
             }
             std::cout << "E2-EP-01.5 Phase 1 gate passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* ep015p2 = std::getenv("THOTH_E2_EP015_PHASE2")) {
+        if (ep015p2[0] != '0' && std::string(ep015p2) != "false") {
+            if (!runE2Ep015Phase2Tests()) {
+                return 1;
+            }
+            std::cout << "E2-EP-01.5 Phase 2 gate passed.\n";
             return 0;
         }
     }
