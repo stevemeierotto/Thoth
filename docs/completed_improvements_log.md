@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-08 (E2 Phase D complete — evolution trust proof sealed)
+Last updated: 2026-07-09 (Phase E Step 2 complete — authoritative STRICT trio sealed)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### E2 track — status at a glance
@@ -11,7 +11,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | **B** | Can measurement be trusted? | ✅ Complete 2026-07-04 | [`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md); fingerprint `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
 | **C** | Can trusted measurement become architecture? | ✅ Locked 2026-07-05 | [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) |
 | **D** | Can architecture evolve without losing trust? | ✅ Complete 2026-07-08 | [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md); D5 evolution trust proof |
-| **E** | Can we defend the results scientifically? | 📋 Planned | — |
+| **E** | Can we defend the results scientifically? | 🔶 In progress (2026-07-09) | E1 ✅ · EP-01 ✅ · Step 2 ✅ — see entries below |
 
 ### E2 Phase C — Integration tier ✅ locked (2026-07-05)
 
@@ -45,6 +45,23 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 **Review note:** E2-C5-03 aliases E2-C5-01; proof coverage unchanged via `diffPathEquivalence()`.
 
 **Next:** Phase D4 — [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md). Constitutional rule: Observe, Record, Replay, Present — Never Decide.
+
+### Phase E — EP-01 episodic authoritative inference harness ✅ (2026-07-09)
+
+**Authority:** `cursor_list.md` § E.0.0 EP-01  
+**Gate:** `THOTH_E2_EP01=1` (E2-29 → E2-28 spot-check → E2-30)
+
+- Dual-mode `run_episodic_learning_benchmark`: `--mock` (default) · `--authoritative` / `--full`
+- Isolated `inferTier()` branch for `episodic_learning_benchmark`
+- Infrastructure only — no Phase E benchmark evidence in EP-01
+
+### Phase E Step 2 — authoritative STRICT trio evidence ✅ (2026-07-09)
+
+**Authority:** `cursor_list.md` § E.0.0 Step 2 · [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md)  
+**Evidence scope:** `n=3_strict_trio`  
+**E2-28:** PASS (bucket #0) — Run A `run-1783628170667` vs Run B `run-1783628248447`  
+**Rollup:** `SCORED_FAILURE` / `mean_episodic_lift = 0` at authoritative tier (not comparable to Phase B mock SUCCESS)  
+**Artifacts:** `docs/baselines/artifacts/phase_e/` · `docs/baselines/phase_e_run_manifest.json`
 
 ### E2 Phase D3 — Observability without influence ✅ complete (2026-07-07)
 

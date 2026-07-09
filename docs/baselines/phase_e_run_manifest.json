@@ -1,0 +1,79 @@
+{
+  "manifest_version": "phase_e_step2_v1",
+  "evidence_scope": "n=3_strict_trio",
+  "protocol_revision": {
+    "e_analysis_plan": "E-AP v1.1",
+    "e2_protocol": "E2_PROTOCOL.md v1.2"
+  },
+  "analysis_plan_commit": "1fd067300a3d229e1431fc1b973e0f3dd738fdd2",
+  "step2_plan_commit": "8bf09b31212ed4fb845809bcf0b702a8c33cefd7",
+  "step2_implementation_commit": "pending",
+  "git_sha": {
+    "thoth": "8bf09b31212ed4fb845809bcf0b702a8c33cefd7",
+    "basic_agent": "54f2b3f"
+  },
+  "inference_tier": "authoritative",
+  "inference_backend_identifier": "ollama",
+  "harness_command": "THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning_benchmark --authoritative",
+  "benchmark_corpus_identifier": "v1.2_strict_trio",
+  "e2_28_result": {
+    "status": "PASS",
+    "diagnosis_bucket": 0,
+    "verification_doc": "docs/baselines/phase_e_baseline_verification.md"
+  },
+  "runs": [
+    {
+      "label": "A",
+      "run_id": "run-1783628170667",
+      "environment_hash": "af20b692ac59e45f2ba3d65d71433c1b42b2f1bc042652a8085fe7ca8f81cb5f",
+      "index_hash": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
+      "evaluation_fingerprint": "ddc5c865b7edbff73a2702ac1b1d2a00075baa6992f480d23d490fe2d551668e",
+      "corpus_snapshot_id": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
+      "wiring_stage": "B",
+      "scoring_tier": "STRICT",
+      "official_scoring": true,
+      "model_identifier": {
+        "llm_model": "qwen2.5:3b",
+        "embedding_model": "nomic-embed-text:v1.5",
+        "embedding_method": "External",
+        "model_version_or_weights_hash": "qwen2.5:3b",
+        "embedding_model_version": "External:2"
+      },
+      "e2_outcome": "FAILURE",
+      "evaluation_resolution": "SCORED_FAILURE",
+      "mean_episodic_lift": 0.0,
+      "artifact_paths": {
+        "summary": "docs/baselines/artifacts/phase_e/run_01_summary.json",
+        "benchmark_env": "docs/baselines/artifacts/phase_e/run_01_benchmark_env.json"
+      }
+    },
+    {
+      "label": "B",
+      "run_id": "run-1783628248447",
+      "environment_hash": "af20b692ac59e45f2ba3d65d71433c1b42b2f1bc042652a8085fe7ca8f81cb5f",
+      "index_hash": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
+      "evaluation_fingerprint": "ddc5c865b7edbff73a2702ac1b1d2a00075baa6992f480d23d490fe2d551668e",
+      "corpus_snapshot_id": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
+      "wiring_stage": "B",
+      "scoring_tier": "STRICT",
+      "official_scoring": true,
+      "model_identifier": {
+        "llm_model": "qwen2.5:3b",
+        "embedding_model": "nomic-embed-text:v1.5",
+        "embedding_method": "External",
+        "model_version_or_weights_hash": "qwen2.5:3b",
+        "embedding_model_version": "External:2"
+      },
+      "e2_outcome": "FAILURE",
+      "evaluation_resolution": "SCORED_FAILURE",
+      "mean_episodic_lift": 0.0,
+      "artifact_paths": {
+        "summary": "docs/baselines/artifacts/phase_e/run_02_summary.json",
+        "benchmark_env": "docs/baselines/artifacts/phase_e/run_02_benchmark_env.json"
+      }
+    }
+  ],
+  "artifact_bundle": "docs/baselines/artifacts/phase_e/",
+  "run_record": "docs/benchmark_results/phase_e_strict_v1.md",
+  "combined_jsonl": "docs/baselines/artifacts/phase_e/episodic_learning_benchmark_snapshot.jsonl"
+}

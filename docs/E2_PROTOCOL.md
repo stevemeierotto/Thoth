@@ -481,6 +481,8 @@ No changes to scoring function during an in-flight STRICT run.
 |------|-------|
 | Binary | `run_episodic_learning_benchmark` |
 | JSONL | `logs/episodic_learning_benchmark.jsonl` |
+| Mock inference (default) | `--mock` · TfIdf · `THOTH_MOCK_*` (CI / Phase B regression) |
+| Authoritative inference | `--full` / `--authoritative` · live backend · env `THOTH_EPISODIC_LEARNING_INFERENCE=authoritative` |
 | Official mode | `--tier strict` or default STRICT |
 | Diagnostic mode | `--tier integration` (non-scoring) |
 | E1 | One `run_id`; attribution on all STRICT arms |

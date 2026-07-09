@@ -118,6 +118,8 @@ Harnesses emit a **terminal summary** via `BenchmarkRun::emit()` when the run fi
 | `run_grag_benchmark` | `GRAG_BENCHMARK_COMPLETE` | `GRAG_BENCHMARK_ABORTED` |
 | `run_episodic_learning_benchmark` | `EPISODIC_LEARNING_COMPLETE` | `EPISODIC_LEARNING_ABORTED` |
 
+**Episodic inference tiers (EP-01):** default `--mock` (TfIdf, `THOTH_MOCK_*`, `inferTier` → MOCK). Authoritative `--full` / `--authoritative` uses External embeddings + pinned LLM metadata (`inferTier` → OLLAMA/FULL when Ollama reachable). EP-01 smoke uses wiring checkpoints only — no `official_scoring: true` rows.
+
 Each harness wraps its case loop in an RAII recorder: `complete()` sets a flag and emits the **COMPLETE** event; if scope exits without `complete()` (early `return`, exception propagated to `main()`), the destructor emits **ABORTED** with whatever counts are available.
 
 **Worker-thread crash — known gap (all harnesses):** **ABORTED** events are only guaranteed on **main-thread exit paths** (early return, exception that unwinds through the recorder on the harness thread). A **worker-thread** failure that calls `std::terminate` (uncaught exception on `loop_thread_`, segfault, etc.) kills the process before the main thread's destructor stack runs — the RAII recorder cannot emit **ABORTED** in that case. This is a structural boundary, not a recorder bug.

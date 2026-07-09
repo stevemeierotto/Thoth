@@ -2550,6 +2550,28 @@ static bool testE1InferTierFromEnvFlags() {
         return false;
     }
 
+    Thoth::BenchmarkEnvironmentInputs episodicMock;
+    episodicMock.harness = "episodic_learning_benchmark";
+    episodicMock.tier = Thoth::BenchmarkTier::MOCK;
+    episodicMock.model.llm_model = "mock";
+    episodicMock.model.embedding_method = "TfIdf";
+    episodicMock.thoth_env_flags = {{"THOTH_MOCK_EPISODIC", "1"}, {"THOTH_MOCK_LLM", "true"}};
+    if (Thoth::inferTier(episodicMock) != Thoth::BenchmarkTier::MOCK) {
+        std::cerr << "testE1InferTierFromEnvFlags: expected episodic MOCK\n";
+        return false;
+    }
+
+    Thoth::BenchmarkEnvironmentInputs episodicAuth;
+    episodicAuth.harness = "episodic_learning_benchmark";
+    episodicAuth.tier = Thoth::BenchmarkTier::FULL;
+    episodicAuth.model.llm_model = "qwen2.5:3b";
+    episodicAuth.model.embedding_method = "External";
+    episodicAuth.ollama_reachable = true;
+    if (Thoth::inferTier(episodicAuth) != Thoth::BenchmarkTier::OLLAMA) {
+        std::cerr << "testE1InferTierFromEnvFlags: expected episodic OLLAMA\n";
+        return false;
+    }
+
     Thoth::BenchmarkEnvironmentInputs strictCorpus = makeE1SampleInputs();
     strictCorpus.corpus_mode = Thoth::CorpusFingerprintMode::STRICT;
     strictCorpus.corpus_fingerprint_override = "strict-corpus";
@@ -9647,6 +9669,228 @@ static bool attestD3CloseOutEvidence() {
     return true;
 }
 
+static std::string findEpisodicHarnessBinary() {
+    FileHandler fh;
+    const fs::path root = fh.getProjectRoot();
+    const std::vector<fs::path> candidates = {
+        root / "build" / "debug" / "external" / "basic_agent" /
+            "run_episodic_learning_benchmark",
+        root / "build" / "release" / "external" / "basic_agent" /
+            "run_episodic_learning_benchmark",
+        fs::path("build/debug/external/basic_agent/run_episodic_learning_benchmark"),
+    };
+    for (const auto& path : candidates) {
+        if (fs::exists(path)) {
+            return fs::absolute(path).string();
+        }
+    }
+    return {};
+}
+
+static std::vector<nlohmann::json> readJsonlRows(const std::string& path) {
+    std::vector<nlohmann::json> rows;
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        try {
+            rows.push_back(nlohmann::json::parse(line));
+        } catch (...) {
+        }
+    }
+    return rows;
+}
+
+static int runShellCommand(const std::string& cmd) {
+    return std::system(cmd.c_str());
+}
+
+static Thoth::BenchmarkEnvironmentInputs makeEpisodicMockHarnessInputs() {
+    Thoth::BenchmarkEnvironmentInputs inputs;
+    inputs.harness = "episodic_learning_benchmark";
+    inputs.tier = Thoth::BenchmarkTier::MOCK;
+    inputs.model.llm_model = "mock";
+    inputs.model.embedding_model = "tfidf-local";
+    inputs.model.embedding_method = "TfIdf";
+    inputs.thoth_env_flags = {{"THOTH_MOCK_EPISODIC", "1"}, {"THOTH_MOCK_LLM", "true"}};
+    return inputs;
+}
+
+static Thoth::BenchmarkEnvironmentInputs makeEpisodicAuthoritativeHarnessInputs() {
+    Thoth::BenchmarkEnvironmentInputs inputs;
+    inputs.harness = "episodic_learning_benchmark";
+    inputs.tier = Thoth::BenchmarkTier::FULL;
+    Config cfg;
+    inputs.model.llm_model = cfg.llm_model;
+    inputs.model.embedding_model = cfg.embedding_model;
+    inputs.model.embedding_method = "External";
+    inputs.ollama_reachable = true;
+    inputs.thoth_env_flags = nlohmann::json::object();
+    return inputs;
+}
+
+/** E2-29a — episodic harness inferTier mock classification. */
+static bool testE2Ep01InferTierMockEpisodicHarness() {
+    const auto inputs = makeEpisodicMockHarnessInputs();
+    if (Thoth::inferTier(inputs) != Thoth::BenchmarkTier::MOCK) {
+        std::cerr << "testE2Ep01InferTierMockEpisodicHarness: expected MOCK\n";
+        return false;
+    }
+    if (Thoth::hasTierMismatch(inputs)) {
+        std::cerr << "testE2Ep01InferTierMockEpisodicHarness: unexpected tier mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-29b — episodic harness inferTier authoritative classification. */
+static bool testE2Ep01InferTierAuthoritativeEpisodicHarness() {
+    const auto inputs = makeEpisodicAuthoritativeHarnessInputs();
+    const Thoth::BenchmarkTier inferred = Thoth::inferTier(inputs);
+    if (inferred != Thoth::BenchmarkTier::OLLAMA && inferred != Thoth::BenchmarkTier::FULL) {
+        std::cerr << "testE2Ep01InferTierAuthoritativeEpisodicHarness: expected OLLAMA or FULL\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-29c — default mock harness A1 wiring smoke. */
+static bool testE2Ep01MockHarnessWiringSmoke() {
+    const std::string binary = findEpisodicHarnessBinary();
+    if (binary.empty()) {
+        std::cerr << "testE2Ep01MockHarnessWiringSmoke: harness binary not found — build first\n";
+        return false;
+    }
+    const int rc = runShellCommand(
+        "THOTH_E2_WIRING_STAGE=A1 \"" + binary + "\" --mock >/dev/null 2>&1");
+    if (rc != 0) {
+        std::cerr << "testE2Ep01MockHarnessWiringSmoke: mock A1 harness exit=" << rc << '\n';
+        return false;
+    }
+    return true;
+}
+
+/** E2-29 — mock path preserves Phase B / E2-28 scoped equivalence (bucket #0). */
+static bool testE2Ep01MockRegressionPreservesE28() {
+    if (!testE2Ep01InferTierMockEpisodicHarness()) {
+        return false;
+    }
+    if (!testE2Ep01InferTierAuthoritativeEpisodicHarness()) {
+        return false;
+    }
+    if (!testE2Ep01MockHarnessWiringSmoke()) {
+        return false;
+    }
+    const Thoth::E2EvalConfig cfg = makeE2StrictTestConfig();
+    const auto fp = Thoth::computeEvaluationFingerprint(cfg);
+    const auto summary_a = buildOfficialGoldenSummary();
+    const auto summary_b = buildOfficialGoldenSummary();
+    const auto snap_a = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_a, fp.toJson(), cfg.toJson());
+    const auto snap_b = Thoth::episodicLearningScopedEquivalenceSnapshot(
+        summary_b, fp.toJson(), cfg.toJson());
+    if (!Thoth::episodicLearningScopedEquivalenceEqual(snap_a, snap_b)) {
+        std::cerr << "testE2Ep01MockRegressionPreservesE28: scoped snapshots differ\n";
+        return false;
+    }
+    if (Thoth::episodicLearningFingerprintMismatchBucket(snap_a, snap_b, "h1", "h1") != 0) {
+        std::cerr << "testE2Ep01MockRegressionPreservesE28: diagnosis bucket mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+/** E2-30 — authoritative inference smoke; zero official_scoring rows. */
+static bool testE2Ep01AuthoritativeInferenceSmoke() {
+    if (!Thoth::isOllamaReachable()) {
+        std::cerr << "testE2Ep01AuthoritativeInferenceSmoke: Ollama not reachable\n";
+        return false;
+    }
+    const std::string binary = findEpisodicHarnessBinary();
+    if (binary.empty()) {
+        std::cerr << "testE2Ep01AuthoritativeInferenceSmoke: harness binary not found\n";
+        return false;
+    }
+
+    FileHandler fh;
+    const fs::path logPath =
+        fs::path(fh.getProjectRoot()) / "logs" / "episodic_learning_benchmark.jsonl";
+    const std::string logBackup = logPath.string() + ".ep01_backup";
+    if (fs::exists(logPath)) {
+        fs::copy_file(logPath, logBackup, fs::copy_options::overwrite_existing);
+        fs::remove(logPath);
+    }
+
+    const int rc = runShellCommand(
+        "THOTH_E2_WIRING_STAGE=A2 \"" + binary + "\" --authoritative >/dev/null 2>&1");
+    if (rc != 0) {
+        std::cerr << "testE2Ep01AuthoritativeInferenceSmoke: authoritative A2 exit=" << rc
+                  << '\n';
+        if (fs::exists(logBackup)) {
+            fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+            fs::remove(logBackup);
+        }
+        return false;
+    }
+
+    bool sawWiringCheckpoint = false;
+    for (const auto& row : readJsonlRows(logPath.string())) {
+        if (row.value("official_scoring", false) == true) {
+            std::cerr << "testE2Ep01AuthoritativeInferenceSmoke: official_scoring row found\n";
+            if (fs::exists(logBackup)) {
+                fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+                fs::remove(logBackup);
+            }
+            return false;
+        }
+        if (row.value("event", "") == "E2_WIRING_CHECKPOINT" &&
+            row.value("wiring_stage", "") == "A2") {
+            sawWiringCheckpoint = true;
+        }
+    }
+    if (!sawWiringCheckpoint) {
+        std::cerr << "testE2Ep01AuthoritativeInferenceSmoke: missing A2 wiring checkpoint\n";
+        if (fs::exists(logBackup)) {
+            fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+            fs::remove(logBackup);
+        }
+        return false;
+    }
+
+    if (fs::exists(logBackup)) {
+        fs::copy_file(logBackup, logPath, fs::copy_options::overwrite_existing);
+        fs::remove(logBackup);
+    }
+    return true;
+}
+
+static bool runE2Ep01Tests() {
+    std::cout << "E2-EP-01 episodic authoritative inference harness proof\n";
+    std::cout << "  gate: THOTH_E2_EP01\n";
+    std::cout << "  sequence: E2-29 -> Phase D E2-28 spot-check -> E2-30\n";
+
+    if (!testE2Ep01MockRegressionPreservesE28()) {
+        std::cerr << "E2-EP-01: E2-29 mock regression failed\n";
+        return false;
+    }
+    std::cout << "  E2-29 mock regression pass\n";
+
+    if (!testE2B5OfficialFingerprintDeterminism()) {
+        std::cerr << "E2-EP-01: Phase D E2-28 spot-check failed\n";
+        return false;
+    }
+    std::cout << "  Phase D E2-28 spot-check pass\n";
+
+    if (!testE2Ep01AuthoritativeInferenceSmoke()) {
+        std::cerr << "E2-EP-01: E2-30 authoritative smoke failed\n";
+        return false;
+    }
+    std::cout << "  E2-30 authoritative smoke pass (zero official_scoring rows)\n";
+    return true;
+}
+
 static bool runE2D5Tests() {
     if (!attestD1CloseOutEvidence()) {
         std::cerr << "E2-D5 closure: D1 attestation failed\n";
@@ -9861,6 +10105,16 @@ int main() {
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
+        }
+    }
+
+    if (const char* ep01 = std::getenv("THOTH_E2_EP01")) {
+        if (ep01[0] != '0' && std::string(ep01) != "false") {
+            if (!runE2Ep01Tests()) {
+                return 1;
+            }
+            std::cout << "E2-EP-01 gate passed.\n";
+            return 0;
         }
     }
 

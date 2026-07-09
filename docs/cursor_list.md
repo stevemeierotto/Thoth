@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **EP-01 complete** · **Step 2 plan locked**)  
+**Last updated:** 2026-07-09 (Phase E — **Step 2 complete** · Step 3 pending)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** 🔒 **Step 2 plan locked** (authoritative STRICT runs) — paused before implementation (AGENTS.md gate).
+**Active E2 work:** ✅ **Step 2 complete** (2026-07-09) — authoritative STRICT trio evidence sealed; paused before Step 3.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2186,7 +2186,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **0** | Protocol lock | `E_PHASE_PROTOCOL.md` 🔒 | — |
 | **1** | Analysis plan lock | `phases/E_ANALYSIS_PLAN.md` | E-Q1 |
 | **EP-01** | Episodic authoritative inference harness | Live-backend path in `run_episodic_learning_benchmark` | — (engineering prereq) |
-| **2** | Authoritative STRICT runs | Pinned-env run artifacts | E-Q2 (partial), E-Q3 |
+| **2** | Authoritative STRICT runs | [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) ✅ | E-Q2 (partial), E-Q3 |
 | **3** | L4 reproducibility package | Manifests + verification doc | E-Q2 |
 | **4** | Claims audit | Claim → evidence tier map | E-Q4 |
 | **5** | Phase close-out | `PHASE_E_COMPLETE.md` | E-Q5 |
@@ -2253,8 +2253,8 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 |------|------|----------|
 | **E0** | Lock `E_PHASE_PROTOCOL.md` + § E.0.0 | ✅ 2026-07-09 |
 | **E1** | Protocol + analysis plan lock | `phases/E_ANALYSIS_PLAN.md` — E-AP v1.1 ✅ |
-| **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** 🔒 |
-| **E2** | Authoritative STRICT runs (trio; B1 deferred) | E1-pinned artifacts — § **E.0.0 Step 2** 🔒 |
+| **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** ✅ |
+| **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ |
 | **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
@@ -2272,7 +2272,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **Step 2 plan locked** (2026-07-09) — paused before implementation.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **Step 2 complete** (2026-07-09) — paused before Step 3.
 
 ---
 
@@ -2330,7 +2330,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 |------|-------------|
 | **E1** | ✅ Complete (`E_ANALYSIS_PLAN.md` E-AP v1.1) — predates this format lock |
 | **EP-01** | ✅ Complete (2026-07-09) — `THOTH_E2_EP01=1` |
-| **E2** | 🔒 **v1 locked** (2026-07-09) — authoritative STRICT trio evidence runs |
+| **E2** | ✅ Complete (2026-07-09) — `phase_e_strict_v1.md` · E2-28 PASS · `evidence_scope: n=3_strict_trio` |
 | **E3** | 📋 Pending — must conform to this format before lock |
 | **E4** | 📋 Pending — must conform to this format before lock |
 | **E5** | 📋 Pending — must conform to this format before lock |
@@ -2762,9 +2762,11 @@ EP-01 harness infrastructure is **green**. Step 2 plan is **locked** — do **no
 
 ---
 
-##### E.0.0 Step 2 — authoritative STRICT runs (**v1 locked**)
+##### E.0.0 Step 2 — authoritative STRICT runs (**v1 locked — complete**)
 
-**Status:** 🔒 **v1 locked** (2026-07-09) — EP-01 prerequisite **satisfied** (`THOTH_E2_EP01=1` green 2026-07-09). Paused before implementation (AGENTS.md Planning/Implementation Gate).
+**Status:** ✅ **Step 2 complete** (2026-07-09) — two authoritative `--authoritative` + `wiring_stage=B` runs; E2-28 bucket #0; rollup `FAILURE` at authoritative tier (not comparable to Phase B mock). Paused before Step 3.
+
+**Evidence:** [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) · [`phase_e_run_manifest.json`](baselines/phase_e_run_manifest.json) · [`phase_e_baseline_verification.md`](baselines/phase_e_baseline_verification.md)
 
 ###### Objective
 
@@ -2780,7 +2782,7 @@ Step 2 runs the declared corpus (v1.2 trio) under E-AP v1.1 and E2 v1.2 **verbat
 
 | This step proves | Mechanism |
 |------------------|-----------|
-| Authoritative STRICT runs executed per frozen E-AP v1.1 Step 2 handoff | `run_episodic_learning_benchmark` · `wiring_stage=B` · trio only |
+| Authoritative STRICT runs executed per frozen E-AP v1.1 Step 2 handoff | `run_episodic_learning_benchmark --authoritative` · `THOTH_E2_WIRING_STAGE=B` · trio only |
 | L2 environment pinning on every authoritative run | `BenchmarkContext::create()` · `run_id` · `env_hash` · `index_hash` · sidecar |
 | **Pinned authoritative backend** recorded in env manifest | Model/provider fields in sidecar — backend-agnostic |
 | All STRICT outcomes reported (including FAILURE) | Per E2 reporting policy + E-AP Part II |
@@ -2941,9 +2943,9 @@ THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning
 
 ###### Pause
 
-**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+**STATUS: STEP 2 COMPLETE — PAUSED BEFORE STEP 3**
 
-Step 2 plan is **locked**. Do **not** execute authoritative STRICT evidence runs until explicitly approved for implementation (AGENTS.md gate).
+Authoritative STRICT evidence is sealed. Do **not** begin Step 3 (L4 package) until Step 3 plan is locked and approved (AGENTS.md gate).
 
 ---
 
@@ -3293,7 +3295,7 @@ Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) 
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 3 — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 4 — phase closure (`THOTH_E2_D5=1`) + `PHASE_D_COMPLETE.md` ✅ 2026-07-08
-Next 1  **Phase E Step 2** — authoritative STRICT runs (§ **E.0.0 Step 2** 🔒 — awaiting implementation approval)
+Next 1  **Phase E Step 3** — L4 reproducibility package (§ **E.0.0 Step 3** pending — plan draft required)
 Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
 Next 4  M4 — range restore (M3 ✅)
 Next 5  B1 (if V3 Zenodo) — hardened research corpus
