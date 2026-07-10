@@ -1,10 +1,10 @@
 # E — Empirical Validation Protocol
 
 **Protocol version:** E v0.1  
-**Status:** 🔒 **LOCKED** (2026-07-09) — E1 · EP-01.5 · **Steps 2–4 complete**; await Step 5 plan  
+**Status:** 🔒 **LOCKED** (2026-07-09) — E1 · EP-01.5 · **Steps 2–4 complete** · **Step 5 plan locked (v2)**; await explicit Step 5 **implementation** approval  
 **Supersedes:** Informal “Phase E scientific defense” label (deprecated in favor of **empirical validation**)  
 **Depends on:** [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) (Phase D sealed 2026-07-08), [`D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒, [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 🔒, [`benchmark_environment.md`](benchmark_environment.md) (benchmark E1 ✅)  
-**Checkpoint tracking:** `cursor_list.md` § **E.0.0** (E1 ✅ · EP-01 ✅ · Steps 2–4 ✅ · Step 5 pending)
+**Checkpoint tracking:** `cursor_list.md` § **E.0.0** (E1 ✅ · EP-01 ✅ · Steps 2–4 ✅ · **Step 5 plan 🔒 v2** · implementation pending)
 
 > **Scope:** Phase E is the **empirical validation layer**. Phase D proved the evaluation **machinery** preserved trust. Phase E proves **empirical claims made using that machinery** are specification-complete, reproducible, methodologically defensible, evidence-mapped, and publication-ready.
 
@@ -279,7 +279,7 @@ E2 does **not** silently wait on B1 — the wait/fork is **explicit in E1**, not
 | **E2** | Authoritative STRICT runs | Pinned-env artifacts — [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) ✅ | **E-Q2** (partial), **E-Q3** |
 | **E3** | Reproducibility package (L4 **verification**) | Manifests + verifier for **every cited run**; reproduction deferred | **E-Q2** (verification) |
 | **E4** | Claims audit (cold-read; claim-ID’d; immutable audit) | Paper claim ↔ evidence map + `n=3_strict_trio` labels | **E-Q4** |
-| **E5** | Close-out | `PHASE_E_COMPLETE.md` + max evidence scope statement | **E-Q5** |
+| **E5** | Close-out (**certification**; immutable record) | `PHASE_E_COMPLETE.md` + max evidence scope · Known Limitations · Deferred Work | **E-Q5** (scoped publication readiness) |
 
 **Step dependency rule:** E2 requires **EP-01** complete. E2 corpus = E1 declaration. E3 L4 scope = E4 cited runs. E5 cannot claim generalization scope beyond E1/E4 tier labels.
 

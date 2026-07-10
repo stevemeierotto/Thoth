@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **Steps 2–4 ✅** · Step 5 pending)  
+**Last updated:** 2026-07-09 (Phase E — **Steps 2–4 ✅** · **Step 5 plan locked (v2)** · implementation pending)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ Steps 2–3 sealed. ✅ **Step 4 claims audit** (`phase_e_claims_audit.md`; E-Q4). **Step 5** next (await plan lock).
+**Active E2 work:** ✅ Steps 2–4 complete. 🔒 **Step 5 plan locked (v2)** — Phase E certification close-out. Await explicit **implementation** approval.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2259,7 +2259,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ sealed |
 | **E3** | L4 verification package | Manifests, verifier, `phase_e_l4_status.json` — ✅ · reproduction deferred |
 | **E4** | Claims audit | `phase_e_claims_audit.md` / `.json` — ✅ |
-| **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
+| **E5** | Close-out (plan 🔒 v2) | `PHASE_E_COMPLETE.md` certification — await implementation |
 
 **Time estimate (rough):** E0 ✅ — E1 **3–5 h** — **EP-01 6–12 h** — E2 **4–8 h** + authoritative inference runtime — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
 
@@ -2273,9 +2273,9 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E2** | Execute the frozen protocol (collect evidence) — redo after EP-01.5 |
 | **E3** | Assemble the L4 **verification** package (others can verify the published result; reproduction deferred) |
 | **E4** | Audit every external **claim** (not whole docs) against frozen evidence — immutable audit + author actions |
-| **E5** | Issue the publication / readiness seal |
+| **E5** | Certify the completed evidence package and its documented scope (no new analysis) |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Steps 2–4 complete**. Step 5 plan pending.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Steps 2–4 complete**. **Step 5 plan locked (v2)** — await implementation approval.
 
 ---
 
@@ -2336,7 +2336,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | **E2** | ✅ Complete (2026-07-09) — `phase_e_strict_v1.md` · E2-28 PASS · `evidence_scope: n=3_strict_trio` |
 | **E3** | ✅ Complete (2026-07-09) — L4 verification package (`phase_e_l4_status.json`) |
 | **E4** | ✅ Complete (2026-07-09) — `phase_e_claims_audit.md` |
-| **E5** | 📋 Pending — must conform to this format before lock |
+| **E5** | 🔒 Plan locked (v2, 2026-07-09) — await implementation approval |
 
 ---
 
@@ -3599,17 +3599,235 @@ Required section in the audit artifact, including at least:
 
 ###### Pause
 
-**STATUS: STEP 4 COMPLETE — PAUSED BEFORE STEP 5**
+**STATUS: STEP 4 COMPLETE — STEP 5 PLAN LOCKED — AWAIT IMPLEMENTATION APPROVAL**
 
-Claims audit sealed. Do **not** begin Step 5 (phase close-out) until Step 5 plan is locked and approved (AGENTS.md gate).
+Claims audit sealed. Step 5 plan is **locked (v2)**. Do **not** begin Step 5 implementation until explicit AGENTS.md approval ("Implement" / "Proceed" / "Go ahead" / "Approved").
 
 ---
 
-##### E.0.0 Step 5 — phase close-out (**plan pending**)
+##### E.0.0 Step 5 — phase close-out / certification (**v2 locked**)
 
-**Status:** 📋 **Plan pending** — must conform to § **E.0.0 Planning format lock** before draft.
+**Status:** 🔒 **LOCKED** (2026-07-09) — plan only; **implementation not started**. Conforms to § E.0.0 Planning format lock.
 
-*Placeholder: `PHASE_E_COMPLETE.md` · E-Q1..Q5 seal · max evidence scope — delivers E-Q5.*
+###### Version summary (locked — place near top of seal)
+
+| Item | Version |
+|------|---------|
+| Phase | E v0.1 |
+| E-AP | v1.1 |
+| E2 Protocol | v1.2 |
+| Phase D | Certified |
+| Phase E | Certified (upon seal issue) |
+
+###### Certification principles (locked)
+
+> **`PHASE_E_COMPLETE.md` is a certification artifact.** It references completed work. It contains **no new empirical analysis**, **no new interpretation**, and **no new evidence**.
+
+> **Certification immutability:** Once `PHASE_E_COMPLETE.md` is issued, its conclusions remain fixed for Phase E v0.1. Subsequent evidence may extend or supersede the record only through a **new protocol version** or a **new phase**, never by editing the certified record in place.
+
+> **Completion ≠ success:** Phase E is **complete**. Completion does **not** imply positive experimental outcomes. Empirical findings are whatever the sealed evidence shows.
+
+> **Publication readiness (qualified):** Ready for **publication of claims within the certified evidence scope** — not a claim that the entire project is universally publication-ready for any future goal.
+
+> **Final philosophy line (required in seal):** This certification attests to the **integrity of the evaluation process and the documented evidence**, not to any particular empirical outcome.
+
+###### Objective
+
+Certify Phase E v0.1 as **complete for the documented evidence scope** by writing `PHASE_E_COMPLETE.md`: answer E-Q1…E-Q5 with **outward pointers only**, freeze an immutable evidence inventory, state max scope and known limitations, surface empirical findings (including lift=0.0 alongside process outcomes), record deferred work / open questions, and pause before Zenodo — **without** adding analysis or re-interpreting Steps 2–4.
+
+###### Core invariant
+
+> **Are E-Q1…E-Q5 answered yes with sealed evidence pointers, under an honest maximum evidence scope, with completion distinguished from experimental success and from universal publication readiness, and with no new evidence introduced in the seal?**
+
+###### What this step proves
+
+| Proves | Mechanism |
+|--------|-----------|
+| Phase E **complete** (process) for v0.1 scope | Certification seal |
+| E-Q1…E-Q5 each yes + pointer | Seal table (pointers only) |
+| Evidence inventory frozen | Immutable reference table |
+| Verification vs reproduction explicit | Reproducibility matrix |
+| Empirical findings visible (null result + process outcomes) | **Empirical Findings** subsection |
+| Known limitations of the certified package | **Known Limitations** (distinct from Deferred Work) |
+| Deferred work explicit | **Open Questions / Deferred Work** |
+| Historical record frozen / non-amendable | Certification immutability + final statement |
+
+###### What this step does not prove
+
+| Out of scope | Notes |
+|--------------|--------|
+| New analysis or claim reinterpretation | Forbidden in seal |
+| Positive episodic lift / “Phase E succeeded” | Completion ≠ success |
+| Universal project publication readiness | Only claims within certified scope |
+| Execution-based reproduction | Deferred |
+| B1 / statistical power / longitudinal eval | Deferred Work |
+| Zenodo upload | After E-Q5; separate action |
+| In-place amendment of certified v0.1 record | Forbidden — new version/phase only |
+
+###### Scope
+
+| In scope | Out of scope |
+|----------|--------------|
+| Compose `PHASE_E_COMPLETE.md` from existing artifacts | New benchmarks, audits, or claim edits |
+| Pointer tables + certification language | Restating full Step 2–4 contents |
+| Status updates in `cursor_list.md` / `E_PHASE_PROTOCOL.md` | Harness / scoring changes |
+| Pause before Zenodo | Performing Zenodo V3 inside Step 5 |
+
+**Lifecycle (locked narrative for seal intro):**
+
+| Step | Role |
+|------|------|
+| 1 | Repair and validate the measurement process |
+| 2 | Produce trustworthy benchmark evidence |
+| 3 | Freeze and package evidence for independent **verification** |
+| 4 | Ensure every published claim is supported by the evidence |
+| 5 | **Certify** the completed evidence package and its documented scope |
+
+###### Mandatory seal structure (`PHASE_E_COMPLETE.md`)
+
+**A. Header** — Date · version summary table · “certification artifact” + immutability declarations
+
+**B. Final certification statements** (conclusion + closing lines)
+
+- Phase E is **certified complete** for the documented evidence scope. Future work may expand the evidence base but **does not alter** the certified Phase E v0.1 record (new protocol version / new phase only).
+- Phase E is **complete**. Completion does **not** imply positive experimental outcomes.
+- Ready for **publication of claims within the certified evidence scope**.
+- This certification attests to the **integrity of the evaluation process and the documented evidence**, not to any particular empirical outcome.
+
+**C. Frozen evidence inventory** (pointers only — do not restate bodies)
+
+| Artifact | Identifier |
+|----------|------------|
+| Step 2 seal / run record | commit + run ids `run-1783639167839` / `run-1783639378206` |
+| L4 package | `phase_e_l4_package_sha256` (current sealed value at seal time) |
+| Claims audit | commit + `phase_e_claims_audit.md` / `.json` |
+| Phase D seal | `PHASE_D_COMPLETE.md` + seal commit |
+| Step 3 / 4 plan locks + seals | commits as recorded |
+| E-AP / E protocol | E-AP v1.1 · E v0.1 |
+
+**D. E-Q1…E-Q5** — yes + pointer each; E-Q2 must use verification/reproduction split; E-Q5 = scoped publication readiness (not universal)
+
+**E. Reproducibility matrix**
+
+| Aspect | Status |
+|--------|--------|
+| Evidence verification | **Complete** |
+| Package verification | **Complete** (`l4_status: VERIFIED`) |
+| Independent execution-based reproduction | **Deferred** |
+
+**F. Empirical Findings** (own subsection)
+
+| Finding | Statement |
+|---------|-----------|
+| Process | Benchmark infrastructure **validated** |
+| Process | Evidence package **verified** (L4) |
+| Outcome | **No measurable episodic lift observed** (`mean_episodic_lift = 0.0`) |
+| Process | Published claims **revised to match evidence** (Step 4) |
+
+**G. Maximum evidence scope** — `n=3_strict_trio` **only**
+
+**H. Known Limitations** (characteristics of the certified package — not future work)
+
+- Evidence scope limited to `n=3_strict_trio`
+- Backend-specific observations (operational Ollama path recorded; protocol backend-agnostic)
+- No statistical inference
+- No independent execution-based reproduction
+- No generalization claims
+
+**I. Threats to validity** — short pointer/summary from E-AP (not new analysis)
+
+**J. Open Questions / Deferred Work** (distinct from Known Limitations)
+
+| Deferred | Notes |
+|----------|--------|
+| B1 larger corpus | Generalization |
+| Execution-based reproduction | Independent re-run |
+| Statistical power / inference | Intentionally deferred |
+| Alternative backends | Protocol allows; not certified here |
+| Longitudinal evaluation | Related tracks |
+| Agent-level task-completion vs retrieval metrics | MYPAPER §6 |
+
+**K. Architecture vs empirical** — Phase D = machinery trust; Phase E = empirical claim discipline
+
+**L. Pause** — before Zenodo V3 / grant submission using new numbers
+
+###### Files touched
+
+| File | Change (on implementation) |
+|------|----------------------------|
+| `docs/phases/PHASE_E_COMPLETE.md` | **New** — certification artifact only |
+| `docs/cursor_list.md` | § E.0.0 Step 5 complete; Phase E certified complete (v0.1) |
+| `docs/E_PHASE_PROTOCOL.md` | Status → certified complete; paused before Zenodo |
+| Optional one-line pointers | From Step 2/4 docs to seal |
+| Harness / tests / Steps 2–4 artifact bodies | **None** (no new evidence; no in-place rewrite of prior seals beyond pointers) |
+
+###### Detailed work items
+
+| # | Work | Detail |
+|---|------|--------|
+| **1** | Write `PHASE_E_COMPLETE.md` | Structure A–L; pointers only; no new analysis |
+| **2** | Freeze evidence inventory | Current SHAs / run ids / L4 package sha at seal time |
+| **3** | Fill E-Q + reproducibility + Empirical Findings + Known Limitations + Deferred Work | As locked above |
+| **4** | Certification statements | Completeness, immutability, scoped publication readiness, process≠outcome |
+| **5** | Update status docs | `cursor_list.md` · `E_PHASE_PROTOCOL.md` |
+| **6** | Pause | No Zenodo unless separately approved |
+
+###### Dangers / failure modes / things that must not change
+
+| Risk | Mitigation |
+|------|------------|
+| Seal becomes new analysis | Certification-only rule |
+| “Complete” read as “succeeded” | Completion ≠ success wording |
+| “Publication ready” read as universal | Scoped publication readiness |
+| “Reproducible” = already re-run | Explicit matrix |
+| Burying lift=0.0 | Empirical Findings subsection |
+| Editing certified seal later | Certification immutability |
+| Confusing limitations with deferred work | Separate Known Limitations vs Open Questions |
+| Things that must not change | Sealed Step 2–4 evidence bytes · prior audit dispositions · protocol constants |
+
+###### Forbidden changes
+
+- New empirical analysis, interpretation, or evidence in the seal  
+- In-place amendment of `PHASE_E_COMPLETE.md` conclusions after issue (new version/phase only)  
+- Claim positive lift, generalization, or universal publication readiness  
+- Claim execution-based reproduction complete  
+- Zenodo inside Step 5 without separate approval  
+- Harness / scoring / constant changes  
+- Rewriting Steps 2–4 artifact bodies as part of close-out  
+
+###### Exit criteria
+
+1. Plan locked in § E.0.0 Step 5 (v2) — ✅ this lock  
+2. On implementation: `PHASE_E_COMPLETE.md` issued as certification artifact (no new evidence)  
+3. Version summary + immutability + completion≠success + scoped publication readiness present  
+4. E-Q1…E-Q5 answered with pointers; E-Q2 split explicit  
+5. Evidence inventory frozen  
+6. Empirical Findings subsection visible (process outcomes + lift=0.0)  
+7. Known Limitations and Deferred Work both present and distinct  
+8. Final philosophy certification line present  
+9. Status docs updated; **paused before Zenodo**  
+
+###### Deliverables / evidence produced
+
+| Deliverable | Path |
+|-------------|------|
+| Certification seal | `docs/phases/PHASE_E_COMPLETE.md` |
+| Status | `docs/cursor_list.md` § E.0.0 Step 5 |
+
+###### Dependencies on previous steps
+
+| Dependency | Status |
+|------------|--------|
+| E1 / E-AP v1.1 | ✅ |
+| Steps 2–4 complete | ✅ |
+| Phase D seal | ✅ |
+| B1 | Deferred — out of certified scope |
+
+###### Pause
+
+**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+
+Step 5 plan is locked. Do **not** create `PHASE_E_COMPLETE.md` until explicit implementation approval per AGENTS.md.
 
 ---
 
