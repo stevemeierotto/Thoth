@@ -2,6 +2,8 @@
 
 > **✅ SEALED (2026-07-09)** — Step 2 redo after EP-01.5 + E2-33 completion sync. E2-28 bucket **#0**. Execution gate PASS (all arms tokens > 0, all `COMPLETED`). Investigation hold **released**. Prior invalid / failed-redo pairs archived under `superseded_pre_ep015/` and `superseded_e228_fail_pre_fix/`.
 
+> **L4 verification package (Step 3):** [`phase_e_l4_verification.md`](../baselines/phase_e_l4_verification.md) · [`phase_e_l4_status.json`](../baselines/phase_e_l4_status.json) · [`PHASE_E_PROVENANCE.md`](../baselines/PHASE_E_PROVENANCE.md) · `python3 scripts/verify_phase_e_l4.py`. **Verification ≠ reproduction** — reproduction recipe is documented, not executed.
+
 **Evidence scope:** `n=3_strict_trio`  
 **Locked:** 2026-07-09 (sealed post-sync redo)  
 **Wiring stage:** `B` (official STRICT)  

@@ -1,0 +1,44 @@
+{
+  "run_id": "run-1783639167839",
+  "environment_hash": "155b66a41bbca1bdba441e301841baaa35fd08b6681c3ebc1d7158610a96f790",
+  "index_hash": "c150f0362342c32cefa53e3653f84fa812aa9545b180e2fb6d8982c0124c50f8",
+  "environment": {
+    "corpus": {
+      "chunk_count": 0,
+      "fingerprint": "",
+      "fingerprint_mode": "FAST"
+    },
+    "environment_hash": "155b66a41bbca1bdba441e301841baaa35fd08b6681c3ebc1d7158610a96f790",
+    "index": {
+      "rag_index_header": {}
+    },
+    "model": {
+      "embedding_dimension": 768,
+      "embedding_internal_version": 2,
+      "embedding_method": "External",
+      "embedding_model": "nomic-embed-text:v1.5",
+      "llm_model": "qwen2.5:3b"
+    },
+    "ollama": {
+      "models_digest": "298bd31c1198b9ceb8c5378953f557cdafc3ffc5ee32ced62294171760d693fa",
+      "models_digest_version": "v1",
+      "version": "0.18.0"
+    },
+    "prov": {
+      "basic_agent_git_sha": "77508c4",
+      "captured_at_ms": 1783639167839,
+      "thoth_git_sha": "0a38f22"
+    },
+    "runtime": {
+      "harness": "episodic_learning_benchmark",
+      "thoth_env_flags": {},
+      "tier": "OLLAMA"
+    }
+  },
+  "source_events": {
+    "BENCHMARK_ENV": true,
+    "BENCHMARK_INDEX_BOUND": true
+  },
+  "recovered_from": "logs/benchmark_env.jsonl",
+  "note": "L4 L2 sidecar recovered from JSONL BENCHMARK_ENV (+ INDEX_BOUND for index_hash). Sealed run_*_benchmark_env.json remain the Step 2 freeze of the completion envelope and are not overwritten."
+}

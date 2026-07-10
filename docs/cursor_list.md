@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **Step 2 sealed** · **Step 3 plan locked (v3)** · implementation pending)  
+**Last updated:** 2026-07-09 (Phase E — **Step 2 sealed** · **Step 3 L4 verification ✅** · Step 4 pending)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **Step 2 sealed**. 🔒 **Step 3 plan locked (v3)** — L4 **verification** package (verification ≠ reproduction). Await explicit **implementation** approval.
+**Active E2 work:** ✅ **Step 2 sealed**. ✅ **Step 3 L4 verification package** (`l4_status: VERIFIED`; `e_q2_reproduction: DEFERRED`). **Step 4** next (await plan lock).
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2257,7 +2257,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** ✅ |
 | **EP-01.5** | Authoritative LLM wiring + planner contract | Harness repair — § **E.0.0 EP-01.5** ✅ |
 | **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ sealed |
-| **E3** | L4 verification package (plan 🔒 v3) | Manifests, verifier, `phase_e_l4_status.json` — reproduction deferred |
+| **E3** | L4 verification package | Manifests, verifier, `phase_e_l4_status.json` — ✅ · reproduction deferred |
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
 
@@ -2275,7 +2275,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Step 2 sealed** (2026-07-09). **Step 3 plan locked (v3)** — await implementation approval.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Step 2 sealed** (2026-07-09). **Step 3 complete** (2026-07-09) — L4 verification `VERIFIED`; reproduction deferred. Step 4 plan pending.
 
 ---
 
@@ -2334,7 +2334,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | **E1** | ✅ Complete (`E_ANALYSIS_PLAN.md` E-AP v1.1) — predates this format lock |
 | **EP-01** | ✅ Complete (2026-07-09) — `THOTH_E2_EP01=1` |
 | **E2** | ✅ Complete (2026-07-09) — `phase_e_strict_v1.md` · E2-28 PASS · `evidence_scope: n=3_strict_trio` |
-| **E3** | 🔒 Plan locked (v3, 2026-07-09) — await implementation approval |
+| **E3** | ✅ Complete (2026-07-09) — L4 verification package (`phase_e_l4_status.json`) |
 | **E4** | 📋 Pending — must conform to this format before lock |
 | **E5** | 📋 Pending — must conform to this format before lock |
 
@@ -3151,9 +3151,11 @@ Authoritative STRICT evidence is sealed. Step 3 plan is **locked (v3)**. Do **no
 
 ---
 
-##### E.0.0 Step 3 — L4 verification package (**v3 locked**)
+##### E.0.0 Step 3 — L4 verification package (**v3 locked — complete**)
 
-**Status:** 🔒 **LOCKED** (2026-07-09) — plan only; **implementation not started**. Conforms to § E.0.0 Planning format lock.
+**Status:** ✅ **COMPLETE** (2026-07-09) — plan locked v3; implementation delivered. `l4_status: VERIFIED` · `e_q2_verification: true` · `e_q2_reproduction: false` (`DEFERRED`).
+
+**Evidence:** [`phase_e_l4_verification.md`](baselines/phase_e_l4_verification.md) · [`phase_e_l4_status.json`](baselines/phase_e_l4_status.json) · [`PHASE_E_PROVENANCE.md`](baselines/PHASE_E_PROVENANCE.md) · [`phase_e_run_manifest.json`](baselines/phase_e_run_manifest.json) · `python3 scripts/verify_phase_e_l4.py`
 
 ###### Objective
 
@@ -3355,9 +3357,9 @@ Manifest field: `reproduction_recipe.status = DOCUMENTED_NOT_EXECUTED`.
 
 ###### Pause
 
-**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+**STATUS: STEP 3 COMPLETE — PAUSED BEFORE STEP 4**
 
-Step 3 plan is locked. Do **not** create L4 artifacts, verifier, or status JSON until explicit implementation approval per AGENTS.md.
+L4 verification package sealed. Do **not** begin Step 4 (claims audit) until Step 4 plan is locked and approved (AGENTS.md gate).
 
 ---
 

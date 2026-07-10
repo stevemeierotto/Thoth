@@ -1,5 +1,7 @@
 {
-  "manifest_version": "phase_e_step2_v1",
+  "manifest_version": "phase_e_l4_v1",
+  "package_version": 1,
+  "l4_mode": "verification",
   "evidence_scope": "n=3_strict_trio",
   "protocol_revision": {
     "e_analysis_plan": "E-AP v1.1",
@@ -8,18 +10,56 @@
   "ep015_complete": true,
   "e233_complete": true,
   "step2_seal_commit": "0a38f22bb7970356e81b5a4907cd0df863c26d1b",
+  "step3_plan_lock_commit": "07491b4a25e47ceca359139591b8a7c4d373bbf7",
   "git_sha": {
-    "thoth": "0a38f22bb7970356e81b5a4907cd0df863c26d1b",
-    "basic_agent": "77508c4c2335e801692648074e657e3d29d846d5"
+    "thoth_at_step2_run": "0a38f22",
+    "basic_agent": "77508c4c2335e801692648074e657e3d29d846d5",
+    "step3_plan_lock": "07491b4a25e47ceca359139591b8a7c4d373bbf7"
   },
   "inference_tier": "authoritative",
   "inference_backend_identifier": "ollama",
   "harness_command": "THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning_benchmark --authoritative",
+  "reproduction_recipe": {
+    "status": "DOCUMENTED_NOT_EXECUTED",
+    "command": "THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning_benchmark --authoritative",
+    "note": "Step 3 verifies the sealed package only; reproduction is deferred."
+  },
   "benchmark_corpus_identifier": "v1.2_strict_trio",
   "e2_28_result": {
     "status": "PASS",
     "diagnosis_bucket": 0,
     "verification_doc": "docs/baselines/phase_e_baseline_verification.md"
+  },
+  "phase_e_l4_package_sha256": "fa824a3df474033d735d7010b15776e2babe4298d22a649a70fd3b8c4badc082",
+  "file_hashes": {
+    "cited_artifacts": {
+      "docs/baselines/artifacts/phase_e/run_01_summary.json": "100413239803c88560f1d57125f1515ab222b396d2853224f29e11c8748d36b5",
+      "docs/baselines/artifacts/phase_e/run_02_summary.json": "d8c0563d2acc533ab0a45244ae6f794e9e7aa77f34f70a22efbd0242980263d5",
+      "docs/baselines/artifacts/phase_e/run_01_benchmark_env.json": "a8f537b3732b7f94707921bc34473b161afbbb1970f852c92ac1a973903299a7",
+      "docs/baselines/artifacts/phase_e/run_02_benchmark_env.json": "aa967ce43237894d55a96a7cdb7ae9da888f846a74c8342a599f13bb4d3f7328",
+      "docs/baselines/artifacts/phase_e/episodic_learning_benchmark_snapshot.jsonl": "050d3eeecd1c95c6cd1d2fc711db6e9da2a2f9d55cf6f735a5988f40dcec3a2c",
+      "docs/baselines/artifacts/phase_e/run_01_l2_environment.json": "889fbc1d8401d62111712486fb0c9ce88be9336ab7286a9e7f3b4e8fc2ca66d0",
+      "docs/baselines/artifacts/phase_e/run_02_l2_environment.json": "93bdf8e460178e07da0d8b591cbaeef18acad9b4808fa6f7e59d58f9dffac170"
+    },
+    "protocol_documents": {
+      "docs/benchmark_results/phase_e_strict_v1.md": "d4b7b835c05a85fa7367f2c1dda8b09806a0b80f9cde66cd533f1feba352ffb5",
+      "docs/E2_PROTOCOL.md": "be4d87f08e8e0a974f81fb2a5d108414c29a9768493dc9d931331aeb9a2cf703",
+      "docs/phases/E_ANALYSIS_PLAN.md": "895736a07c06986fb2e8d095b529756ee844f37bd692762a443f479a136f1528",
+      "docs/baselines/PHASE_E_PROVENANCE.md": "cc1fb5bbc7d1ba35e0f4e61c1311bb63e57258f01fa42a671396f23b0680532c",
+      "docs/baselines/phase_e_l4_verification.md": "9c8df2acefa3d8de0143e2bdf91110d94a81ddc5e7731d54e54f9fef02bedc42"
+    },
+    "superseded_archives_historical": {
+      "docs/baselines/artifacts/phase_e/superseded_pre_ep015/episodic_learning_benchmark_snapshot.jsonl": "1aa7622748e6388b4208ece38648619cb882e54fe93efafd816f92fcae7b13bd",
+      "docs/baselines/artifacts/phase_e/superseded_pre_ep015/run_01_benchmark_env.json": "13dce368f45fe84d7f527992e41f6cdd8c71d5cfd5d8e7118b5c544455b59d9a",
+      "docs/baselines/artifacts/phase_e/superseded_pre_ep015/run_01_summary.json": "4c63bc53da97f64a145b9571a074dcc60028bc88abec4476c95a35fb39077827",
+      "docs/baselines/artifacts/phase_e/superseded_pre_ep015/run_02_benchmark_env.json": "5488f5a342f0f0a91f6b668150edfc4864d237400f5ccf7c3df3040d55bd38b5",
+      "docs/baselines/artifacts/phase_e/superseded_pre_ep015/run_02_summary.json": "77765da654e054d31036b5cc087594eb39ddb2df6781a619ca7f77a7a5957d7f",
+      "docs/baselines/artifacts/phase_e/superseded_e228_fail_pre_fix/episodic_learning_benchmark_snapshot.jsonl": "78ce9adeb9fb327ada0025238f5bc2a0934872cff161df860fa19a9b29337ca6",
+      "docs/baselines/artifacts/phase_e/superseded_e228_fail_pre_fix/run_01_benchmark_env.json": "70fb957c6f3de3ee68da7cdb5ab7356bbcf63d8046c74a0cec6f6d4a2bf2c11f",
+      "docs/baselines/artifacts/phase_e/superseded_e228_fail_pre_fix/run_01_summary.json": "4416f5e2c99d5a2290a9e422698b35f16f2dd433584e662ab3106ffb88e601c9",
+      "docs/baselines/artifacts/phase_e/superseded_e228_fail_pre_fix/run_02_benchmark_env.json": "4b9e0fc6ab270e0166828458dfc66c50a76cb1effb7b596a250f0d22a5b95055",
+      "docs/baselines/artifacts/phase_e/superseded_e228_fail_pre_fix/run_02_summary.json": "84176481ff2354f0b55e110f69bf0c1c476568288e510684192b1e1dd9cdd9f4"
+    }
   },
   "runs": [
     {
@@ -45,7 +85,8 @@
       "cases_passed": "1/3",
       "artifact_paths": {
         "summary": "docs/baselines/artifacts/phase_e/run_01_summary.json",
-        "benchmark_env": "docs/baselines/artifacts/phase_e/run_01_benchmark_env.json"
+        "benchmark_env_completion_envelope": "docs/baselines/artifacts/phase_e/run_01_benchmark_env.json",
+        "l2_environment": "docs/baselines/artifacts/phase_e/run_01_l2_environment.json"
       }
     },
     {
@@ -71,7 +112,8 @@
       "cases_passed": "1/3",
       "artifact_paths": {
         "summary": "docs/baselines/artifacts/phase_e/run_02_summary.json",
-        "benchmark_env": "docs/baselines/artifacts/phase_e/run_02_benchmark_env.json"
+        "benchmark_env_completion_envelope": "docs/baselines/artifacts/phase_e/run_02_benchmark_env.json",
+        "l2_environment": "docs/baselines/artifacts/phase_e/run_02_l2_environment.json"
       }
     }
   ],
@@ -81,5 +123,9 @@
     "docs/baselines/artifacts/phase_e/superseded_e228_fail_pre_fix/"
   ],
   "run_record": "docs/benchmark_results/phase_e_strict_v1.md",
-  "combined_jsonl": "docs/baselines/artifacts/phase_e/episodic_learning_benchmark_snapshot.jsonl"
+  "combined_jsonl": "docs/baselines/artifacts/phase_e/episodic_learning_benchmark_snapshot.jsonl",
+  "l4_verification_doc": "docs/baselines/phase_e_l4_verification.md",
+  "l4_provenance_doc": "docs/baselines/PHASE_E_PROVENANCE.md",
+  "l4_status_doc": "docs/baselines/phase_e_l4_status.json",
+  "verifier": "scripts/verify_phase_e_l4.py"
 }
