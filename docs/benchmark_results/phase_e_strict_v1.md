@@ -6,6 +6,8 @@
 
 > **Claims audit (Step 4):** [`phase_e_claims_audit.md`](../baselines/phase_e_claims_audit.md) · [`phase_e_claims_audit.json`](../baselines/phase_e_claims_audit.json). E-Q4 green; Negative Findings record `lift=0.0` as evidence.
 
+> **Phase E certification (Step 5):** [`PHASE_E_COMPLETE.md`](../phases/PHASE_E_COMPLETE.md) — v0.1 certified complete for `n=3_strict_trio`; completion ≠ success.
+
 **Evidence scope:** `n=3_strict_trio`  
 **Locked:** 2026-07-09 (sealed post-sync redo)  
 **Wiring stage:** `B` (official STRICT)  

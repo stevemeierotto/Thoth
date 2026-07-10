@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **Steps 2–4 ✅** · **Step 5 plan locked (v2)** · implementation pending)  
+**Last updated:** 2026-07-09 (Phase E — **v0.1 certified complete** · paused before Zenodo)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ Steps 2–4 complete. 🔒 **Step 5 plan locked (v2)** — Phase E certification close-out. Await explicit **implementation** approval.
+**Active E2 work:** ✅ **Phase E v0.1 certified complete** — [`PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md). Paused before Zenodo V3.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2259,7 +2259,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ sealed |
 | **E3** | L4 verification package | Manifests, verifier, `phase_e_l4_status.json` — ✅ · reproduction deferred |
 | **E4** | Claims audit | `phase_e_claims_audit.md` / `.json` — ✅ |
-| **E5** | Close-out (plan 🔒 v2) | `PHASE_E_COMPLETE.md` certification — await implementation |
+| **E5** | Close-out | `PHASE_E_COMPLETE.md` — ✅ certified |
 
 **Time estimate (rough):** E0 ✅ — E1 **3–5 h** — **EP-01 6–12 h** — E2 **4–8 h** + authoritative inference runtime — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
 
@@ -2275,7 +2275,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **E4** | Audit every external **claim** (not whole docs) against frozen evidence — immutable audit + author actions |
 | **E5** | Certify the completed evidence package and its documented scope (no new analysis) |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Steps 2–4 complete**. **Step 5 plan locked (v2)** — await implementation approval.
+**Status:** 🔒 **Phase E v0.1 certified complete** (2026-07-09) — [`PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md). Paused before Zenodo V3.
 
 ---
 
@@ -2336,7 +2336,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | **E2** | ✅ Complete (2026-07-09) — `phase_e_strict_v1.md` · E2-28 PASS · `evidence_scope: n=3_strict_trio` |
 | **E3** | ✅ Complete (2026-07-09) — L4 verification package (`phase_e_l4_status.json`) |
 | **E4** | ✅ Complete (2026-07-09) — `phase_e_claims_audit.md` |
-| **E5** | 🔒 Plan locked (v2, 2026-07-09) — await implementation approval |
+| **E5** | ✅ Complete (2026-07-09) — `PHASE_E_COMPLETE.md` certified |
 
 ---
 
@@ -3605,9 +3605,11 @@ Claims audit sealed. Step 5 plan is **locked (v2)**. Do **not** begin Step 5 imp
 
 ---
 
-##### E.0.0 Step 5 — phase close-out / certification (**v2 locked**)
+##### E.0.0 Step 5 — phase close-out / certification (**v2 locked — complete**)
 
-**Status:** 🔒 **LOCKED** (2026-07-09) — plan only; **implementation not started**. Conforms to § E.0.0 Planning format lock.
+**Status:** ✅ **COMPLETE** (2026-07-09) — plan locked v2; certification issued. Phase E v0.1 **certified complete** for documented evidence scope. Completion ≠ success; process integrity ≠ empirical outcome.
+
+**Evidence:** [`PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md)
 
 ###### Version summary (locked — place near top of seal)
 
@@ -3617,7 +3619,7 @@ Claims audit sealed. Step 5 plan is **locked (v2)**. Do **not** begin Step 5 imp
 | E-AP | v1.1 |
 | E2 Protocol | v1.2 |
 | Phase D | Certified |
-| Phase E | Certified (upon seal issue) |
+| Phase E | **Certified** |
 
 ###### Certification principles (locked)
 
@@ -3825,9 +3827,9 @@ Certify Phase E v0.1 as **complete for the documented evidence scope** by writin
 
 ###### Pause
 
-**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+**STATUS: PHASE E v0.1 CERTIFIED COMPLETE — PAUSED BEFORE ZENODO V3**
 
-Step 5 plan is locked. Do **not** create `PHASE_E_COMPLETE.md` until explicit implementation approval per AGENTS.md.
+Certification issued. Do **not** amend `PHASE_E_COMPLETE.md` in place. Future evidence requires a new protocol version or new phase. Zenodo V3 / grant use of new numbers requires separate explicit approval.
 
 ---
 

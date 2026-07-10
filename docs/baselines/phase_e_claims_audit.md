@@ -3,7 +3,7 @@
 **Protocol:** E-AP v1.1 · E v0.1 · Step 4 plan v2 (`3230362`)  
 **Audit date:** 2026-07-09  
 **Evidence scope (episodic):** `n=3_strict_trio`  
-**L4 package:** `5614414ba81ee1cb990aeb9f45e7ea794fc4af0908429c9d187ab8d3a13ce89e`
+**L4 package:** `70d25560981f9c3322e59589e5867dda77c226833b3e1e7fb395fa3aef98a6ff`
 
 ---
 
