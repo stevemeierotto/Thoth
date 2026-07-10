@@ -30,7 +30,7 @@
     "diagnosis_bucket": 0,
     "verification_doc": "docs/baselines/phase_e_baseline_verification.md"
   },
-  "phase_e_l4_package_sha256": "fa824a3df474033d735d7010b15776e2babe4298d22a649a70fd3b8c4badc082",
+  "phase_e_l4_package_sha256": "5614414ba81ee1cb990aeb9f45e7ea794fc4af0908429c9d187ab8d3a13ce89e",
   "file_hashes": {
     "cited_artifacts": {
       "docs/baselines/artifacts/phase_e/run_01_summary.json": "100413239803c88560f1d57125f1515ab222b396d2853224f29e11c8748d36b5",
@@ -42,7 +42,7 @@
       "docs/baselines/artifacts/phase_e/run_02_l2_environment.json": "93bdf8e460178e07da0d8b591cbaeef18acad9b4808fa6f7e59d58f9dffac170"
     },
     "protocol_documents": {
-      "docs/benchmark_results/phase_e_strict_v1.md": "d4b7b835c05a85fa7367f2c1dda8b09806a0b80f9cde66cd533f1feba352ffb5",
+      "docs/benchmark_results/phase_e_strict_v1.md": "ed7bfd17bbaf99019c9c9bbcabde94c781bbda7ba4696ba721d7b0ecb2f443b9",
       "docs/E2_PROTOCOL.md": "be4d87f08e8e0a974f81fb2a5d108414c29a9768493dc9d931331aeb9a2cf703",
       "docs/phases/E_ANALYSIS_PLAN.md": "895736a07c06986fb2e8d095b529756ee844f37bd692762a443f479a136f1528",
       "docs/baselines/PHASE_E_PROVENANCE.md": "cc1fb5bbc7d1ba35e0f4e61c1311bb63e57258f01fa42a671396f23b0680532c",

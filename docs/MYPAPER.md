@@ -12,7 +12,7 @@ Adaptive Retrieval Blending – dynamic weighting between semantic similarity an
 
 Experience-Weighted Graph Memory – a graph structure representing successful retrieval trajectories that can adapt over time.
 
-Experimental benchmarks comparing GRAG with conventional RAG show consistent improvements in retrieval quality on goal-disambiguation tasks, demonstrating that goal-aware retrieval can significantly improve information access in autonomous systems.
+Experimental benchmarks comparing GRAG with conventional RAG show improvements in retrieval quality on a hardened goal-disambiguation evaluation suite (see §4; canonical 2026-03-14 run). These results are retrieval-metric evidence under the stated corpus and case mix—not a claim of agent-level task-completion or episodic-learning lift.
 
 1 Introduction
 
@@ -154,13 +154,13 @@ nDCG@5	0.516	0.557	+0.041
 
 Performance gains were particularly strong in goal-disambiguation tasks, where GRAG achieved a **+0.202 nDCG@5** improvement over baseline RAG on that case bucket (same run). An early 100-chunk sandbox (2026-03-09) showed +0.200 mean nDCG@5 — useful for prototype validation but not representative of hardened suites.
 
-These results support the hypothesis that goal-aware retrieval improves information relevance in multi-step reasoning contexts.
+These results support the narrower claim that goal-aware retrieval improved ranked-retrieval metrics (nDCG@5, MRR, Precision@5) on the stated evaluation suite, especially on the goal-disambiguation bucket.
 
 5 Discussion
 
 The experimental results suggest that retrieval architectures designed for goal-directed agents benefit from incorporating additional context beyond the immediate query.
 
-GRAG demonstrates that integrating:
+On the stated §4 evaluation suite, integrating:
 
 goal-relative directional vectors
 
@@ -168,11 +168,11 @@ adaptive retrieval weighting
 
 graph-structured knowledge relationships
 
-can improve retrieval performance in scenarios where standard semantic search is insufficient.
+improved ranked-retrieval metrics relative to baseline RAG, especially where goal context disambiguates the query.
 
 Importantly, the improvements were most significant in tasks where the goal context disambiguates otherwise ambiguous queries.
 
-This suggests that goal-aware retrieval may be particularly valuable for autonomous reasoning systems.
+Whether these retrieval-metric gains translate to agent task-completion efficiency remains future work (§6 Agent-Level Evaluation).
 
 6 Future Work
 
@@ -193,6 +193,6 @@ Measuring improvements in task completion efficiency rather than retrieval accur
 
 This work introduces Goal-Relative Adaptive Graph Retrieval (GRAG), a retrieval architecture designed to support autonomous goal-driven agents.
 
-By integrating goal-relative directional retrieval, adaptive blending of retrieval signals, and graph-structured knowledge memory, GRAG extends traditional retrieval-augmented systems to better support multi-step reasoning tasks.
+By integrating goal-relative directional retrieval, adaptive blending of retrieval signals, and graph-structured knowledge memory, GRAG extends traditional retrieval-augmented systems with mechanisms intended to support multi-step, goal-directed retrieval. Agent-level task-completion benefits remain future work (§6).
 
-Preliminary benchmarks demonstrate improved retrieval performance in goal-disambiguation scenarios, suggesting that goal-aware retrieval may play an important role in future agent architectures.
+Preliminary benchmarks demonstrate improved retrieval performance in goal-disambiguation scenarios under the stated evaluation suite (§4). Broader claims about the role of goal-aware retrieval in future agent architectures remain outside the present evidence.

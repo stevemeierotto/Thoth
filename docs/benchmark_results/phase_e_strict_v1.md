@@ -4,6 +4,8 @@
 
 > **L4 verification package (Step 3):** [`phase_e_l4_verification.md`](../baselines/phase_e_l4_verification.md) · [`phase_e_l4_status.json`](../baselines/phase_e_l4_status.json) · [`PHASE_E_PROVENANCE.md`](../baselines/PHASE_E_PROVENANCE.md) · `python3 scripts/verify_phase_e_l4.py`. **Verification ≠ reproduction** — reproduction recipe is documented, not executed.
 
+> **Claims audit (Step 4):** [`phase_e_claims_audit.md`](../baselines/phase_e_claims_audit.md) · [`phase_e_claims_audit.json`](../baselines/phase_e_claims_audit.json). E-Q4 green; Negative Findings record `lift=0.0` as evidence.
+
 **Evidence scope:** `n=3_strict_trio`  
 **Locked:** 2026-07-09 (sealed post-sync redo)  
 **Wiring stage:** `B` (official STRICT)  

@@ -1,10 +1,10 @@
 # E — Empirical Validation Protocol
 
 **Protocol version:** E v0.1  
-**Status:** 🔒 **LOCKED** (2026-07-09) — E1 · EP-01.5 · Steps 2–3 complete · **Step 4 plan locked (v2)**; await explicit Step 4 **implementation** approval  
+**Status:** 🔒 **LOCKED** (2026-07-09) — E1 · EP-01.5 · **Steps 2–4 complete**; await Step 5 plan  
 **Supersedes:** Informal “Phase E scientific defense” label (deprecated in favor of **empirical validation**)  
 **Depends on:** [`PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) (Phase D sealed 2026-07-08), [`D5_PROTOCOL.md`](D5_PROTOCOL.md) v0.1 🔒, [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 🔒, [`benchmark_environment.md`](benchmark_environment.md) (benchmark E1 ✅)  
-**Checkpoint tracking:** `cursor_list.md` § **E.0.0** (E1 ✅ · EP-01 ✅ · Step 2 ✅ · Step 3 ✅ · **Step 4 plan 🔒 v2** · implementation pending)
+**Checkpoint tracking:** `cursor_list.md` § **E.0.0** (E1 ✅ · EP-01 ✅ · Steps 2–4 ✅ · Step 5 pending)
 
 > **Scope:** Phase E is the **empirical validation layer**. Phase D proved the evaluation **machinery** preserved trust. Phase E proves **empirical claims made using that machinery** are specification-complete, reproducible, methodologically defensible, evidence-mapped, and publication-ready.
 
@@ -330,4 +330,4 @@ E2 does **not** silently wait on B1 — the wait/fork is **explicit in E1**, not
 
 **Review incorporated:** Engineering vs empirical confidence; metric definition vs validation; reproducibility levels L1–L4; statistical inference deferred; architecture vs empirical publication; threats to validity; five core questions; empirical validation terminology. **Amendment 2026-07-09:** n=3 corpus tier labeling + E4/E5 gates; falsification/negative-result path; B1/E2 timing fork; E4 cold-read audit discipline; forbid citing D-phase machinery proofs as empirical evidence.
 
-**Status:** 🔒 **v0.1 locked** (2026-07-09, amended 2026-07-09). E1 · EP-01 · EP-01.5 · E2-33 · Steps 2–3 complete — **Step 4 plan locked (v2)**; paused before Step 4 implementation.
+**Status:** 🔒 **v0.1 locked** (2026-07-09, amended 2026-07-09). E1 · EP-01 · EP-01.5 · E2-33 · **Steps 2–4 complete**; paused before Step 5.

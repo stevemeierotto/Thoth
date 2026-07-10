@@ -1,0 +1,295 @@
+{
+  "audit_version": 1,
+  "step4_plan_lock_commit": "3230362673dd925f22317b27c0c20f3252268fe7",
+  "audit_date": "2026-07-09",
+  "audit_principle": "When evidence and narrative disagree, the narrative changes—not the evidence.",
+  "immutable_audit": true,
+  "evidence_scope_episodic": "n=3_strict_trio",
+  "phase_e_l4_package_sha256": "5614414ba81ee1cb990aeb9f45e7ea794fc4af0908429c9d187ab8d3a13ce89e",
+  "cited_run_ids": [
+    "run-1783639167839",
+    "run-1783639378206"
+  ],
+  "e_q4": true,
+  "negative_findings": [
+    "No measurable episodic-learning lift on sealed authoritative STRICT trio (mean_episodic_lift=0.0).",
+    "This is evidence, not a benchmark or protocol failure.",
+    "No publishable claim may imply positive episodic lift on this evidence base."
+  ],
+  "cold_read": {
+    "criterion": "Could a technically competent reviewer, unfamiliar with the drafting history, infer this claim solely from the cited evidence?",
+    "same_session_authoring_as_pass": false,
+    "attested": true
+  },
+  "claims": [
+    {
+      "claim_id": "C-001",
+      "source": "MYPAPER Abstract",
+      "text": "Experimental benchmarks comparing GRAG with conventional RAG show improvements in retrieval quality on a hardened goal-disambiguation evaluation suite (see §4; canonical 2026-03-14 run).",
+      "type": "Retrieval quality (GRAG)",
+      "evidence_source": "GRAG diagnostics",
+      "citation_anchor": {
+        "doc": "docs/benchmark_results.md",
+        "run": "2026-03-14 hardened 100-case",
+        "metric": "mean nDCG@5 +0.041"
+      },
+      "confidence": "SCOPED",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-002",
+      "source": "MYPAPER Abstract",
+      "text": "These results are retrieval-metric evidence under the stated corpus and case mix—not a claim of agent-level task-completion or episodic-learning lift.",
+      "type": "Meta / scope disclaimer",
+      "evidence_source": "Step 2 STRICT",
+      "citation_anchor": {
+        "run_ids": ["run-1783639167839", "run-1783639378206"],
+        "mean_episodic_lift": 0.0
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-003",
+      "source": "MYPAPER §3.1",
+      "text": "GRAG introduces a directional retrieval signal goal_embedding − current_state_embedding and scores documents with query + directional similarity.",
+      "type": "Architecture",
+      "evidence_source": "Architecture / implementation",
+      "citation_anchor": {
+        "docs": ["docs/GRAG.md"],
+        "component": "grag_scorer"
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-004",
+      "source": "MYPAPER §3.2",
+      "text": "GRAG introduces adaptive blending, dynamically adjusting α based on task progress.",
+      "type": "Architecture",
+      "evidence_source": "Architecture / implementation",
+      "citation_anchor": {
+        "docs": ["docs/GRAG.md"]
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-005",
+      "source": "MYPAPER §3.3",
+      "text": "GRAG integrates a graph-structured memory layer; hybrid score 0.7 vector + 0.3 graph connectivity (prototype).",
+      "type": "Architecture",
+      "evidence_source": "Architecture / implementation",
+      "citation_anchor": {
+        "docs": ["docs/GRAG.md"]
+      },
+      "confidence": "SCOPED",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-006",
+      "source": "MYPAPER §3.4",
+      "text": "Dynamic graph edge learning is operational via GraphRefiner; metrics logged in GragDiagnostics / grag_benchmark.jsonl.",
+      "type": "Architecture",
+      "evidence_source": "Engineering diagnostic / log",
+      "citation_anchor": {
+        "log": "docs/completed_improvements_log.md",
+        "date": "2026-03-12",
+        "component": "GraphRefiner"
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-007",
+      "source": "MYPAPER §4 table",
+      "text": "Canonical 2026-03-14: Precision@5 +0.036, MRR +0.071, nDCG@5 +0.041 (RAG vs GRAG).",
+      "type": "Retrieval quality (GRAG)",
+      "evidence_source": "GRAG diagnostics",
+      "citation_anchor": {
+        "doc": "docs/benchmark_results.md",
+        "run": "2026-03-14"
+      },
+      "confidence": "SCOPED",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-008",
+      "source": "MYPAPER §4",
+      "text": "Goal-disambiguation bucket: +0.202 nDCG@5 over baseline RAG (same run).",
+      "type": "Retrieval quality (GRAG)",
+      "evidence_source": "GRAG diagnostics",
+      "citation_anchor": {
+        "doc": "docs/benchmark_results.md",
+        "bucket": "goal-disambiguation",
+        "run": "2026-03-14"
+      },
+      "confidence": "SCOPED",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-009",
+      "source": "MYPAPER §4",
+      "text": "Early 100-chunk sandbox (2026-03-09) showed +0.200 mean nDCG@5 — not representative of hardened suites.",
+      "type": "Retrieval quality (GRAG)",
+      "evidence_source": "GRAG diagnostics (historical)",
+      "citation_anchor": {
+        "doc": "docs/benchmark_results.md",
+        "run": "2026-03-09 sandbox"
+      },
+      "confidence": "SCOPED",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-010",
+      "source": "MYPAPER §4",
+      "text": "Goal-aware retrieval improved ranked-retrieval metrics on the stated evaluation suite, especially on the goal-disambiguation bucket.",
+      "type": "Retrieval quality (GRAG)",
+      "evidence_source": "GRAG diagnostics",
+      "citation_anchor": {
+        "claims": ["C-007", "C-008"]
+      },
+      "confidence": "SCOPED",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-011",
+      "source": "MYPAPER §5",
+      "text": "GRAG demonstrates that integrating [directional vectors, adaptive weighting, graph relationships] can improve retrieval performance in scenarios where standard semantic search is insufficient.",
+      "type": "Retrieval quality (GRAG)",
+      "evidence_source": "GRAG diagnostics",
+      "citation_anchor": {
+        "claims": ["C-007", "C-008"],
+        "note": "Suite-scoped metrics only; audited sentence lacked suite bound"
+      },
+      "confidence": "SPECULATIVE",
+      "audit_disposition": "UNSUPPORTED",
+      "author_action": "NARROW",
+      "final_status": "PASS (after revision)",
+      "revised_text": "On the stated §4 evaluation suite, integrating goal-relative directional vectors, adaptive retrieval weighting, and graph-structured relationships improved ranked-retrieval metrics relative to baseline RAG, especially where goal context disambiguates the query."
+    },
+    {
+      "claim_id": "C-012",
+      "source": "MYPAPER §5",
+      "text": "Whether these retrieval-metric gains translate to agent task-completion efficiency remains future work (§6).",
+      "type": "Meta / non-claim",
+      "evidence_source": "None (explicit deferral)",
+      "citation_anchor": {
+        "section": "MYPAPER §6 Agent-Level Evaluation"
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-013",
+      "source": "MYPAPER §7",
+      "text": "Preliminary benchmarks demonstrate improved retrieval performance in goal-disambiguation scenarios under the stated evaluation suite (§4).",
+      "type": "Retrieval quality (GRAG)",
+      "evidence_source": "GRAG diagnostics",
+      "citation_anchor": {
+        "claims": ["C-008"]
+      },
+      "confidence": "SCOPED",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-014",
+      "source": "MYPAPER §7",
+      "text": "Broader claims about the role of goal-aware retrieval in future agent architectures remain outside the present evidence.",
+      "type": "Meta / scope disclaimer",
+      "evidence_source": "None (self-limit)",
+      "citation_anchor": {
+        "section": "MYPAPER §7"
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-015",
+      "source": "MYPAPER §7",
+      "text": "By integrating [GRAG mechanisms], GRAG extends traditional retrieval-augmented systems to better support multi-step reasoning tasks.",
+      "type": "Architecture / over-claim",
+      "evidence_source": "Architecture / implementation",
+      "citation_anchor": {
+        "note": "Architecture exists; agent-level 'better support' not demonstrated"
+      },
+      "confidence": "SPECULATIVE",
+      "audit_disposition": "UNSUPPORTED",
+      "author_action": "NARROW",
+      "final_status": "PASS (after revision)",
+      "revised_text": "By integrating goal-relative directional retrieval, adaptive blending of retrieval signals, and graph-structured knowledge memory, GRAG extends traditional retrieval-augmented systems with mechanisms intended to support multi-step, goal-directed retrieval. Agent-level task-completion benefits remain future work (§6)."
+    },
+    {
+      "claim_id": "C-016",
+      "source": "(implicit / forbidden)",
+      "text": "Episodic memory improves learning / positive episodic lift under live authoritative STRICT on the v1.2 trio.",
+      "type": "Official episodic lift (scoped)",
+      "evidence_source": "Step 2 STRICT",
+      "citation_anchor": {
+        "run_ids": ["run-1783639167839", "run-1783639378206"],
+        "mean_episodic_lift": 0.0,
+        "phase_e_l4_package_sha256": "5614414ba81ee1cb990aeb9f45e7ea794fc4af0908429c9d187ab8d3a13ce89e"
+      },
+      "confidence": "SPECULATIVE",
+      "audit_disposition": "UNSUPPORTED",
+      "author_action": "REMOVE",
+      "final_status": "REMOVED (no such publishable claim retained)"
+    },
+    {
+      "claim_id": "C-017",
+      "source": "E_PHASE_PROTOCOL",
+      "text": "Phase D establishes trust in evaluation machinery; Phase E establishes trust in empirical claims made using that machinery.",
+      "type": "Architecture / meta",
+      "evidence_source": "Phase D seal",
+      "citation_anchor": {
+        "doc": "docs/phases/PHASE_D_COMPLETE.md"
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    },
+    {
+      "claim_id": "C-018",
+      "source": "phase_e_strict_v1",
+      "text": "After EP-01.5 and sync repairs, authoritative harness produced reproducible results with no instrumentation defects; lift=0.0 is an observed outcome, not a benchmark failure.",
+      "type": "Official episodic lift (scoped) / meta",
+      "evidence_source": "Step 2 STRICT + Step 3 L4",
+      "citation_anchor": {
+        "run_ids": ["run-1783639167839", "run-1783639378206"],
+        "l4_status": "VERIFIED",
+        "doc": "docs/benchmark_results/phase_e_strict_v1.md"
+      },
+      "confidence": "DIRECT",
+      "audit_disposition": "PASS",
+      "author_action": "None",
+      "final_status": "PASS (as written)"
+    }
+  ]
+}
