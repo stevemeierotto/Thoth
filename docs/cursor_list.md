@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **EP-01.5 ✅** · **E2-33 ✅** · **Step 2 sealed** · Step 3 pending)  
+**Last updated:** 2026-07-09 (Phase E — **Step 2 sealed** · **Step 3 plan locked (v3)** · implementation pending)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **Step 2 sealed** (E2-28 bucket #0; `run-1783639167839` / `run-1783639378206`; lift=0 FAILURE under live LLM). Investigation hold released. **Step 3** next (await approval).
+**Active E2 work:** ✅ **Step 2 sealed**. 🔒 **Step 3 plan locked (v3)** — L4 **verification** package (verification ≠ reproduction). Await explicit **implementation** approval.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2188,7 +2188,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **EP-01** | Episodic authoritative inference harness | Live-backend path in `run_episodic_learning_benchmark` | — (engineering prereq) |
 | **EP-01.5** | Authoritative LLM wiring + planner contract | Live `LLMInterface` on `--authoritative` + `wiring_stage=B` | — (harness repair; § **E.0.0 EP-01.5**) |
 | **2** | Authoritative STRICT runs | [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) ⚠️ hold | E-Q2 (partial), E-Q3 |
-| **3** | L4 reproducibility package | Manifests + verification doc | E-Q2 |
+| **3** | L4 verification package | Manifests + verifier + status (`e_q2_verification`) | E-Q2 (verification) |
 | **4** | Claims audit | Claim → evidence tier map | E-Q4 |
 | **5** | Phase close-out | `PHASE_E_COMPLETE.md` | E-Q5 |
 
@@ -2257,7 +2257,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **EP-01** | Episodic authoritative inference harness | Engineering prereq — § **E.0.0 EP-01** ✅ |
 | **EP-01.5** | Authoritative LLM wiring + planner contract | Harness repair — § **E.0.0 EP-01.5** ✅ |
 | **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ sealed |
-| **E3** | L4 reproducibility package | Manifests, verification, baseline compare |
+| **E3** | L4 verification package (plan 🔒 v3) | Manifests, verifier, `phase_e_l4_status.json` — reproduction deferred |
 | **E4** | Claims audit | Paper sentence → evidence tier |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
 
@@ -2271,11 +2271,11 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **EP-01** | Add episodic harness authoritative inference capability (infrastructure only) |
 | **EP-01.5** | Wire live `LLMInterface` so authoritative mode actually invokes inference (harness repair only) |
 | **E2** | Execute the frozen protocol (collect evidence) — redo after EP-01.5 |
-| **E3** | Assemble the reproducibility package (others can reproduce it) |
+| **E3** | Assemble the L4 **verification** package (others can verify the published result; reproduction deferred) |
 | **E4** | Audit every external claim against frozen evidence tiers |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 complete** (2026-07-09). **EP-01 complete** (2026-07-09). **EP-01.5 complete** (2026-07-09). **E2-33 complete** (2026-07-09). **Step 2 sealed** (2026-07-09) — E2-28 #0; Step 3 pending approval.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Step 2 sealed** (2026-07-09). **Step 3 plan locked (v3)** — await implementation approval.
 
 ---
 
@@ -2334,7 +2334,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | **E1** | ✅ Complete (`E_ANALYSIS_PLAN.md` E-AP v1.1) — predates this format lock |
 | **EP-01** | ✅ Complete (2026-07-09) — `THOTH_E2_EP01=1` |
 | **E2** | ✅ Complete (2026-07-09) — `phase_e_strict_v1.md` · E2-28 PASS · `evidence_scope: n=3_strict_trio` |
-| **E3** | 📋 Pending — must conform to this format before lock |
+| **E3** | 🔒 Plan locked (v3, 2026-07-09) — await implementation approval |
 | **E4** | 📋 Pending — must conform to this format before lock |
 | **E5** | 📋 Pending — must conform to this format before lock |
 
@@ -2966,7 +2966,7 @@ Phase 5 verification: `THOTH_E2_EP015_PHASE5=1` → E2-29 · E2-28 spot · E2-30
 
 ##### E.0.0 Step 2 — authoritative STRICT runs (**v1 locked — complete**)
 
-**Status:** ⚠️ **Step 2 complete — UNDER INVESTIGATION HOLD** (2026-07-09) — artifacts sealed but pre-flight (1) failed: authoritative runs did not invoke live LLM (zero tokens); evidence **not** valid for empirical claims until **EP-01.5** + Step 2 redo.
+**Status:** ✅ **Step 2 sealed** (2026-07-09) — post EP-01.5 + E2-33; E2-28 bucket #0; investigation hold released. See [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md).
 
 **Evidence:** [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md) · [`phase_e_run_manifest.json`](baselines/phase_e_run_manifest.json) · [`phase_e_baseline_verification.md`](baselines/phase_e_baseline_verification.md)
 
@@ -3145,17 +3145,219 @@ THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning
 
 ###### Pause
 
-**STATUS: STEP 2 COMPLETE — PAUSED BEFORE STEP 3**
+**STATUS: STEP 2 COMPLETE — STEP 3 PLAN LOCKED — AWAIT IMPLEMENTATION APPROVAL**
 
-Authoritative STRICT evidence is sealed. Do **not** begin Step 3 (L4 package) until Step 3 plan is locked and approved (AGENTS.md gate).
+Authoritative STRICT evidence is sealed. Step 3 plan is **locked (v3)**. Do **not** begin Step 3 implementation until explicit AGENTS.md approval ("Implement" / "Proceed" / "Go ahead" / "Approved").
 
 ---
 
-##### E.0.0 Step 3 — L4 reproducibility package (**plan pending**)
+##### E.0.0 Step 3 — L4 verification package (**v3 locked**)
 
-**Status:** 📋 **Plan pending** — must conform to § **E.0.0 Planning format lock** before draft.
+**Status:** 🔒 **LOCKED** (2026-07-09) — plan only; **implementation not started**. Conforms to § E.0.0 Planning format lock.
 
-*Placeholder: L4 manifests, verification doc, baseline compare tooling — delivers E-Q2 complete.*
+###### Objective
+
+Assemble a publication-grade **L4 verification package** for every Step 2 run that E4 may cite: frozen artifacts, protocol-document hashes, package fingerprint, investigation-aware provenance, toolchain record, and a **required** verifier that emits machine-readable verification status — **without** performing or claiming reproduction.
+
+###### Core invariant
+
+> **Can an independent lab verify the published Phase E STRICT result from the sealed package alone (hashes, docs, env compare, scoped fields) — without re-running the benchmark?**
+
+###### Verification vs reproduction (locked — no ambiguity)
+
+| Term | Meaning | What the lab does | Step 3? |
+|------|---------|-------------------|---------|
+| **Verification** | Confirm the **published package** is intact and internally consistent with sealed Step 2 evidence | Check hashes, paths, manifest, protocol-doc pins, env-compare on **frozen** sidecars, scoped fields vs sealed summaries, package fingerprint, status JSON | **Yes — Step 3’s job** |
+| **Reproduction** | Independently **re-execute** the harness under the published recipe and obtain an equivalent result vs cited runs | Build from git; run `--authoritative` + `wiring_stage=B`; compare new outputs to sealed evidence | **No.** Recipe is **documented only**. Re-execution is a **future separate protocol step** if an audit requires it |
+
+**One-line rule:** Step 3 proves *“This package correctly describes and integrity-checks the published result.”* It does **not** prove *“A fresh run today matches the published result.”*
+
+**E-Q2 mapping (honest):**
+
+| Sub-question | Step 3 |
+|--------------|--------|
+| Can a lab **verify** every cited published run from the package? | **Yes** → `e_q2_verification: true` |
+| Can a lab **reproduce** every cited run by re-running? | **Not claimed** → `e_q2_reproduction: false` / `DEFERRED` |
+
+Do **not** use bare `e_q2: true` in status JSON (ambiguous). `l4_status: VERIFIED` means package verification passed — never “reproduction succeeded.”
+
+###### What this step proves
+
+| Proves | Mechanism |
+|--------|-----------|
+| Cited Step 2 runs have a complete L4 inventory | Manifest + per-file SHA-256 |
+| Protocol interpretation docs are pinned | SHA-256 of `phase_e_strict_v1.md`, `E2_PROTOCOL.md`, `E_ANALYSIS_PLAN.md`, `PHASE_E_PROVENANCE.md`, `phase_e_l4_verification.md` |
+| One stable citation id | `phase_e_l4_package_sha256` |
+| Env sidecars comparable on frozen A/B | `scripts/compare_benchmark_env.py` |
+| Investigation history is explicit | Provenance § Known Investigation History |
+| Toolchain of sealed evidence recorded | Provenance (not protocol) |
+| External lab can automate checks | **Required** `scripts/verify_phase_e_l4.py` |
+| E-Q2 **verification** answered | `phase_e_l4_status.json` |
+
+###### What this step does not prove
+
+| Deferred | Notes |
+|----------|--------|
+| **Reproduction** (re-execute harness) | Separate future protocol step; recipe `DOCUMENTED_NOT_EXECUTED` |
+| L4 dry-run | Same as reproduction — **out of Step 3** |
+| Paper sentence → evidence map | **E4** |
+| Phase E complete / E-Q5 | **E5** |
+| Generalization beyond trio | Forbidden (B1 deferred) |
+| Inferential statistics | Out of scope v0.1 |
+| That lift must be nonzero | Not a protocol expectation |
+
+###### Scope
+
+| In scope (**verification**) | Out of scope (**reproduction**) |
+|-----------------------------|----------------------------------|
+| Hash artifacts + protocol docs | Any `--authoritative` execution |
+| Package fingerprint | Treating a new run as evidence |
+| Provenance (investigation + toolchain) | Claiming `e_q2_reproduction: true` |
+| Required verifier + status JSON | Full unit-test suite / G2 |
+| Document reproduction **recipe** only | Executing that recipe |
+| Docs/manifest only (+ verifier script) | Harness / scoring / constant changes |
+
+**Cited runs (locked from Step 2 seal):**
+
+| Label | `run_id` |
+|-------|----------|
+| A | `run-1783639167839` |
+| B | `run-1783639378206` |
+
+**Reproduction recipe (document only — not executed in Step 3):**
+
+```bash
+THOTH_E2_WIRING_STAGE=B ./build/debug/external/basic_agent/run_episodic_learning_benchmark --authoritative
+```
+
+Manifest field: `reproduction_recipe.status = DOCUMENTED_NOT_EXECUTED`.
+
+**Docs wording:** Prefer “verify the published result” / “verification package.” Use “reproduce” only for the deferred re-execution path or the documented recipe.
+
+###### Files touched
+
+| File | Change (on implementation) |
+|------|----------------------------|
+| `docs/baselines/phase_e_l4_verification.md` | **New** — verification checklist + verification≠reproduction table |
+| `docs/baselines/phase_e_l4_status.json` | **New** — machine-readable status (schema below) |
+| `docs/baselines/PHASE_E_PROVENANCE.md` | **New** — provenance + investigation history + toolchain |
+| `docs/baselines/phase_e_run_manifest.json` | Enrich: file hashes, protocol-doc hashes, package digest, recipe status, seal SHAs |
+| `scripts/verify_phase_e_l4.py` | **Required** — verification checks only; must not invoke live harness |
+| `docs/cursor_list.md` | § E.0.0 Step 3 status after implementation |
+| `docs/benchmark_results/phase_e_strict_v1.md` | Short pointer to L4 package (no outcome rewrite) |
+| `external/basic_agent/*` | **None** |
+| Sealed `artifacts/phase_e/run_0{1,2}_*` | **Read-only** |
+
+###### Detailed work items
+
+| # | Work | Detail |
+|---|------|--------|
+| **1** | Artifact SHA-256 inventory | Cited files under `artifacts/phase_e/` (exclude `superseded_*` from cited set; inventory superseded as historical) |
+| **2** | Protocol/interpretation doc hashes | `phase_e_strict_v1.md`, `E2_PROTOCOL.md`, `E_ANALYSIS_PLAN.md`, `PHASE_E_PROVENANCE.md`, `phase_e_l4_verification.md` |
+| **3** | Package fingerprint | `phase_e_l4_package_sha256` — canonical `relpath<TAB>sha256\n` listing over member set; omit self-referential digest fields (two-pass) |
+| **4** | `PHASE_E_PROVENANCE.md` | Repo SHAs + **Known Investigation History** + **Toolchain** |
+| **5** | `phase_e_l4_verification.md` | Opens with verification≠reproduction; verify-from-frozen-artifacts checklist |
+| **6** | Env-compare frozen A/B | Document `compare_benchmark_env.py` result |
+| **7** | `verify_phase_e_l4.py` | Required; exit 0 only if verification checks pass; write/validate status JSON |
+| **8** | Emit `phase_e_l4_status.json` | Schema below |
+| **9** | Enrich run manifest | Hashes, digest, `reproduction_recipe.status=DOCUMENTED_NOT_EXECUTED` |
+| **10** | Pointers | `cursor_list.md` + `phase_e_strict_v1.md` |
+| **11** | Pause before E4 | No claims audit in this step |
+
+**Package fingerprint member set (locked):**
+
+1. Cited artifacts under `artifacts/phase_e/` (not `superseded_*`)
+2. `phase_e_run_manifest.json` with `phase_e_l4_package_sha256` omitted
+3. `PHASE_E_PROVENANCE.md`
+4. `phase_e_l4_verification.md`
+5. `docs/benchmark_results/phase_e_strict_v1.md`
+6. `docs/E2_PROTOCOL.md`
+7. `docs/phases/E_ANALYSIS_PLAN.md`
+
+**Machine-readable status (required):**
+
+```json
+{
+  "l4_status": "VERIFIED",
+  "e_q2_verification": true,
+  "e_q2_reproduction": false,
+  "e_q2_reproduction_status": "DEFERRED",
+  "evidence_scope": "n=3_strict_trio",
+  "package_version": 1,
+  "phase_e_l4_package_sha256": "<hex>",
+  "cited_run_ids": ["run-1783639167839", "run-1783639378206"],
+  "verifier": "scripts/verify_phase_e_l4.py"
+}
+```
+
+**Provenance — Known Investigation History (required):** Investigation hold (zero-token / silent LLM no-op) → EP-01.5 wiring → metrics `run_id` filter → E2-33 completion sync → superseded archives → current sealed A/B run ids + seal commit.
+
+**Provenance — Toolchain (required; not protocol):** compiler, CMake, preset, Python (verifier), Docker (N/A if unused), LLM backend/model, embedding model, llama.cpp N/A for Ollama seal, Thoth/`basic_agent` SHAs.
+
+###### Dangers / failure modes / things that must not change
+
+| Risk | Mitigation |
+|------|------------|
+| Collapsing verification into “E-Q2 complete” | Split status fields; docs use verification≠reproduction |
+| Recipe mistaken for completed reproduction | `DOCUMENTED_NOT_EXECUTED` |
+| Fresh run / dry-run treated as evidence | Forbidden in Step 3 |
+| `l4_status: VERIFIED` misread as reproduced | Explicit definition in verification doc + schema |
+| Overwriting sealed artifacts | Read-only; verifier fails on byte change |
+| Circular package hash | Digest omits self-referential fields |
+| Authority / scoring drift | No `basic_agent` changes |
+| Things that must not change | Protocol definitions · scoring · `LIFT_MARGIN` · case table · sealed Step 2 artifact bytes · evaluation semantics |
+
+###### Forbidden changes
+
+- Any L4 dry-run / fresh authoritative pair as part of Step 3  
+- Claiming `e_q2_reproduction: true` or bare ambiguous `e_q2: true` as Step 3 success  
+- Re-run until lift improves; change `LIFT_MARGIN` / case table  
+- Overwrite sealed Step 2 artifacts  
+- Begin E4/E5 in this step  
+- Harness/scoring/protocol constant edits  
+- Claim Phase E complete  
+- Present trio results as unqualified general claims  
+
+###### Exit criteria
+
+1. Plan locked in § E.0.0 Step 3 (v3) — ✅ this lock  
+2. On implementation: verifier exits 0 on **verification** checks only  
+3. `phase_e_l4_status.json` has `l4_status: VERIFIED`, `e_q2_verification: true`, `e_q2_reproduction: false`, `e_q2_reproduction_status: DEFERRED`  
+4. Manifest has per-file SHA-256 (artifacts + protocol docs) + `phase_e_l4_package_sha256`  
+5. `PHASE_E_PROVENANCE.md` includes Known Investigation History + Toolchain  
+6. Reproduction recipe documented, **not executed**  
+7. Env-compare on frozen A/B documented  
+8. No sealed artifact bytes changed; **no** new authoritative runs  
+9. **Pause for review** before Step 4  
+
+###### Deliverables / evidence produced
+
+| Deliverable | Path |
+|-------------|------|
+| L4 verification doc | `docs/baselines/phase_e_l4_verification.md` |
+| L4 status (machine-readable) | `docs/baselines/phase_e_l4_status.json` |
+| Provenance | `docs/baselines/PHASE_E_PROVENANCE.md` |
+| Enriched manifest | `docs/baselines/phase_e_run_manifest.json` |
+| Verifier (required) | `scripts/verify_phase_e_l4.py` |
+| Package id | `phase_e_l4_package_sha256` |
+| Status | `docs/cursor_list.md` § E.0.0 Step 3 |
+
+###### Dependencies on previous steps
+
+| Dependency | Status |
+|------------|--------|
+| E-AP v1.1 / E2 v1.2 | ✅ |
+| EP-01 + EP-01.5 + E2-33 | ✅ |
+| Step 2 sealed (E2-28 #0) | ✅ |
+| `compare_benchmark_env.py` | ✅ |
+| B1 | Deferred — out of L4 scope |
+| Reproduction / L4 dry-run | **Deferred** — not a Step 3 dependency |
+
+###### Pause
+
+**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+
+Step 3 plan is locked. Do **not** create L4 artifacts, verifier, or status JSON until explicit implementation approval per AGENTS.md.
 
 ---
 
