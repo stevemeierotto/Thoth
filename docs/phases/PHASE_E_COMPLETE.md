@@ -60,7 +60,7 @@ Future work may expand the evidence base but **does not alter** the certified Ph
 | Claims audit | [`phase_e_claims_audit.md`](../baselines/phase_e_claims_audit.md) · [`phase_e_claims_audit.json`](../baselines/phase_e_claims_audit.json) |
 | Step 4 plan lock / implementation | `3230362` · `6fdf086` |
 | Step 5 plan lock | `a9ee09c` |
-| Step 5 certification (this file) | Commit that introduces this document (recorded at issue) |
+| Step 5 certification (this file) | 0c0d72490378c476e1563cdab8cb20c2791284ab |
 | Phase D seal | [`PHASE_D_COMPLETE.md`](PHASE_D_COMPLETE.md) · `e0a9ba5` |
 | basic_agent (Step 2/3 harness) | `77508c4` |
 | Maximum evidence scope | `n=3_strict_trio` |
