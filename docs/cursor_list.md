@@ -1,11 +1,11 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **Step 2 sealed** · **Step 3 L4 verification ✅** · Step 4 pending)  
+**Last updated:** 2026-07-09 (Phase E — **Step 3 ✅** · **Step 4 plan locked (v2)** · implementation pending)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
 
-**Active E2 work:** ✅ **Step 2 sealed**. ✅ **Step 3 L4 verification package** (`l4_status: VERIFIED`; `e_q2_reproduction: DEFERRED`). **Step 4** next (await plan lock).
+**Active E2 work:** ✅ Steps 2–3 sealed. 🔒 **Step 4 plan locked (v2)** — claim-ID’d immutable claims audit (E-Q4). Await explicit **implementation** approval.
 
 **Baseline locked:** Headless cognitive loop verified — `run_test_suite` **TC-01–TC-07 all pass** (2026-06-27) with real `executeLLM`, RETRIEVAL→LLM plans, and GRAG scoring. Prior P0–P2 alignment (2026-06-17) in `completed_improvements_log.md`.
 
@@ -2258,7 +2258,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **EP-01.5** | Authoritative LLM wiring + planner contract | Harness repair — § **E.0.0 EP-01.5** ✅ |
 | **E2** | Authoritative STRICT runs (trio; B1 deferred) | `phase_e_strict_v1.md` + manifest — § **E.0.0 Step 2** ✅ sealed |
 | **E3** | L4 verification package | Manifests, verifier, `phase_e_l4_status.json` — ✅ · reproduction deferred |
-| **E4** | Claims audit | Paper sentence → evidence tier |
+| **E4** | Claims audit (plan 🔒 v2) | Claim-ID registry · immutable audit · Negative Findings |
 | **E5** | Close-out | `PHASE_E_COMPLETE.md` + E-Q1..Q5 seal |
 
 **Time estimate (rough):** E0 ✅ — E1 **3–5 h** — **EP-01 6–12 h** — E2 **4–8 h** + authoritative inference runtime — E3 **2–4 h** — E4 **3–6 h** — E5 **1–2 h**.
@@ -2272,10 +2272,10 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | **EP-01.5** | Wire live `LLMInterface` so authoritative mode actually invokes inference (harness repair only) |
 | **E2** | Execute the frozen protocol (collect evidence) — redo after EP-01.5 |
 | **E3** | Assemble the L4 **verification** package (others can verify the published result; reproduction deferred) |
-| **E4** | Audit every external claim against frozen evidence tiers |
+| **E4** | Audit every external **claim** (not whole docs) against frozen evidence — immutable audit + author actions |
 | **E5** | Issue the publication / readiness seal |
 
-**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Step 2 sealed** (2026-07-09). **Step 3 complete** (2026-07-09) — L4 verification `VERIFIED`; reproduction deferred. Step 4 plan pending.
+**Status:** 🔒 **E0 locked** (2026-07-09). **E1 · EP-01 · EP-01.5 · E2-33 complete**. **Step 2 sealed**. **Step 3 complete**. **Step 4 plan locked (v2)** — await implementation approval.
 
 ---
 
@@ -2335,7 +2335,7 @@ Each step subsection under § E.0.0 **must** contain these sections **in this ex
 | **EP-01** | ✅ Complete (2026-07-09) — `THOTH_E2_EP01=1` |
 | **E2** | ✅ Complete (2026-07-09) — `phase_e_strict_v1.md` · E2-28 PASS · `evidence_scope: n=3_strict_trio` |
 | **E3** | ✅ Complete (2026-07-09) — L4 verification package (`phase_e_l4_status.json`) |
-| **E4** | 📋 Pending — must conform to this format before lock |
+| **E4** | 🔒 Plan locked (v2, 2026-07-09) — await implementation approval |
 | **E5** | 📋 Pending — must conform to this format before lock |
 
 ---
@@ -3357,17 +3357,249 @@ Manifest field: `reproduction_recipe.status = DOCUMENTED_NOT_EXECUTED`.
 
 ###### Pause
 
-**STATUS: STEP 3 COMPLETE — PAUSED BEFORE STEP 4**
+**STATUS: STEP 3 COMPLETE — STEP 4 PLAN LOCKED — AWAIT IMPLEMENTATION APPROVAL**
 
-L4 verification package sealed. Do **not** begin Step 4 (claims audit) until Step 4 plan is locked and approved (AGENTS.md gate).
+L4 verification package sealed. Step 4 plan is **locked (v2)**. Do **not** begin Step 4 implementation until explicit AGENTS.md approval ("Implement" / "Proceed" / "Go ahead" / "Approved").
 
 ---
 
-##### E.0.0 Step 4 — claims audit (**plan pending**)
+##### E.0.0 Step 4 — claims audit (**v2 locked**)
 
-**Status:** 📋 **Plan pending** — must conform to § **E.0.0 Planning format lock** before draft.
+**Status:** 🔒 **LOCKED** (2026-07-09) — plan only; **implementation not started**. Conforms to § E.0.0 Planning format lock.
 
-*Placeholder: cold-read audit · paper sentence → evidence tier map — delivers E-Q4.*
+###### Audit principle (locked)
+
+> **When evidence and narrative disagree, the narrative changes — not the evidence.**
+
+###### Objective
+
+Produce a **deterministic, claim-ID’d, immutable audit** of every in-scope external claim: map each claim one-way to evidence (**Evidence Source** + **Citation Anchor**), assign documentation confidence and **initial audit disposition**, record **Negative Findings**, then record any **author actions** separately so the original audit is never rewritten. Cold-read pass criteria ensure no publishable sentence exceeds sealed evidence.
+
+###### Core invariant
+
+> **Could a technically competent reviewer, unfamiliar with the drafting history, infer this claim solely from the cited evidence?**  
+> If no → the claim fails the audit (initial disposition cannot be PASS).
+
+###### What this step proves
+
+| Proves | Mechanism |
+|--------|-----------|
+| Every in-scope claim has a stable ID | `C-NNN` registry (claim-level, not document-level) |
+| Initial audit is immutable | `audit_disposition` never rewritten after author edits |
+| Author edits are a separate trail | `author_action` + `final_status` |
+| Evidence source ≠ citation anchor | Split schema fields |
+| Evidence → claim is one-way | Audit principle + schema |
+| Negative empirical findings are first-class | **Negative Findings** (mandatory) |
+| E-Q4 answerable | Audit complete; no PASS without sole-evidence inferability |
+
+###### What this step does not prove
+
+| Deferred | Notes |
+|----------|--------|
+| Phase E complete / E-Q5 | **E5** |
+| Reproduction of cited runs | Still deferred (Step 3) |
+| Positive episodic lift | Not supported by Step 2 (`lift=0.0`) |
+| Novelty, importance, significance, or generalizability | **PASS does not imply these** |
+| Generalization beyond trio | Forbidden (B1 deferred) |
+| That editing `MYPAPER.md` alone completes E-Q4 | Edits are consequences of dispositions; audit trail preserves pre-edit evaluation |
+
+###### Scope
+
+**Unit of audit = individual claim**, not whole documents.
+
+| In scope | Out of scope |
+|----------|--------------|
+| Extract claims from `MYPAPER.md`, `E_PHASE_PROTOCOL.md`, and any cited thesis/grant text | Re-running benchmarks |
+| Assign IDs, types, Evidence Source, Citation Anchor, confidence, immutable audit disposition | Interpreting evidence to fit paper wording |
+| Separate author actions after audit | Rewriting audit rows after edits |
+| **Negative Findings** section (mandatory) | Claiming `e_q2_reproduction` |
+| Markdown + JSON audit artifacts | Harness / scoring / constant changes |
+| Cold-read attestation | Rubber-stamp same-session self-audit |
+
+**Claim registry schema (locked):**
+
+| Column | Meaning |
+|--------|---------|
+| **Claim ID** | Stable id, e.g. `C-001` |
+| **Source** | Document + section (e.g. `MYPAPER §3.2`) |
+| **Text** | Exact claim sentence (or minimal quote) **as audited** — frozen at audit time |
+| **Type** | From E-AP claim taxonomy |
+| **Evidence Source** | Class of support: Step 2 STRICT, Phase D seal, GRAG diagnostics, L4 package, None, … |
+| **Citation Anchor** | Concrete pointers: `run_id`(s), seal commit, `phase_e_l4_package_sha256`, Phase D commit, GRAG path, … |
+| **Confidence** | DIRECT / SCOPED / INFERRED / SPECULATIVE |
+| **Audit disposition** | Initial evaluation only — **immutable**: PASS / UNSUPPORTED / DEFER |
+| **Author action** | None / NARROW / REMOVE / DEFER (after audit) |
+| **Final status** | Publishability after author action |
+| **Notes** | Scope labels, rewrite summary; optional `revised_text` (not a substitute for audited Text) |
+
+**Example:**
+
+| Claim | Audit | Author Action | Final Status |
+|-------|-------|---------------|--------------|
+| C-002 | UNSUPPORTED | NARROW | PASS (after revision) |
+
+###### Immutable audit (locked)
+
+> The claims audit records the **initial evaluation** and is **never rewritten** after author edits. Subsequent edits are recorded as **author actions** while preserving the original **audit disposition**.
+
+- Do not update `audit_disposition` from UNSUPPORTED → PASS.  
+- Record NARROW/REMOVE on `author_action`; set `final_status` accordingly.  
+- Audited **Text** stays the pre-edit wording.
+
+###### Dispositions (locked)
+
+| Field | Values | Role |
+|-------|--------|------|
+| **Audit disposition** | **PASS**, **UNSUPPORTED**, **DEFER** | What the evidence supports *before* editing |
+| **Author action** | **None**, **NARROW**, **REMOVE**, **DEFER** | What the author did afterward |
+| **Final status** | e.g. PASS (as written), PASS (after revision), REMOVED, DEFERRED | Publishability outcome |
+
+- **UNSUPPORTED** = audit result before editing (preserves trail).  
+- **REMOVE** = author chooses to delete (action, not the initial audit label).  
+- **DEFER** may appear as audit disposition and/or author action.
+
+###### PASS meaning (locked)
+
+> **PASS** indicates **only** that the claim is supported by the cited evidence.  
+> It does **not** imply novelty, importance, significance, or generalizability beyond the documented scope.
+
+###### Evidence is one-way (locked)
+
+> Claims may cite evidence. Evidence may never be interpreted in light of claims.
+
+Forbidden: “The paper says X, therefore this benchmark must mean X.” Benchmarks and seals stand alone; claims are downstream consumers.
+
+###### Evidence Source vs Citation Anchor (locked)
+
+| Field | Purpose |
+|-------|---------|
+| **Evidence Source** | What class of evidence (Step 2, Phase D, GRAG, …) |
+| **Citation Anchor** | Exact machine-checkable pointers (`run_id`, commits, L4 SHA, …) |
+
+###### Documentation confidence (locked — not statistical)
+
+| Level | Meaning | Publishable? |
+|-------|---------|--------------|
+| **DIRECT** | Explicitly demonstrated by cited evidence | Yes if audit PASS (and scope labels if needed) |
+| **SCOPED** | Demonstrated only for stated scope (e.g. `n=3_strict_trio`) | Yes only with explicit scope label |
+| **INFERRED** | A conclusion that **necessarily** follows from the cited evidence **without introducing additional assumptions** | Yes only if necessity holds and is stated |
+| **SPECULATIVE** | Not entailed / requires extra assumptions | **Not publishable** → UNSUPPORTED / DEFER / REMOVE |
+
+###### Cold-read pass criterion (locked)
+
+A technically competent reviewer **unfamiliar with the drafting history** must answer for each claim:
+
+> **Could I infer this claim solely from the cited evidence?**
+
+| Answer | Result |
+|--------|--------|
+| Yes | Eligible for audit **PASS** |
+| No | **Fail** — audit disposition **UNSUPPORTED** (or DEFER if out of current evidence scope) |
+
+Self-audit in the same session as authoring is **not** sufficient for E-Q4 green (E-AP / E protocol).
+
+###### Negative Findings (mandatory — locked)
+
+Required section in the audit artifact, including at least:
+
+- No measurable episodic lift observed on sealed authoritative trio (`lift = 0.0`).  
+- This is **evidence**, not a benchmark/protocol failure.  
+- Claims revised (or removed) accordingly; no claim may imply positive episodic lift on this evidence base.
+
+###### Files touched
+
+| File | Change (on implementation) |
+|------|----------------------------|
+| `docs/baselines/phase_e_claims_audit.md` | **New** — principle, registry, Negative Findings, cold-read attestation |
+| `docs/baselines/phase_e_claims_audit.json` | **New** — machine-readable rows (immutable audit + author_action + final_status) |
+| `docs/MYPAPER.md` (and other in-scope external text) | Only via author actions after UNSUPPORTED recorded |
+| `docs/cursor_list.md` | § E.0.0 Step 4 status after implementation |
+| `docs/phases/E_ANALYSIS_PLAN.md` | **None** unless protocol amendment required |
+| `external/basic_agent/*` / `tests/*` | **None** |
+
+###### Detailed work items
+
+| # | Work | Detail |
+|---|------|--------|
+| **1** | Inventory claims | Claim-level extraction from in-scope docs (not whole-document rubber-stamp) |
+| **2** | Assign `C-NNN` | Stable IDs; fill Type, Evidence Source, Citation Anchor, Confidence |
+| **3** | Cold-read sole-evidence test | Immutable **audit disposition** PASS / UNSUPPORTED / DEFER |
+| **4** | Write **Negative Findings** | Mandatory section (lift=0.0 as evidence) |
+| **5** | Author actions | NARROW / REMOVE / DEFER without rewriting audit disposition |
+| **6** | Set **final status** | Publishability after revision |
+| **7** | Cold-read attestation | Gap / second reviewer / no-drafting-context |
+| **8** | Emit artifacts | `phase_e_claims_audit.md` + `.json`; update `cursor_list.md` |
+| **9** | Pause before Step 5 | No Phase E close-out in this step |
+
+**Cited evidence anchors (from Steps 2–3):**
+
+| Anchor | Value |
+|--------|-------|
+| Run A | `run-1783639167839` |
+| Run B | `run-1783639378206` |
+| L4 package | `phase_e_l4_package_sha256` in `phase_e_l4_status.json` |
+| Scope | `n=3_strict_trio` |
+
+###### Dangers / failure modes / things that must not change
+
+| Risk | Mitigation |
+|------|------------|
+| Rewriting audit after edits | Immutable audit rule + split columns |
+| Stretching “logical consequence” | INFERRED = **necessary**, no extra assumptions |
+| Over-reading PASS | PASS ≠ novelty/importance/significance/generalizability |
+| Author-intent leakage in cold-read | “Unfamiliar with drafting history” wording |
+| Evidence bent to fit paper | One-way evidence + narrative-changes principle |
+| Hiding lift=0 | Mandatory Negative Findings |
+| Doc-level rubber-stamp | Claim IDs required |
+| Things that must not change | Sealed Step 2/3 artifacts · protocol constants · scoring · `LIFT_MARGIN` · case table · audit_disposition after first write |
+
+###### Forbidden changes
+
+- Mutate `audit_disposition` after author edits  
+- PASS if claim not solely inferable from cited evidence  
+- Interpreting benchmarks in light of paper claims  
+- Unqualified generalization / positive lift claims on trio evidence  
+- Citing Phase D machinery proofs as episodic-lift evidence  
+- Skipping Negative Findings  
+- Benchmark re-runs or harness/scoring changes  
+- Claiming Phase E / E-Q5 complete  
+- Same-session self-audit as sole E-Q4 green path  
+
+###### Exit criteria
+
+1. Plan locked in § E.0.0 Step 4 (v2) — ✅ this lock  
+2. On implementation: every in-scope claim has full schema including Evidence Source + Citation Anchor  
+3. Audit dispositions immutable; author actions recorded separately  
+4. No audit PASS without sole-evidence inferability (competent reviewer, no drafting history)  
+5. INFERRED only when conclusion **necessarily** follows without added assumptions  
+6. Negative Findings section present and accurate  
+7. Cold-read attestation recorded  
+8. PASS claims carry correct scope; SPECULATIVE not left as audit PASS  
+9. E-Q4 marked yes for remaining publishable claims (final status)  
+10. **Pause for review** before Step 5  
+
+###### Deliverables / evidence produced
+
+| Deliverable | Path |
+|-------------|------|
+| Claims audit (human) | `docs/baselines/phase_e_claims_audit.md` |
+| Claims audit (machine) | `docs/baselines/phase_e_claims_audit.json` |
+| Status | `docs/cursor_list.md` § E.0.0 Step 4 |
+
+###### Dependencies on previous steps
+
+| Dependency | Status |
+|------------|--------|
+| E-AP v1.1 claim taxonomy + E4 handoff | ✅ |
+| Step 2 sealed (`lift=0.0` observation) | ✅ |
+| Step 3 L4 verification (`VERIFIED`) | ✅ |
+| B1 | Deferred — generalization claims cannot audit-PASS |
+
+###### Pause
+
+**STATUS: WAITING FOR IMPLEMENTATION APPROVAL**
+
+Step 4 plan is locked. Do **not** create claims-audit artifacts or edit external claim text until explicit implementation approval per AGENTS.md.
 
 ---
 
