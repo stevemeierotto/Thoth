@@ -1,0 +1,74 @@
+{
+  "contract_version": "AC v1.0",
+  "wilson": {
+    "successes": 7,
+    "n": 10,
+    "rate": 0.7,
+    "ci_low": 0.353050,
+    "ci_high": 0.935934
+  },
+  "confidence": {
+    "high": {
+      "successes": 29,
+      "n": 30,
+      "ci_low": 0.828300,
+      "ci_high": 0.999084,
+      "expected_label": "high"
+    },
+    "low": {
+      "successes": 3,
+      "n": 5,
+      "ci_low": 0.123267,
+      "ci_high": 0.989835,
+      "expected_label": "low"
+    }
+  },
+  "trend": {
+    "improving": {
+      "current_rate": 0.8,
+      "prior_rate": 0.65,
+      "prior_ci_low": 0.55,
+      "prior_ci_high": 0.75,
+      "confidence_label": "medium",
+      "expected": "improving"
+    },
+    "stable_delta": {
+      "current_rate": 0.62,
+      "prior_rate": 0.6,
+      "prior_ci_low": 0.45,
+      "prior_ci_high": 0.75,
+      "confidence_label": "medium",
+      "expected": "stable"
+    },
+    "stable_ci": {
+      "current_rate": 0.7,
+      "prior_rate": 0.65,
+      "prior_ci_low": 0.6,
+      "prior_ci_high": 0.8,
+      "confidence_label": "medium",
+      "expected": "stable"
+    },
+    "stable_confidence": {
+      "current_rate": 0.8,
+      "prior_rate": 0.6,
+      "prior_ci_low": 0.4,
+      "prior_ci_high": 0.7,
+      "confidence_label": "low",
+      "expected": "stable"
+    },
+    "declining": {
+      "current_rate": 0.5,
+      "prior_rate": 0.75,
+      "prior_ci_low": 0.65,
+      "prior_ci_high": 0.85,
+      "confidence_label": "medium",
+      "expected": "declining"
+    }
+  },
+  "anchor": {
+    "window_end_ms": 1800001000000,
+    "window_start_ms": 1797581800000,
+    "window_days": 28,
+    "foo_complete_ignored": true
+  }
+}

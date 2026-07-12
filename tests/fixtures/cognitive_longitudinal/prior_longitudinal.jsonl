@@ -1,0 +1,2 @@
+{"event":"COGNITIVE_LONGITUDINAL_SUMMARY","metric_schema_version":"1.0","window":{"start_ms":1797581800000,"end_ms":1799000000000,"days":28,"anchor":"official_benchmark_execution"}}
+{"event":"COGNITIVE_LONGITUDINAL_SUMMARY","metric_schema_version":"0.9","window":{"start_ms":1797581800000,"end_ms":1799500000000,"days":28,"anchor":"official_benchmark_execution"}}

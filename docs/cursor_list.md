@@ -72,7 +72,8 @@ Agree on direction; adjust sequencing:
 ### Consolidated roadmap (reflection snapshot)
 
 ```
-Now      E2 Phase D (D1+)           (passive consumer evolution — D0 locked)
+Done     E2 Phase E v0.1 certified   (empirical validation — paused before Zenodo)
+Done     E2 Phase D                 (evolution trust — sealed 2026-07-08)
 Done     E2 Phase C                 (integration tier — locked 2026-07-05)
 Done     E2 Phase B                 (authoritative STRICT baseline)
 Next     C6 Phase 3 + E3             (longitudinal metrics; SCR harness)
@@ -92,12 +93,13 @@ Last     UI polish (§6), S1 apply_diff (owner discretion)
 
 ---
 
-## E2 — Episodic learning eval (Phases A–C complete; Phase D — D3 Step 2 pending)
+## E2 — Episodic learning eval (Phases A–E complete; Phase E v0.1 certified)
 
-**Status:** 🔒 Phase C locked (2026-07-05); Phase D D0 locked — ✅ **D1–D2 complete**; **D3 Step 1 complete** — **D3 Step 2 plan approved** (§ D.3.0); paused before Step 2 implementation  
+**Status:** 🔒 Phases A–D sealed; ✅ **Phase E v0.1 certified** (2026-07-09) — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); paused before Zenodo V3  
 **Spec:** `docs/E2_PROTOCOL.md` v1.2 (preregistered constants; do not change mid-run)  
 **Phase C close-out:** `docs/phases/PHASE_C_COMPLETE.md`  
 **Phase D protocol:** `docs/D_PHASE_PROTOCOL.md` v1.0  
+**Phase E protocol:** `docs/E_PHASE_PROTOCOL.md` v0.1  
 **What this is:** Converting a coupled cognitive runtime into a **two-layer evaluation kernel** with determinism boundaries — not a refactor.
 
 | Layer | Role |
@@ -201,7 +203,8 @@ See **`docs/E2_PROTOCOL.md` § STRICT retrieval boundary** for the canonical dia
 | **A5** | Diagnostic fuse; A3→A4 transition enforced; failure-domain separation; first `rag.cpp` touch (guard only) | ✅ 2026-07-02 — **E2-11** |
 | **B** | STRICT re-baseline (after 0 + A1–A5) | ✅ 2026-07-04 — authoritative baseline; fingerprint `1ce31c6a…` |
 | **C** | Integration tier (C1–C5) | ✅ 2026-07-05 — passive eval in architecture; path equivalence proven |
-| **D** | Evolution tier (D0–D5) | 🔒 D0 locked; D1–D2 ✅; D3 Step 1 ✅ — **Step 2 pending** (§ D.3.0) |
+| **D** | Evolution tier (D0–D5) | ✅ Complete 2026-07-08 — [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md) |
+| **E** | Empirical validation | ✅ Certified 2026-07-09 — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); paused before Zenodo V3 |
 
 **Scope estimate:** Phase A ≈ **3–5 sub-sessions** (not one session) — largest change since E1 Checkpoint C.
 
@@ -287,7 +290,7 @@ If a component influences planning, retrieval, memory, evaluation, or benchmark 
 | Constitutional Rule | Observe / Record / Replay / Present only |
 | Passive Consumer Law | All five conditions per new subscriber |
 
-**Status:** 🔒 **D0 locked** (2026-07-05). ✅ **E2-D1 complete** (2026-07-05). ✅ **D2 complete** + **D2-03 resolved** (2026-07-07). ✅ **D3 complete** (2026-07-07). 🔒 **D4 plan locked** (§ **D.4.0**).
+**Status:** 🔒 **D0 locked** (2026-07-05). ✅ **E2-D1 complete** (2026-07-05). ✅ **D2 complete** + **D2-03 resolved** (2026-07-07). ✅ **D3 complete** (2026-07-07). ✅ **D4 complete** (2026-07-08). ✅ **D5 complete** + **Phase D sealed** (2026-07-08). ✅ **Phase E certified** (2026-07-09) — paused before Zenodo V3.
 
 ---
 
@@ -298,7 +301,7 @@ If a component influences planning, retrieval, memory, evaluation, or benchmark 
 **Authority:** [`docs/D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) § D3  
 **Prerequisites:** D1 ✅, D2 ✅, D2-03 ✅, G1/G2 ✅, **D3 Step 1 ✅**  
 **Estimate:** 4–6 h (remaining Steps 2–6)  
-**Status:** 🔒 **v1 locked** (2026-07-07) — **Step 1 complete** — **Step 2 plan approved** — paused before Step 2 implementation
+**Status:** 🔒 **v1 locked** (2026-07-07) — ✅ **D3 complete** (Steps 1–6 green) — see footer below.
 
 ##### Proof obligation (what D3 must prove)
 
@@ -859,7 +862,7 @@ Each step establishes a different architectural invariant; the umbrella gate pro
 | `executive_controller.*` | No subscriber-count or metrics/trace branching |
 | Phase B export / STRICT harness | Authority frozen |
 
-**Status:** 🔒 **v1 locked** (2026-07-07). **D3 complete** — proof suite Steps 1–6 green; paused before D4 implementation.
+**Status:** 🔒 **v1 locked** (2026-07-07). **D3 complete** — proof suite Steps 1–6 green; D4–D5 ✅; Phase E certified.
 
 #### D.4.0 — E2-D4 implementation plan (live INTEGRATION connection — **v1 locked**)
 
@@ -1971,7 +1974,7 @@ On green gate, Step 3 records:
 
 ##### D.5.0 Step 4 — phase closure (**v1 locked**)
 
-**Status:** 🔒 **v1 locked** (2026-07-08) — ✅ **Step 4 complete** (2026-07-08) — **Phase D complete** — paused before Phase E.
+**Status:** 🔒 **v1 locked** (2026-07-08) — ✅ **Step 4 complete** (2026-07-08) — **Phase D complete** — Phase E later certified (2026-07-09); see [`PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md).
 
 ###### Core invariant (why Step 4 exists)
 
@@ -2166,7 +2169,7 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | `docs/D_PHASE_PROTOCOL.md` | D5 complete pointer |
 | `external/basic_agent/*` | **None** |
 
-**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 ✅** — **Step 4 ✅** — **Phase D complete** — paused before Phase E (empirical validation).
+**Status:** 🔒 **v1 locked** (2026-07-08). **Step 1 ✅** — **Step 2 ✅** — **Step 3 ✅** — **Step 4 ✅** — **Phase D complete** — Phase E later certified (2026-07-09); see [`PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md).
 
 ---
 
@@ -2194,15 +2197,15 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 
 **Verification scope:** Documentation + pinned authoritative runs for in-scope claims. Full suite / G2 optional post-E hygiene.
 
-##### Current maturity (honest)
+##### Current maturity (honest — post Phase E certification)
 
 | Area | Assessment |
 |------|------------|
 | Engineering rigor | Strong |
-| Reproducibility infrastructure | Strong |
-| Benchmark methodology | Good but limited |
+| Reproducibility infrastructure | Strong (L4 verification package ✅; execution-based reproduction deferred) |
+| Benchmark methodology | Good but limited (`n=3_strict_trio`; B1 deferred) |
 | Statistical rigor | Early — inference intentionally deferred |
-| Publication readiness | Not yet |
+| Publication readiness | **Scoped yes** within certified evidence — Zenodo V3 / generalization **not yet** |
 
 ##### Five questions Phase E must answer (locked intent — see protocol)
 
@@ -2230,14 +2233,14 @@ Mirror [`PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) structure. The seal d
 | L1 Source reproducible | ✅ A–D |
 | L2 Environment reproducible | ✅ E1 |
 | L3 Benchmark reproducible | ✅ B (v1.2 trio) |
-| L4 Publication package reproducible | 📋 Phase E target |
+| L4 Publication package reproducible | ✅ Verification package (execution-based reproduction deferred) |
 
 ##### Publication targets (separate)
 
 | Target | Question | Status |
 |--------|----------|--------|
 | **Architecture** | Built correctly? Authority preserved? Deterministic? | Phase D ✅ |
-| **Empirical** | Does memory improve learning? How much? Uncertainty? | Phase E 📋 |
+| **Empirical** | Does memory improve learning? How much? Uncertainty? | Phase E ✅ certified (scoped; lift=0.0 on trio) |
 
 ##### Threats to validity (document in close-out)
 
@@ -3889,9 +3892,9 @@ STRICT / INTEGRATION share eval types and schema → **behavioral separation**, 
 
 ## Active backlog
 
-### 0. Cognitive loop hardening — **work now**
+### 0. Cognitive loop hardening — ✅ complete (C1–C7)
 
-End-to-end goal execution works; next focus is **quality, speed, and evidence** — not wiring.
+End-to-end goal execution works; C1–C7 quality/speed/evidence hardening is shipped. Remaining focus is **post-E eval forks** (B1, C6 Phase 3, E3, M4, G1d) — not re-wiring the loop.
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
@@ -4002,7 +4005,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **B3** | Reduce test log noise | 📋 | Repeated embedding migration log per fixture |
 | **B4** | Compiler warnings (~14 on debug build) | 📋 | Unused params in stubs/GUI |
 | **E1** | Benchmark environment pinning | ✅ | A–E complete 2026-07-01 — **`docs/benchmark_environment.md`** |
-| **E2** | Episodic memory learning eval | 🔶 | Protocol v1.2 + eval kernel ✅; harness still on runtime path — **§ E2** for checkpoint plan (`docs/E2_PROTOCOL.md`) |
+| **E2** | Episodic memory learning eval | ✅ | Phases A–E complete; Phase E v0.1 certified 2026-07-09 — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); paused before Zenodo V3 |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
 | **G1d** | Trajectory bucket diagnostic | 🔶 | Harness wired — `run_trajectory_ablation_benchmark`; Ollama 30-case run + decision pending — **`docs/trajectory_ablation_benchmark.md` v1.0** |
 
@@ -4050,6 +4053,8 @@ From `ui_improvements.md` §11–§12 — research console shell exists; these a
 
 **Do not start until C1–C7 are complete and Phase 3–4 internals are in good shape.** These are the next layer of capability — beyond fixing context management and measuring what exists today. Spec detail belongs in `improvements.md` when any item is promoted to active work.
 
+**Promotion criteria (normative):** [`improvements.md`](improvements.md) § **C6 Phase 3 — F-series promotion gate (C6.3-04)** — this section lists horizon items only; do not duplicate gate rules here.
+
 | ID | Direction | Status | Notes |
 |----|-----------|--------|-------|
 | **F1** | **Better planning heuristics** | 📋 | Move past scaffold adherence: goal decomposition, cost/risk-aware step ordering, dynamic RETRIEVAL depth, domain-aware plan templates. Builds on **C1** (validator + budgets) and **G2** (subgoal trees). |
@@ -4087,20 +4092,20 @@ Three independent reviewers reading the same codebase converged on the same diag
 
 The third tier does not exist yet. It is the missing bridge between "it works" and "it gets better." Building it is the primary remaining research obligation.
 
-#### Consolidated priority order (all reviewers)
+#### Consolidated priority order (post Phase E — 2026-07-09)
 
-| Step | Item | Rationale |
-|------|------|-----------|
-| **1** | **M3** — `/prune` admin command | Closes operational memory loop; unblocks debugging and consolidation demos |
-| **2** | **E1** — Environment pinning | ✅ Complete 2026-07-01 — see `docs/benchmark_environment.md` |
-| **3** | **E2** — Kernel wiring migration | Phase 0 (pin bug) → A1–A5 sub-checkpoints → Phase B re-baseline. See **`cursor_list.md` § E2** + **`docs/E2_PROTOCOL.md`**. STRICT tests declared-episode retrieval, not organic consolidation (M1.5 covers that). |
-| **4** | **M4** — `MemoryPruner::restore(session_id, range)` | Built into already-verified eval environment. Foundation F3 needs; do not parallel-track with E2 |
-| **5** | **G1 diagnostic** — Trajectory scoring ablation | `w_t=0` vs `0.2` vs empty T ablation is cheap. Tells you tune vs drop vs redesign before touching anything else in retrieval. Do not promote F5 until this completes |
-| **6** | **E3** — SCR in CI | Wire Strategy Conformance Rate into continuous benchmark. Makes strategy promotion a regression signal not a one-off paper figure |
-| **7** | **C6 Phase 3** — Accumulated multi-session analysis | Longitudinal analysis tooling over weeks of Ollama/GUI runs. Establishes the third testing tier |
-| **8** | **B1** — 30 hardened corpus cases | Run under pinned E1 environment. Defensible benchmark claims for V3 |
-| **9** | **V3** — Zenodo re-upload | Only after B1 + E1 pinned runs. Do not re-publish stale or unreproducible numbers |
-| **10** | **F-series** — Chosen by evidence | F1/F3 are highest-leverage next capability layer. Do not promote until E2/E3 data identifies the actual bottleneck — retrieval, decomposition, or tool choice |
+| Step | Item | Status | Rationale |
+|------|------|--------|-----------|
+| — | **M3** — `/prune` admin command | ✅ | Operational memory loop closed |
+| — | **E1** — Environment pinning | ✅ | `docs/benchmark_environment.md` |
+| — | **E2** — Phases A–E | ✅ | Phase E certified; paused before Zenodo |
+| **1** | **M4** — `MemoryPruner::restore(session_id, range)` | 📋 | Foundation F3 needs; operators cannot replay archives |
+| **2** | **G1d** — Trajectory scoring ablation | 🔶 | Decide tune vs drop vs redesign before F5 |
+| **3** | **E3** — SCR in CI | 📋 | Strategy promotion as regression signal |
+| **4** | **C6 Phase 3** — Accumulated multi-session analysis | ✅ | C6.3-01–06 ✅; operator guide [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md); fixture catalog [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md) |
+| **5** | **B1** — 30 hardened corpus cases | 📋 | Required before generalization / V3 Zenodo |
+| **6** | **V3** — Zenodo re-upload | ⏸️ | Only after B1 + pinned-env runs; scoped Phase E numbers only |
+| **7** | **F-series** — Chosen by evidence | 📋 | Promote per [`improvements.md`](improvements.md) § C6.3-04 (mandatory gates + owner approval) |
 
 #### What to avoid
 
@@ -4109,9 +4114,9 @@ The third tier does not exist yet. It is the missing bridge between "it works" a
 - **Bulk F-series promotion** — the horizon list is correctly deferred; eval data should drive the order
 - **Parallel-tracking M4 and F3** — M4 is the foundation F3 needs
 
-#### Missing definition (open question to resolve)
+#### Promotion criteria — resolved (C6.3-04 ✅ 2026-07-11)
 
-The roadmap correctly defers F-series until eval data points the way, but no promotion criteria are defined. Before starting E2/E3, document: how many sessions, what delta in SCR or nDCG, and what threshold triggers promotion of the first F-series item. Without this the eval layer has no exit condition.
+**Resolved.** F-series promotion gates, procedure, and owner-approval record template are normative in [`improvements.md`](improvements.md) § **C6 Phase 3 — F-series promotion gate (C6.3-04)**. This section does not duplicate those criteria.
 
 ---
 
@@ -4155,15 +4160,20 @@ Done    E2 Phase D5 Step 1 — authority meta-proof (`THOTH_E2_D5_AUTHORITY=1`) 
 Done    E2 Phase D5 Step 2 — behavioral preservation (`THOTH_E2_D5_C5=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 3 — determinism meta-proof (`THOTH_E2_D5_DETERMINISM=1`) ✅ 2026-07-08
 Done    E2 Phase D5 Step 4 — phase closure (`THOTH_E2_D5=1`) + `PHASE_D_COMPLETE.md` ✅ 2026-07-08
-Next 1  **Phase E Step 3** — L4 reproducibility package (§ **E.0.0 Step 3** pending — plan draft required)
-Next 3  C6 Phase 3 + E3 — longitudinal metrics; SCR harness
-Next 4  M4 — range restore (M3 ✅)
-Next 5  B1 (if V3 Zenodo) — hardened research corpus
+Done    E2 Phase E Step 1 — E-AP v1.1 analysis plan lock ✅ 2026-07-09
+Done    E2 Phase E EP-01 / EP-01.5 — authoritative inference harness ✅ 2026-07-09
+Done    E2 Phase E Step 2 — authoritative STRICT trio sealed ✅ 2026-07-09
+Done    E2 Phase E Step 3 — L4 verification package ✅ 2026-07-09
+Done    E2 Phase E Step 4 — claims audit ✅ 2026-07-09
+Done    E2 Phase E Step 5 — `PHASE_E_COMPLETE.md` certified ✅ 2026-07-09
+Next 1  **M4** — range restore (or **G1d** / **C6 Phase 3** / **E3** — pick fork)
+Next 2  **B1** — 30-case hardened corpus (required before V3 Zenodo)
+Next 3  **C6 Phase 3 + E3** — longitudinal metrics; SCR harness
 Later   F3/F1 — when eval identifies bottleneck (§ Reflection)
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)
 Horizon Tier 8 future cognitive expansion (F1–F8; see §8)
-External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅; E1 ✅)
+External V3 — Zenodo MYPAPER re-upload only after B1 + pinned-env runs (Phase E scoped numbers only)
 ```
 
 **GitHub (2026-07-01):** Thoth workspace + Basic_agent submodule — E1 Checkpoints D3–D5 harness wiring pushed; **Checkpoint E** (double-bind, Python tooling, close-out) implemented locally.
@@ -4196,13 +4206,15 @@ External V3 — Zenodo MYPAPER re-upload when benchmark corpus stable (C2 ✅; E
 
 | Need | File |
 |------|------|
-| **E2 protocol + implementation checkpoints** | **`cursor_list.md` § E2**, **`docs/E2_PROTOCOL.md`** |
+| **E2 protocol + checkpoints** | **`cursor_list.md` § E2**, **`docs/E2_PROTOCOL.md`** |
+| **Phase E certification (current pause)** | **`phases/PHASE_E_COMPLETE.md`** — paused before Zenodo V3 |
+| **Phase seals (B–E)** | `phases/PHASE_B_COMPLETE.md` … `PHASE_E_COMPLETE.md` |
 | **Completed E2/Cognate checkpoint history** | **`cursor_list_archive.md`** (verbatim archive; active work in **`cursor_list.md`**) |
 | **E1 benchmark environment** | **`docs/benchmark_environment.md`** |
 | Full phase specs | `improvements.md` |
 | What's actually shipped | `completed_improvements_log.md` |
 | Honest gaps + external review | `audit.md` §5 |
-| **Reflection & next priorities** | **`cursor_list.md` § Reflection & analysis** |
+| **Reflection & next priorities** | **`cursor_list.md` § Reflection & analysis** + post-E priority table |
 | GRAG implementation truth | `GRAG.md`, `benchmark_results.md` |
 | Cognate / executive truth | `cognate.md`, `PLAN.md` |
 | GRAG paper (Zenodo) | `MYPAPER.md` |

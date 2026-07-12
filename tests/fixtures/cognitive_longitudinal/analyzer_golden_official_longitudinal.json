@@ -1,0 +1,122 @@
+{
+  "event": "COGNITIVE_LONGITUDINAL_SUMMARY",
+  "protocol_version": "C6.3 v0.2.1",
+  "metric_schema_version": "1.0",
+  "analyzer_version": "0.2.0",
+  "generated_at_ms": 1800002000000,
+  "report_completeness": "complete",
+  "evidence_scope": "official_longitudinal",
+  "confidence_label": "high",
+  "window": {
+    "start_ms": 1797581800000,
+    "end_ms": 1800001000000,
+    "days": 28,
+    "anchor": "official_benchmark_execution"
+  },
+  "reproducibility": {
+    "input_log_path": "tests/fixtures/cognitive_longitudinal/metrics_official_longitudinal.jsonl",
+    "input_artifact_paths": [
+      "tests/fixtures/cognitive_longitudinal/metrics_official_longitudinal.jsonl",
+      "tests/fixtures/cognitive_longitudinal/app_log_official_longitudinal.jsonl",
+      "tests/fixtures/cognitive_longitudinal/decision_trace_official_longitudinal.jsonl",
+      "tests/fixtures/cognitive_longitudinal/benchmark_env_official_longitudinal.jsonl"
+    ],
+    "benchmark_run_ids_consumed": [
+      "run-ol01",
+      "run-ol02",
+      "run-ol03",
+      "run-ol04",
+      "run-ol05",
+      "run-ol06",
+      "run-ol07",
+      "run-ol08",
+      "run-ol09",
+      "run-ol10",
+      "run-ol11",
+      "run-ol12",
+      "run-ol13",
+      "run-ol14",
+      "run-ol15",
+      "run-ol16",
+      "run-ol17",
+      "run-ol18",
+      "run-ol19",
+      "run-ol20",
+      "run-ol21",
+      "run-ol22",
+      "run-ol23",
+      "run-ol24",
+      "run-ol25",
+      "run-ol26",
+      "run-ol27",
+      "run-ol28",
+      "run-ol29",
+      "run-ol30",
+      "run-ol31",
+      "run-ol32"
+    ]
+  },
+  "categories": {
+    "performance": {
+      "success_rate": 1.0,
+      "ci_low": 0.889692,
+      "ci_high": 1.0,
+      "variance": 0.0,
+      "trend": "stable",
+      "eligible_count": 32
+    },
+    "efficiency": {
+      "total_wall_clock_ms_p50": 0.0,
+      "total_wall_clock_ms_p95": 0.0,
+      "total_tokens_p50": 0.0,
+      "reflection_count_mean": 0.0,
+      "revisions_count_mean": 0.0
+    },
+    "memory": {
+      "retrieved_chunk_count_mean": 0.0,
+      "grag_alpha_mean": 0.0,
+      "post_consolidation_success_rate_delta": 0.0
+    },
+    "planning": {},
+    "safety": {
+      "reproducibility_ok": true,
+      "tier_contamination": false,
+      "benchmark_regression": false,
+      "official_gates_green": true
+    }
+  },
+  "segments": {
+    "plan_reused_false": {
+      "goal_count": 32,
+      "eligible_count": 32,
+      "success_rate": 1.0,
+      "ci_low": 0.889692,
+      "ci_high": 1.0,
+      "confidence_label": "high",
+      "trend": "stable"
+    },
+    "strategy_injected_false": {
+      "goal_count": 32,
+      "eligible_count": 32,
+      "success_rate": 1.0,
+      "ci_low": 0.889692,
+      "ci_high": 1.0,
+      "confidence_label": "high",
+      "trend": "stable"
+    },
+    "post_consolidation_false": {
+      "goal_count": 32,
+      "eligible_count": 32,
+      "success_rate": 1.0,
+      "ci_low": 0.889692,
+      "ci_high": 1.0,
+      "confidence_label": "high",
+      "trend": "stable"
+    }
+  },
+  "threats_disclosed": [
+    "runtime_environment_drift"
+  ],
+  "flags": [],
+  "warnings": []
+}

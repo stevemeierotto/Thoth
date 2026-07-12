@@ -1,0 +1,331 @@
+{
+  "contract_version": "JC v1.0",
+  "fixture_philosophy": "synthetic_only",
+  "notes": {
+    "C6-05": "MISSING_ARTIFACT for consolidation is exercised in Step 3 by omitting decision_trace.jsonl — not in this golden set."
+  },
+  "case_map": {
+    "plan-c601": "C6-01",
+    "plan-c602": "C6-02",
+    "plan-c603": "C6-03",
+    "plan-c604": "C6-04",
+    "plan-c606": "C6-06",
+    "plan-c607": "C6-07",
+    "plan-c608": "C6-08",
+    "plan-c609": "C6-09",
+    "plan-c610": "C6-10",
+    "plan-c611": "C6-11"
+  },
+  "records": {
+    "plan-c601": {
+      "plan_id": "plan-c601",
+      "session_id": "session-a",
+      "goal_started_at_ms": 1800000160000,
+      "benchmark_run_id": "run-c601",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": true,
+        "strategy_id": "strat-alpha",
+        "join_status": "RESOLVED",
+        "join_confidence": "time_proximity"
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": "env-hash-c601",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    },
+    "plan-c602": {
+      "plan_id": "plan-c602",
+      "session_id": "session-b",
+      "goal_started_at_ms": 1800000260000,
+      "benchmark_run_id": "run-c602",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": false,
+        "strategy_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": "env-hash-c602",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    },
+    "plan-c603": {
+      "plan_id": "plan-c603",
+      "session_id": "session-c",
+      "goal_started_at_ms": 1800000200000,
+      "benchmark_run_id": "run-c603",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": false,
+        "strategy_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "consolidation": {
+        "post_consolidation": true,
+        "consolidation_id": "session-c:1800000105000",
+        "join_status": "RESOLVED",
+        "join_confidence": "synthetic"
+      },
+      "environment": {
+        "env_hash": "env-hash-c603",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    },
+    "plan-c604": {
+      "plan_id": "plan-c604",
+      "session_id": "session-d",
+      "goal_started_at_ms": 1800000050000,
+      "benchmark_run_id": "run-c604",
+      "plan_reused": {
+        "value": true,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": false,
+        "strategy_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": "env-hash-c604",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    },
+    "plan-c606": {
+      "plan_id": "plan-c606",
+      "session_id": "session-e",
+      "goal_started_at_ms": 1800000360000,
+      "benchmark_run_id": "run-c606",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": false,
+        "strategy_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": "env-hash-c606",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    },
+    "plan-c607": {
+      "plan_id": "plan-c607",
+      "session_id": "session-f",
+      "goal_started_at_ms": 1800000460000,
+      "benchmark_run_id": "run-missing",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": false,
+        "strategy_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": null,
+        "model_hash": null,
+        "corpus_fingerprint": null,
+        "tier": null,
+        "join_status": "UNRESOLVED",
+        "join_confidence": null
+      }
+    },
+    "plan-c608": {
+      "plan_id": "plan-c608",
+      "session_id": "session-g",
+      "goal_started_at_ms": 1800000400000,
+      "benchmark_run_id": "run-c608",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": null,
+        "strategy_id": null,
+        "join_status": "STALE_EVENT",
+        "join_confidence": null
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": "env-hash-c608",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    },
+    "plan-c609": {
+      "plan_id": "plan-c609",
+      "session_id": "session-h",
+      "goal_started_at_ms": 1800000560000,
+      "benchmark_run_id": "run-c609",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": false,
+        "strategy_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": null,
+        "model_hash": null,
+        "corpus_fingerprint": null,
+        "tier": null,
+        "join_status": "FINGERPRINT_MISMATCH",
+        "join_confidence": null
+      }
+    },
+    "plan-c610": {
+      "plan_id": "plan-c610",
+      "session_id": "session-i",
+      "goal_started_at_ms": 1800000501000,
+      "benchmark_run_id": "run-c610",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": true,
+        "strategy_id": "strat-z",
+        "join_status": "RESOLVED",
+        "join_confidence": "time_proximity"
+      },
+      "consolidation": {
+        "post_consolidation": false,
+        "consolidation_id": null,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "environment": {
+        "env_hash": "env-hash-c610",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    },
+    "plan-c611": {
+      "plan_id": "plan-c611",
+      "session_id": "",
+      "goal_started_at_ms": 1800000660000,
+      "benchmark_run_id": "run-c611",
+      "plan_reused": {
+        "value": false,
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      },
+      "strategy": {
+        "strategy_injected": null,
+        "strategy_id": null,
+        "join_status": "INVALID_INPUT",
+        "join_confidence": null
+      },
+      "consolidation": {
+        "post_consolidation": null,
+        "consolidation_id": null,
+        "join_status": "INVALID_INPUT",
+        "join_confidence": null
+      },
+      "environment": {
+        "env_hash": "env-hash-c611",
+        "model_hash": "model-hash-fixture-1",
+        "corpus_fingerprint": "corpus-fp-fixture-1",
+        "tier": "FULL",
+        "join_status": "RESOLVED",
+        "join_confidence": "exact"
+      }
+    }
+  }
+}

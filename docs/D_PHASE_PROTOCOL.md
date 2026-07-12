@@ -729,4 +729,4 @@ D5 is a **meta-proof**, not a feature phase. It verifies the composed proof surf
 **Locked:** 2026-07-05 (D0); **D3:** complete 2026-07-07; **D4 protocol:** v1 locked 2026-07-07 (§ D4); **D4:** complete 2026-07-08 (`THOTH_E2_D4=1` composition proof green)  
 **Review incorporated:** Constitutional Rule elevated; three architectural modes at D0; Passive Consumer Law; GUI as subscriber consequence; D1 invisibility invariant; D2/D3 separation; D3 measure-don't-interpret boundary + subscriber ownership split; D4 containment + live-path definition + protocol lock; D5 as trust re-proof.
 
-**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 ✅ complete** — **D5 ✅ complete** — **Phase D sealed** — **Phase E protocol locked** v0.1 — paused before Phase E Step 1.
+**Status:** 🔒 D0 locked — D1 ✅ — D2 ✅ — D3 ✅ — **D4 ✅ complete** — **D5 ✅ complete** — **Phase D sealed** — **Phase E v0.1 certified** (2026-07-09) — [`PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); paused before Zenodo V3.

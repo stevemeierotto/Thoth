@@ -3,7 +3,7 @@
 **Protocol version:** 1.2  
 **Locked:** 2026-07-01  
 **Supersedes:** v1.0, v1.1  
-**Status:** 🔒 Preregistered — evaluation kernel hardened; harness retrieval migration pending re-baseline  
+**Status:** 🔒 Preregistered v1.2 — evaluation kernel hardened; Phases A–E complete (Phase E certified 2026-07-09 under this protocol); paused before Zenodo V3  
 **Distinct from:** `episodic_memory_benchmark.md` (M1.5 pipeline verification — retrieval only)
 
 > **Immutability:** Constants and pass/fail rules in this document may not change during an in-flight E2 **STRICT** run. Revisions require **Protocol v1.3** with a new lock date and commit SHA.

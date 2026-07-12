@@ -70,6 +70,27 @@ if(TARGET run_episodic_learning_benchmark)
     )
 endif()
 
+add_test(NAME c6-longitudinal-join COMMAND python3 scripts/test_c6_longitudinal_join.py)
+set_tests_properties(c6-longitudinal-join PROPERTIES
+    LABELS "pr;fast"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_test(NAME c6-longitudinal-analyzer COMMAND python3 scripts/test_c6_longitudinal_analyzer.py)
+set_tests_properties(c6-longitudinal-analyzer PROPERTIES
+    LABELS "pr;fast"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_test(NAME c6-longitudinal-reporting COMMAND python3 scripts/test_c6_longitudinal_reporting.py)
+set_tests_properties(c6-longitudinal-reporting PROPERTIES
+    LABELS "pr;fast"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 option(THOTH_TEST_SUITE_FULL "Register nightly Ollama TEST_SUITE (--full) in CTest" OFF)
 if(THOTH_TEST_SUITE_FULL)
     add_test(NAME test-suite-full COMMAND run_test_suite --full)

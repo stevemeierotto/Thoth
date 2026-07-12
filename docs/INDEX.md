@@ -1,6 +1,6 @@
 # Thoth Documentation Index
 
-**Last Updated:** 2026-06-17  
+**Last Updated:** 2026-07-09  
 **Purpose:** Central navigation for all Thoth documentation
 
 ---
@@ -17,8 +17,9 @@
 4. **[completed_improvements_log.md](completed_improvements_log.md)** — **Authoritative source of truth** for what's actually implemented
 
 ### For Active Development
-- **[cursor_list.md](cursor_list.md)** — **WORKING BACKLOG** — Active todo list by priority (start here after time away)
-- **[improvements.md](improvements.md)** — **ACTIVE ROADMAP** — Phases 3–4 🔶 partial; Phase 5 optional future expansion; Phases 9–12 complete
+- **[cursor_list.md](cursor_list.md)** — **WORKING BACKLOG** — Post-E pause (before Zenodo V3); next forks B1 / M4 / G1d / C6 Phase 3 / E3
+- **[improvements.md](improvements.md)** — **ACTIVE ROADMAP** — Phases 3–4 🔶 partial; C6.3-04 F-series promotion policy ✅; E2 ✅ certified
+- **[phases/PHASE_E_COMPLETE.md](phases/PHASE_E_COMPLETE.md)** — **Phase E seal** — current empirical certification boundary
 - **[AGENTS.md](../AGENTS.md)** — Architecture reference and coding guidelines
 - **[TESTING.md](TESTING.md)** — Test structure and how to run tests
 - **[plan_reuse_tuning.md](plan_reuse_tuning.md)** — Tunable plan reuse, trajectory, and reflection thresholds
@@ -51,9 +52,11 @@
 ### Roadmaps & Tracking
 | Document | Purpose | Status |
 |----------|---------|--------|
-| **[improvements.md](improvements.md)** | **ACTIVE ROADMAP** — Phases 3–4 partial; Phase 5 future expansion | ✅ Active |
-| **[cursor_list.md](cursor_list.md)** | **WORKING BACKLOG** — Active todo list by priority | ✅ Active |
+| **[improvements.md](improvements.md)** | **ACTIVE ROADMAP** — Phases 3–4 partial; Phase 5 future expansion; E2 ✅ | ✅ Active |
+| **[cursor_list.md](cursor_list.md)** | **WORKING BACKLOG** — Post-E forks (B1 / M4 / G1d / C6.3 / E3) | ✅ Active |
 | **[completed_improvements_log.md](completed_improvements_log.md)** | **AUTHORITATIVE** — Completed work log | ✅ Authoritative |
+| **[phases/PHASE_E_COMPLETE.md](phases/PHASE_E_COMPLETE.md)** | Phase E v0.1 certification seal | 🔒 Certified |
+| **[phases/PHASE_D_COMPLETE.md](phases/PHASE_D_COMPLETE.md)** | Phase D evolution trust seal | 🔒 Sealed |
 | **[benchmark_results.md](benchmark_results.md)** | Auto-archived GRAG performance metrics | ✅ Auto-updated |
 | **[new_corpus_tests.md](new_corpus_tests.md)** | Research-paper corpus benchmark case design | ✅ Active |
 
@@ -77,8 +80,14 @@
 → **[completed_improvements_log.md](completed_improvements_log.md)** — Authoritative source
 
 ### "What should I work on next?"
-→ **[cursor_list.md](cursor_list.md)** — Working backlog by priority  
-→ **[improvements.md](improvements.md)** — Active roadmap (Phases 3–5; see phase table + `completed_improvements_log.md`)
+→ **[cursor_list.md](cursor_list.md)** — Working backlog (post-E: B1 / M4 / G1d / C6 Phase 3 / E3)  
+→ **[phases/PHASE_E_COMPLETE.md](phases/PHASE_E_COMPLETE.md)** — Current pause: before Zenodo V3  
+→ **[improvements.md](improvements.md)** — Active roadmap (Phases 3–5; E2 certified)
+
+### "How do I run longitudinal analysis?"
+→ **[cognitive_longitudinal_ops.md](cognitive_longitudinal_ops.md)** — Operator guide (C6.3-05)  
+→ **[tests/fixtures/cognitive_longitudinal/README.md](../tests/fixtures/cognitive_longitudinal/README.md)** — Fixture catalog + regression gate (C6.3-06)  
+→ **[C6_phase3_analyzer_contract.md](C6_phase3_analyzer_contract.md)** — Normative CLI / semantics
 
 ### "How do I run tests?"
 → **[TESTING.md](TESTING.md)** — Unit tests and manual concurrency checks  

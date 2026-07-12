@@ -1,0 +1,135 @@
+{
+  "event": "COGNITIVE_LONGITUDINAL_SUMMARY",
+  "protocol_version": "C6.3 v0.2.1",
+  "metric_schema_version": "1.0",
+  "analyzer_version": "0.2.0",
+  "generated_at_ms": 1800002000000,
+  "report_completeness": "complete",
+  "evidence_scope": "exploratory_only",
+  "confidence_label": "low",
+  "window": {
+    "start_ms": 1797581800000,
+    "end_ms": 1800001000000,
+    "days": 28,
+    "anchor": "official_benchmark_execution"
+  },
+  "reproducibility": {
+    "input_log_path": "tests/fixtures/cognitive_longitudinal/metrics.jsonl",
+    "input_artifact_paths": [
+      "tests/fixtures/cognitive_longitudinal/metrics.jsonl",
+      "tests/fixtures/cognitive_longitudinal/app_log.jsonl",
+      "tests/fixtures/cognitive_longitudinal/decision_trace.jsonl",
+      "tests/fixtures/cognitive_longitudinal/benchmark_env.jsonl"
+    ],
+    "benchmark_run_ids_consumed": [
+      "run-c601",
+      "run-c602",
+      "run-c603",
+      "run-c604",
+      "run-c606",
+      "run-c608",
+      "run-c610",
+      "run-c611"
+    ]
+  },
+  "categories": {
+    "performance": {
+      "success_rate": 0.875,
+      "ci_low": 0.480527,
+      "ci_high": 1.0,
+      "variance": 0.013672,
+      "trend": "stable",
+      "eligible_count": 8
+    },
+    "efficiency": {
+      "total_wall_clock_ms_p50": 0.0,
+      "total_wall_clock_ms_p95": 0.0,
+      "total_tokens_p50": 0.0,
+      "reflection_count_mean": 0.0,
+      "revisions_count_mean": 0.0
+    },
+    "memory": {
+      "retrieved_chunk_count_mean": 0.0,
+      "grag_alpha_mean": 0.0,
+      "post_consolidation_success_rate_delta": 0.16666666666666663
+    },
+    "planning": {},
+    "safety": {
+      "reproducibility_ok": false,
+      "tier_contamination": false,
+      "benchmark_regression": false,
+      "official_gates_green": false
+    }
+  },
+  "segments": {
+    "plan_reused_true": {
+      "goal_count": 1,
+      "eligible_count": 1,
+      "success_rate": 1.0,
+      "ci_low": 0.0,
+      "ci_high": 1.0,
+      "confidence_label": "low",
+      "trend": "stable"
+    },
+    "plan_reused_false": {
+      "goal_count": 7,
+      "eligible_count": 7,
+      "success_rate": 0.857143,
+      "ci_low": 0.427272,
+      "ci_high": 1.0,
+      "confidence_label": "low",
+      "trend": "stable"
+    },
+    "strategy_injected_true": {
+      "goal_count": 2,
+      "eligible_count": 2,
+      "success_rate": 1.0,
+      "ci_low": 0.109231,
+      "ci_high": 1.0,
+      "confidence_label": "low",
+      "trend": "stable"
+    },
+    "strategy_injected_false": {
+      "goal_count": 4,
+      "eligible_count": 4,
+      "success_rate": 1.0,
+      "ci_low": 0.412085,
+      "ci_high": 1.0,
+      "confidence_label": "low",
+      "trend": "stable"
+    },
+    "post_consolidation_true": {
+      "goal_count": 1,
+      "eligible_count": 1,
+      "success_rate": 1.0,
+      "ci_low": 0.0,
+      "ci_high": 1.0,
+      "confidence_label": "low",
+      "trend": "stable"
+    },
+    "post_consolidation_false": {
+      "goal_count": 6,
+      "eligible_count": 6,
+      "success_rate": 0.833333,
+      "ci_low": 0.361612,
+      "ci_high": 1.0,
+      "confidence_label": "low",
+      "trend": "stable"
+    }
+  },
+  "threats_disclosed": [
+    "env_hash_drift",
+    "fingerprint_mismatch",
+    "gate_evidence_missing",
+    "prompt_evolution",
+    "runtime_environment_drift",
+    "small_sample"
+  ],
+  "flags": [
+    "fingerprint_mismatch",
+    "gate_evidence_missing:episodic_learning",
+    "gate_evidence_missing:reflection_ab",
+    "gate_evidence_missing:robustness"
+  ],
+  "warnings": []
+}

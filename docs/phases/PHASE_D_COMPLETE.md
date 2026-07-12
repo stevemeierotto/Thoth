@@ -5,7 +5,7 @@
 **Protocol version:** [`D_PHASE_PROTOCOL.md`](../D_PHASE_PROTOCOL.md) v1 🔒 · [`D5_PROTOCOL.md`](../D5_PROTOCOL.md) v0.1 🔒  
 **Prerequisite:** Phase C locked — [`PHASE_C_COMPLETE.md`](PHASE_C_COMPLETE.md)
 
-**Status:** 🔒 **Phase D locked** — paused before Phase E.
+**Status:** 🔒 **Phase D locked** — Phase E v0.1 later certified (2026-07-09); see [`PHASE_E_COMPLETE.md`](PHASE_E_COMPLETE.md). This seal remains the Phase D trust boundary (preservation only).
 
 ---
 

@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-09 (Phase E — EP-01.5 complete; Step 2 on investigation hold pending redo)
+Last updated: 2026-07-11 (C6.3-06 regression fixtures ✅)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
 ### E2 track — status at a glance
@@ -11,7 +11,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | **B** | Can measurement be trusted? | ✅ Complete 2026-07-04 | [`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md); fingerprint `1ce31c6aa3f6987841c1a0ddecae6f9171e5ef86fc9c88601b1a017e25f669b4` |
 | **C** | Can trusted measurement become architecture? | ✅ Locked 2026-07-05 | [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md) |
 | **D** | Can architecture evolve without losing trust? | ✅ Complete 2026-07-08 | [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md); D5 evolution trust proof |
-| **E** | Can we defend the results scientifically? | 🔶 In progress (2026-07-09) | E1 ✅ · EP-01 ✅ · EP-01.5 ✅ · Step 2 ⚠️ hold — see entries below |
+| **E** | Can we defend the results scientifically? | ✅ Certified 2026-07-09 | [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md) — scoped `n=3_strict_trio`; lift=0.0; paused before Zenodo V3 |
 
 ### E2 Phase C — Integration tier ✅ locked (2026-07-05)
 
@@ -44,7 +44,528 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 **Review note:** E2-C5-03 aliases E2-C5-01; proof coverage unchanged via `diffPathEquivalence()`.
 
-**Next:** Phase D4 — [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md). Constitutional rule: Observe, Record, Replay, Present — Never Decide.
+**Next:** Phase D — complete (see Phase D section below). Constitutional rule: Observe, Record, Replay, Present — Never Decide.
+
+### E2 Phase E — Empirical validation tier ✅ certified (2026-07-09)
+
+**Authority:** [`E_PHASE_PROTOCOL.md`](E_PHASE_PROTOCOL.md) E v0.1 🔒 · [`phases/E_ANALYSIS_PLAN.md`](phases/E_ANALYSIS_PLAN.md) E-AP v1.1 🔒 · [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 🔒  
+**Close-out:** [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md)  
+**Prerequisite:** Phase D sealed — [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md)
+
+**Governing question:** Are empirical claims made with the trusted evaluator specification-complete, reproducible, defensible, evidence-mapped, and publication-ready within the declared scope?
+
+| Step | Deliverable | Status |
+|------|-------------|--------|
+| E0 / E1 | Protocol + analysis plan lock | ✅ |
+| EP-01 / EP-01.5 | Authoritative inference harness + LLM wiring | ✅ |
+| Step 2 | Authoritative STRICT trio evidence | ✅ sealed |
+| Step 3 | L4 verification package | ✅ `VERIFIED` |
+| Step 4 | Claims audit | ✅ |
+| Step 5 | Certification | ✅ |
+
+**Empirical observation (certified scope only):** `mean_episodic_lift = 0.0` · rollup `FAILURE` / `SCORED_FAILURE` · `evidence_scope: n=3_strict_trio`. Completion ≠ positive lift. Generalization beyond the trio is outside the certified record (B1 deferred).
+
+**Next:** Paused before Zenodo V3 / grant submission using new numbers. Post-E forks: B1, C6 Phase 3 (C6.3-01–06 ✅), E3 (SCR), M4, G1d — see `cursor_list.md`.
+
+### C6 Phase 3 — C6.3-06 regression fixtures ✅ (2026-07-11)
+
+**Authority:** [`C6_phase3_protocol.md`](C6_phase3_protocol.md) § C6.3-06 implementation lock · § C6.3-06-5 implementation lock  
+**Depends on:** C6.3-01–05 ✅ · sub-checkpoints 06-1–06-4 ✅
+
+| Sub-checkpoint | Deliverable | Status |
+|----------------|-------------|--------|
+| **06-1** | Fixture catalog (`tests/fixtures/cognitive_longitudinal/README.md`) | ✅ |
+| **06-2** | Intentionally absent fixture (`missing_decision_trace.jsonl` — README only) | ✅ |
+| **06-3** | Official longitudinal companion corpus + `scripts/generate_c6_official_longitudinal_fixtures.py` | ✅ |
+| **06-4** | `analyzer_golden_official_longitudinal.json` + F1 + `--write-official-golden` | ✅ |
+| **06-5** | Documentation seal (this entry) | ✅ |
+
+| Deliverable | Status |
+|-------------|--------|
+| Four `*_official_longitudinal.jsonl` companion fixtures | ✅ |
+| `analyzer_golden_official_longitudinal.json` (independent of default exploratory golden) | ✅ |
+| F1 via `run_official_analysis()` → `analyzer.analyze_longitudinal` | ✅ |
+| Fixture README § Regression gate (authoritative command list) | ✅ |
+| Implementation invariant honored (fixture/regression infrastructure only; no analyzer behavior changes during 06-1–06-4) | ✅ |
+
+**Phase 3 exit criteria** ([`C6_phase3_protocol.md`](C6_phase3_protocol.md) § Exit criteria):
+
+| # | Criterion | Evidence pointer |
+|---|-----------|------------------|
+| 1 | C6.3-01–06 sealed in this log | This entry + prior C6.3 seals |
+| 2 | Four output artifacts with reproducibility metadata | C6.3-03 Step 03-5 / O1 seal |
+| 3 | Report with qualifying `evidence_scope` | F1 + official golden (06-4 seal) |
+| 4 | `cursor_list.md` C6 Phase 3 row ✅ | Updated in 06-5 |
+| 5 | `improvements.md` references C6.3-04 | C6.3-04 seal |
+
+**Regression evidence:** [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md) § Regression gate.
+
+**Explicitly deferred beyond C6.3-06:** negative slices (`plan-negxx`), `run_c6_regression.py`, production log samples, AC/RC/JC version bumps.
+
+### C6 Phase 3 — C6.3-05 operator invocation guide ✅ (2026-07-11)
+
+**Authority:** [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md) · [`C6_phase3_protocol.md`](C6_phase3_protocol.md) C6.3 v0.2.1 checkpoint C6.3-05  
+**Depends on:** C6.3-03 ✅ · C6.3-04 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `docs/cognitive_longitudinal_ops.md` — procedural operator guide | ✅ |
+| References AC/RC/JC; no implementation semantics duplicated | ✅ |
+| Expected successful run + symptom troubleshooting | ✅ |
+| Example scheduling patterns (non-prescriptive) | ✅ |
+| Protocol doc map updated | ✅ |
+| `improvements.md` promotion procedure linked | ✅ |
+| Implementation invariant honored (docs only) | ✅ |
+
+**Next:** (historical) superseded by C6.3-06 complete entry above
+
+### C6 Phase 3 — C6.3-04 F-series promotion gate ✅ (2026-07-11)
+
+**Authority:** [`C6_phase3_protocol.md`](C6_phase3_protocol.md) C6.3 v0.2.1 § C6.3-04 implementation lock  
+**Depends on:** C6.3-03 ✅ sealed  
+**Substeps:** 04-a ✅ · 04-b ✅ · 04-c ✅ · 04-d ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Normative policy in `improvements.md` (7-part structure) | ✅ |
+| Mandatory vs supporting gates split | ✅ |
+| Owner approval governance (no auto-promotion) | ✅ |
+| Two consecutive official evaluation windows definition | ✅ |
+| Promotion reversibility | ✅ |
+| Thresholds via AC reference only | ✅ |
+| `cursor_list.md` pointers only; §9 resolved | ✅ |
+| Implementation invariant honored (docs only) | ✅ |
+| Protocol exit criterion #5 (`improvements.md` references C6.3-04) | ✅ |
+
+**Next:** (historical) superseded by C6.3-05 complete entry above
+
+### C6 Phase 3 — C6.3-04 F-series promotion gate plan 🔒 (2026-07-11)
+
+**Authority:** [`C6_phase3_protocol.md`](C6_phase3_protocol.md) C6.3 v0.2.1 § C6.3-04 implementation lock  
+**Depends on:** C6.3-03 ✅ sealed
+
+| Deliverable | Status |
+|-------------|--------|
+| Single atomic lock (04-a–d phases, not separate locks) | ✅ locked |
+| Implementation invariant (no code, schema, or auto-promotion) | ✅ locked |
+| Document ownership: `improvements.md` normative; `cursor_list.md` informational only | ✅ locked |
+| Mandatory vs supporting gates split | ✅ locked |
+| Owner approval governance (no auto-promotion) | ✅ locked |
+| Two consecutive official evaluation windows definition | ✅ locked |
+| Promotion reversibility | ✅ locked |
+| Thresholds via AC reference only (no duplication) | ✅ locked |
+| Seven-part policy structure for `improvements.md` | ✅ locked |
+
+**Internal phases:** 04-a `improvements.md` policy → 04-b `cursor_list.md` pointers → 04-c doc sync → 04-d log seal.
+
+**Deferred:** C6.3-05 ops docs · C6.3-06 fixtures · observational harness markdown · auto-promotion scripts.
+
+**Next:** (historical) superseded by C6.3-04 complete entry above
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-7 implementation lock  
+**Depends on:** C6.3-03 Steps 03-0 through 03-6 ✅  
+**Substeps:** 03-7a ✅ · 03-7b ✅ · 03-7c ✅ · 03-7d ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `analyzer_version` `0.1.0` → `0.2.0` | ✅ |
+| Diff-gated golden refresh (`analyzer_golden_summary`, report headers) | ✅ |
+| Doc sync (RC, protocol, AC example JSON) | ✅ |
+| RC § Step 03 success criteria 1–7 | ✅ |
+| Implementation invariant (no semantic changes) | ✅ honored |
+| Seven-suite + CTest regression | ✅ |
+
+**Checkpoint summary (03-0–03-7):** RC lock · renderer · threats · gates · plots · orchestration · validation/CI · version seal.
+
+**Next:** (historical) superseded by C6.3-04 plan lock entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-7 close-out plan 🔒 (2026-07-11)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-7 implementation lock  
+**Depends on:** C6.3-03 Step 03-6 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Single atomic lock (03-7a–d implementation phases, not separate locks) | ✅ locked |
+| Implementation invariant (no semantic changes; version + docs only) | ✅ locked |
+| `analyzer_version` `0.1.0` → `0.2.0` | ✅ locked |
+| Diff-gated golden refresh (`analyzer_golden_summary`, report headers) | ✅ locked |
+| Doc sync (RC, protocol, AC example JSON) | ✅ locked |
+| `completed_improvements_log.md` C6.3-03 seal | ✅ locked |
+| Seven-suite + CTest regression gate | ✅ locked |
+
+**Internal phases:** 03-7a version constant → 03-7b goldens → 03-7c docs → 03-7d log seal.
+
+**Deferred:** C6.3-04 promotion gate · C6.3-05 ops docs · C6.3-06 fixtures · observational harness markdown · `run_c6_regression.py`.
+
+**Next:** (historical) superseded by C6.3-03 sealed entry above
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-6 implementation lock  
+**Depends on:** C6.3-03 Step 03-5 ✅  
+**Substeps:** 03-6a ✅ · 03-6b ✅ · 03-6c ✅ · 03-6d ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `gate_status_golden.json` + `benchmark_env_gates_green.jsonl` + `metrics_gates_green.jsonl` | ✅ |
+| R3 threat parity + R4 prose guard (Layer A) | ✅ |
+| R5–R7 gate assertions driven from gate golden (Layer A) | ✅ |
+| R8 incomplete orchestration + JSONL immutability (Layer B) | ✅ |
+| R9 required artifacts + optional PNGs (Layer B) | ✅ |
+| CTest: `c6-longitudinal-join`, `c6-longitudinal-analyzer`, `c6-longitudinal-reporting` | ✅ |
+| Implementation invariant (no analyzer/reporting semantic changes) | ✅ honored |
+
+**Regression gate:** all seven C6 Python suites green; `ctest -R c6-longitudinal` after CMake reconfigure.
+
+**Next:** (historical) superseded by 03-7 plan lock entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-6 validation/CI plan 🔒 (2026-07-11)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-6 implementation lock  
+**Depends on:** C6.3-03 Step 03-5 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Single atomic lock (03-6a–d implementation phases, not separate locks) | ✅ locked |
+| Implementation invariant (no analyzer/reporting semantic changes) | ✅ locked |
+| Layer A: R3–R7 protocol validation + `gate_status_golden.json` | ✅ locked |
+| Layer B: R8–R9 engineering validation + CTest (CI-independent RC) | ✅ locked |
+| R8 strengthened (empty plot_dir, JSONL immutability) | ✅ locked |
+| R9 required vs optional artifacts | ✅ locked |
+| Fixture read-only / no golden self-modification | ✅ locked |
+
+**Internal phases:** 03-6a gate golden → 03-6b R3/R4 → 03-6c R8/R9 → 03-6d CTest.
+
+**Deferred:** `analyzer_version`, final golden refresh (03-7); `run_c6_regression.py` (future, non-normative).
+
+**Next:** (historical) superseded by 03-6 complete entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-5 CLI orchestration ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-5 implementation lock  
+**Depends on:** C6.3-03 Step 03-1 ✅ · 03-4 ✅  
+**Substeps:** 03-5a ✅ · 03-5b ✅ · 03-5c ✅ · 03-5d ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `WriteOptions` + extended `write_outputs()` | ✅ |
+| Frozen write order + JSONL immutability | ✅ |
+| Two-phase summary patch (plot flags → summary only) | ✅ |
+| CLI `--no-report`, `--no-plots` | ✅ |
+| Delegation to report + plot modules | ✅ |
+| O1–O6 orchestration tests (tempfile isolation) | ✅ |
+
+**Regression gate:** all seven C6 suites green.
+
+**Next:** (historical) superseded by 03-6 plan lock entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-5 orchestration plan 🔒 (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-5 implementation lock  
+**Depends on:** C6.3-03 Step 03-1 ✅ · 03-4 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Single atomic lock (03-5a–d execution substeps, not separate locks) | ✅ locked |
+| Artifact pipeline ownership (orchestrator delegates only) | ✅ locked |
+| Write order + JSONL immutability | ✅ locked |
+| Two-phase summary patch (plot flags → summary only) | ✅ locked |
+| Markdown timing (pre-plot; no second pass) | ✅ locked |
+| CLI (`--no-report`, `--no-plots`, `--dry-run`) | ✅ locked |
+| `WriteOptions` API + O1–O6 + tempfile isolation | ✅ locked |
+
+**Internal substeps:** 03-5a `write_outputs` → 03-5b CLI → 03-5c delegation → 03-5d O1–O6.
+
+**Deferred:** R3–R9, CTest, `analyzer_version`, golden refresh (03-6–03-7).
+
+**Next:** (historical) superseded by 03-5 complete entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-4 plot module ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-4 implementation lock  
+**Depends on:** C6.3-03 Step 03-3 ✅  
+**Substeps:** 03-4a ✅ · 03-4b ✅ · 03-4c ✅ · 03-4d ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `plot_cognitive_longitudinal.py` + `PlotResult` API | ✅ |
+| Three PNG renderers (success / segments / efficiency) | ✅ |
+| Skip rules (`incomplete`, matplotlib unavailable) | ✅ |
+| Standalone CLI (`--summary`, `--plot-dir`) | ✅ |
+| P1–P8 test harness | ✅ |
+| `analyzer_golden_summary.json` unchanged (read-only) | ✅ |
+
+**Regression gate:** plot suite + five existing C6 suites green.
+
+**Next:** (historical) superseded by 03-5 plan lock entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-4 plot module plan 🔒 (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-4 implementation lock  
+**Depends on:** C6.3-03 Step 03-3 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Single atomic lock (03-4a–d execution substeps, not separate locks) | ✅ locked |
+| Architectural boundary (plot module vs analyzer payload-only) | ✅ locked |
+| Skip behavior (`incomplete`, matplotlib unavailable) | ✅ locked |
+| Decision A: current-window-only success rate chart | ✅ locked |
+| Decision B: empty segments → annotation, no skip flag | ✅ locked |
+| `PlotResult` API + P1–P8 test plan | ✅ locked |
+| Golden discipline — read-only `analyzer_golden_summary.json` | ✅ locked |
+
+**Internal substeps:** 03-4a skeleton → 03-4b renderers → 03-4c CLI → 03-4d P1–P8.
+
+**Deferred:** CLI orchestration, `--no-plots`, R8/R9, CTest, `analyzer_version` (03-5–03-7).
+
+**Next:** (historical) superseded by 03-4 complete entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-3 safety gate wiring ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-3 implementation lock  
+**Depends on:** C6.3-03 Step 03-2 ✅  
+**Substeps:** 03-3a ✅ · 03-3b ✅ · 03-3c ✅ · 03-3d ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `evaluate_safety_gates()` + `GateEvaluation` + `REQUIRED_GATE_HARNESSES` | ✅ |
+| `compute_safety()` wired — stubs removed | ✅ |
+| `THREAT_IDS` 12 → 14; gate threats active | ✅ |
+| Golden diff gate — `flags`, `threats_disclosed` only | ✅ |
+| G1–G5 + H10–H11 + golden H10 regression | ✅ |
+
+**03-3d golden:** diff gate passed — removed `benchmark_regression_not_wired`; added 3× `gate_evidence_missing:*`; `threats_disclosed` now 6 sorted IDs (added `gate_evidence_missing`). Zero production-source modifications.
+
+**Regression gate:** all six C6 suites green.
+
+**Next:** (historical) superseded by 03-4 plan lock entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-2 threat umbrella ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2 umbrella  
+**Substeps:** 03-2a ✅ · 03-2b ✅ · 03-2c ✅ · 03-2d ✅
+
+| Substep | Evidence | Regression gate |
+|---------|----------|-----------------|
+| **03-2a** | Provenance contract + P1–P7 | `test_c6_longitudinal_provenance.py` |
+| **03-2b** | Threat engine H1–H9 (14 checks) | `test_c6_longitudinal_threats.py` |
+| **03-2c** | Analyzer integration I1–I5 | `test_c6_longitudinal_analyzer.py` |
+| **03-2d** | Golden seal H10 (full payload) | `test_c6_longitudinal_analyzer.py` |
+
+**03-2d golden:** diff gate passed — only `threats_disclosed` changed to 5 engine-sorted IDs. Zero production-source modifications.
+
+**Next:** (historical) superseded by 03-3 complete entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-2d golden seal ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2d implementation lock  
+**Depends on:** C6.3-03 Step 03-2c ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Golden diff gate — only `threats_disclosed` changed | ✅ |
+| `analyzer_golden_summary.json` updated (5 sorted threat IDs) | ✅ |
+| H10 full payload compare re-enabled | ✅ |
+| Production source firewall honored | ✅ |
+
+**Regression gate:** all six C6 suites green.
+
+**Next:** (historical) superseded by 03-2 umbrella entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-2d golden seal plan 🔒 (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2d implementation lock  
+**Depends on:** C6.3-03 Step 03-2c ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Golden diff gate — only `threats_disclosed` may change | ✅ locked |
+| H10 full payload compare (not threats-only) | ✅ locked |
+| Re-enable `golden_summary`; no skipped tests | ✅ locked |
+| Evidence block: 03-2b H1–H9 · 03-2c I1–I5 · 03-2d H10 | ✅ locked |
+| Production source firewall (analyzer/threat/reporting unchanged) | ✅ locked |
+
+**Next:** Say **implement** to update golden + re-enable H10.
+
+### C6 Phase 3 — C6.3-03 Step 03-2c analyzer integration ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2c implementation lock  
+**Depends on:** C6.3-03 Step 03-2b ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `_build_threat_inputs()` single assembly path | ✅ |
+| `build_threats()` removed; `detect_threats()` wired | ✅ |
+| `prior_longitudinal_path` read-before-write | ✅ |
+| I1–I5 integration tests | ✅ |
+| `analyzer_golden_summary.json` unchanged (03-2d) | ✅ honored |
+
+**Default fixture threats:** `env_hash_drift`, `fingerprint_mismatch`, `prompt_evolution`, `runtime_environment_drift`, `small_sample`
+
+**Regression gate:** `python3 scripts/test_c6_longitudinal_analyzer.py` — I1–I5 + A1–A9 green; `golden_summary` skipped until 03-2d.
+
+**Next:** (historical) superseded by 03-2 umbrella entry
+
+### C6 Phase 3 — C6.3-03 Step 03-2c analyzer integration plan 🔒 (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2c implementation lock  
+**Depends on:** C6.3-03 Step 03-2b ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Architectural boundary — analyzer assembles only; engine detects | ✅ locked |
+| `_build_threat_inputs()` single assembly path | ✅ locked |
+| Frozen `ThreatInputs`; prior JSONL read-before-write | ✅ locked |
+| I1–I5 integration tests (I2 delegation parity) | ✅ locked |
+| `golden_summary` deferred to 03-2d | ✅ locked |
+| Firewall: no golden, reporting, gates, version bump | ✅ locked |
+
+**Next:** Say **implement** to wire `detect_threats()` into analyzer.
+
+### C6 Phase 3 — C6.3-03 Step 03-2b threat engine ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2b implementation lock  
+**Depends on:** C6.3-03 Step 03-2a ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `scripts/c6_longitudinal_threats.py` — `THREAT_IDS`, frozen `ThreatInputs`, `detect_threats()` | ✅ |
+| `scripts/test_c6_longitudinal_threats.py` — H1–H8, H-null-1..5, H9 (14 checks) | ✅ |
+| H5 `env.prov` on `run-c601`/`run-c602`; H6 `prior_longitudinal.jsonl` | ✅ |
+
+**Regression gate:** `python3 scripts/test_c6_longitudinal_threats.py` — 14/14 green.
+
+**Firewall:** analyzer, `analyzer_golden_summary.json`, reporting — unchanged.
+
+**Next:** **03-2c** — implement per § Step 03-2c lock
+
+### C6 Phase 3 — C6.3-03 Step 03-2b threat engine plan 🔒 (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2b implementation lock  
+**Depends on:** C6.3-03 Step 03-2a ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Frozen `ThreatInputs` + pure `detect_threats()` | ✅ locked + implemented |
+| `THREAT_IDS` registry (12 IDs; gates deferred 03-3) | ✅ locked |
+| `distinct_non_null()` + `extract_env_fields_for_threats` (join parity) | ✅ locked |
+| Tests H1–H8, H-null-1..5, H9; analyzer isolated | ✅ locked + implemented |
+| Firewall: no analyzer, golden, reporting, CLI, version bump | ✅ honored |
+
+**Next:** (historical) plan superseded by implementation entry above
+
+### C6 Phase 3 — C6.3-03 Step 03-2a provenance contract ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Provenance fields (locked)  
+**Depends on:** C6.3-03 Step 03-2 umbrella 🔒
+
+| Deliverable | Status |
+|-------------|--------|
+| Composite `provenance_pin` = `(thoth_git_sha, basic_agent_git_sha)` | ✅ locked + implemented |
+| `scripts/c6_longitudinal_provenance.py` — normalize, extract, `prompt_evolution_detected` | ✅ |
+| `scripts/test_c6_longitudinal_provenance.py` — P1–P7 | ✅ |
+| H5 fixture spec (`run-c601` / `run-c602` distinct tuples; physical edits in 03-2b) | ✅ locked |
+
+**Regression gate:** `python3 scripts/test_c6_longitudinal_provenance.py` — 7/7 checks green.
+
+**Production survey** (`logs/benchmark_env.jsonl`, 2026-07-10): 74+ `BENCHMARK_ENV` rows; `env.prov` keys `thoth_git_sha`, `basic_agent_git_sha`, `captured_at_ms`; P7 verifies production shape; example tuple drift `("9bf8fd5", "649d32c")` vs `("0a38f22", "77508c4")`.
+
+**Next:** **03-2c** — analyzer integration
+
+### C6 Phase 3 — C6.3-03 Step 03-2 threat umbrella 🔒 (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-2 umbrella lock  
+**Depends on:** C6.3-03 Step 03-1 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Substep decomposition 03-2a → 03-2b → 03-2c → 03-2d | ✅ locked |
+| `runtime_environment_drift` rename + intent (replaces draft `hardware_env_drift`) | ✅ locked |
+| `THREAT_SCHEMA_VERSION` 1.0 normative for detection + reporting | ✅ locked |
+| H1–H8 tests; gate threats deferred to 03-3 | ✅ locked |
+
+**Next:** Implement **03-2b** (plan locked; await explicit **implement**)
+
+### C6 Phase 3 — C6.3-03 Step 03-1 renderer ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-1 implementation lock  
+**Depends on:** C6.3-03 Step 03-0 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `scripts/c6_longitudinal_report.py` — `REPORT_SECTIONS`, `THREAT_SCHEMA_VERSION`, `THREAT_LABELS`, `render_report_sections()`, `render_markdown_report()` | ✅ |
+| `scripts/test_c6_longitudinal_reporting.py` — R1, R1b, R2 | ✅ |
+| `report_header_golden.md`, `report_header_incomplete_golden.md` | ✅ |
+
+**Regression gate:** `python3 scripts/test_c6_longitudinal_reporting.py` — 3/3 checks green.
+
+**Next:** Implement **03-2b** (plan locked; await explicit **implement**)
+
+### C6 Phase 3 — C6.3-03 Step 03-1 renderer plan 🔒 (2026-07-10)
+
+**Authority:** [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 § Step 03-1 implementation lock  
+**Depends on:** C6.3-03 Step 03-0 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| Step 03-1 implementation plan — `REPORT_SECTIONS`, `THREAT_SCHEMA_VERSION`, R1/R1b/R2, file map, scope firewall | ✅ locked (superseded by implementation entry above) |
+
+**Approved for implementation.** Implemented in Step 03-1 renderer entry above.
+
+**Next:** (historical) Step 03-1 code
+
+### C6 Phase 3 — C6.3-03 Step 03-0 reporting contract ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_protocol.md`](C6_phase3_protocol.md) C6.3 v0.2.1 🔒 · [`C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) RC v1.0 🔒  
+**Depends on:** C6.3-02 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `docs/C6_phase3_reporting_contract.md` — markdown schema, plot specs, threat table, gate semantics, CI scope, R1–R9 tests | ✅ locked |
+
+**Locked decisions:** separate RC v1.0 (not AC v1.1); conservative missing-gate semantics; summary-JSON-only plots; skip plots on incomplete reports; `analyzer_version` → `0.2.0` at implementation (03-7); required gates `reflection_ab`, `robustness`, `episodic_learning`; `REPORT_SECTIONS` registry; `THREAT_SCHEMA_VERSION` 1.0.
+
+**Next:** Implement **03-2b** (plan locked; await explicit **implement**)
+
+
+### C6 Phase 3 — C6.3-02 longitudinal analyzer ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_protocol.md`](C6_phase3_protocol.md) C6.3 v0.2.1 🔒 · [`C6_phase3_analyzer_contract.md`](C6_phase3_analyzer_contract.md) AC v1.0 🔒  
+**Depends on:** C6.3-01 ✅
+
+| Deliverable | Status |
+|-------------|--------|
+| `scripts/analyze_cognitive_longitudinal.py` — join → window → stats → full JSONL payload | ✅ |
+| `scripts/test_c6_longitudinal_analyzer.py` — A1–A9 + A4b–A4h trend/confidence tests | ✅ |
+| Fixture extensions — terminal allowlist anchor, `analyzer_*_golden.json` | ✅ |
+
+**Regression gate:** `python3 scripts/test_c6_longitudinal_analyzer.py` — 13/13 checks green.
+
+**Outputs:** `logs/cognitive_longitudinal.jsonl` (append, full payload) · `logs/cognitive_longitudinal_summary.json` (latest snapshot).
+
+**Join library fix:** `validate_env_rows` skips non-`BENCHMARK_ENV` sidecar rows (harness terminal events) without invalid-row penalty — required for production `benchmark_env.jsonl`.
+
+**Next:** Implement **03-2b** (plan locked; await explicit **implement**)
+
+### C6 Phase 3 — C6.3-01 join library + golden regression ✅ (2026-07-10)
+
+**Authority:** [`C6_phase3_protocol.md`](C6_phase3_protocol.md) C6.3 v0.2.1 🔒 · [`C6_phase3_join_contract.md`](C6_phase3_join_contract.md) JC v1.0 🔒  
+**Checkpoint:** C6.3-01 Steps 0–4 sealed — join-only (read-only; no runtime influence)
+
+| Step | Deliverable | Status |
+|------|-------------|--------|
+| 0 | Join contract + v0.2.1 errata | ✅ |
+| 1 | Synthetic fixtures + `golden_join_results.json` (10 cases) | ✅ |
+| 2 | `scripts/c6_longitudinal_join.py` — deterministic join library | ✅ |
+| 3 | `scripts/test_c6_longitudinal_join.py` — T1–T6 golden regression | ✅ |
+| 4 | `--smoke` production smoke (segment-level counters, `report_completeness`) | ✅ |
+
+**Regression gate:** `python3 scripts/test_c6_longitudinal_join.py` — 10/10 golden cases, deterministic output, idempotence, input immutability, validation smoke, C6-05 `MISSING_ARTIFACT`.
+
+**Smoke (non-gating):** `python3 scripts/c6_longitudinal_join.py --smoke` — production path defaults; join problems do not fail exit code.
+
+**Key files:** `scripts/c6_longitudinal_join.py`, `scripts/test_c6_longitudinal_join.py`, `tests/fixtures/cognitive_longitudinal/*`
+
+**Next:** Implement **03-2b** (plan locked; await explicit **implement**)
 
 ### Phase E — EP-01 episodic authoritative inference harness ✅ (2026-07-09)
 
@@ -69,15 +590,42 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | 5 | E2-29 / E2-30 regression preserved | `THOTH_E2_EP015_PHASE5=1` |
 
 - Does **not** change scoring formulas, corpus, or thresholds
-- Step 2 investigation-hold artifacts remain invalid until Step 2 **redo**
+- Unblocked Step 2 redo after investigation-hold artifacts (pre-EP-01.5) were invalidated
 
-### Phase E Step 2 — authoritative STRICT trio evidence ⚠️ HOLD (2026-07-09)
+### Phase E Step 2 — authoritative STRICT trio evidence ✅ sealed (2026-07-09)
 
 **Authority:** `cursor_list.md` § E.0.0 Step 2 · [`phase_e_strict_v1.md`](benchmark_results/phase_e_strict_v1.md)  
 **Evidence scope:** `n=3_strict_trio`  
-**Status:** Sealed artifacts exist but pre-flight (1) failed (LLM no-op) — **not** valid empirical evidence until redo after EP-01.5  
-**E2-28:** PASS (bucket #0) on broken config only — Run A `run-1783628170667` vs Run B `run-1783628248447`  
+**Status:** ✅ Sealed after EP-01.5 redo — valid empirical evidence for Phase E v0.1  
+**Runs:** A `run-1783639167839` · B `run-1783639378206`  
+**E2-28:** PASS (bucket #0)  
+**Seal commits:** `0a38f22` (sync) · `51b9cf0` (artifact seal) · `d5df718` (empirical-observation wording)  
+**Outcome:** `mean_episodic_lift = 0.0` (reported; not softened)  
 **Artifacts:** `docs/baselines/artifacts/phase_e/` · `docs/baselines/phase_e_run_manifest.json`
+
+> **Superseded HOLD:** An earlier same-day investigation hold (LLM no-op pre-flight; runs `run-1783628170667` / `run-1783628248447`) is **not** certified evidence. Only the sealed redo above is in the Phase E v0.1 record.
+
+### Phase E Step 3 — L4 verification package ✅ (2026-07-09)
+
+**Authority:** `cursor_list.md` § E.0.0 Step 3  
+**Status:** `l4_status: VERIFIED` · `e_q2_verification: true` · execution-based reproduction **deferred**  
+**Package SHA-256:** `70d25560981f9c3322e59589e5867dda77c226833b3e1e7fb395fa3aef98a6ff`  
+**Artifacts:** [`phase_e_l4_status.json`](baselines/phase_e_l4_status.json) · [`phase_e_l4_verification.md`](baselines/phase_e_l4_verification.md) · [`PHASE_E_PROVENANCE.md`](baselines/PHASE_E_PROVENANCE.md)  
+**Plan / implementation:** `07491b4` · `e7e60ff`
+
+### Phase E Step 4 — claims audit ✅ (2026-07-09)
+
+**Authority:** `cursor_list.md` § E.0.0 Step 4  
+**Artifacts:** [`phase_e_claims_audit.md`](baselines/phase_e_claims_audit.md) · [`phase_e_claims_audit.json`](baselines/phase_e_claims_audit.json)  
+**Plan / implementation:** `3230362` · `6fdf086`  
+**Result:** Remaining publishable claims map to certified evidence; negative findings retained (no quiet softening of lift=0.0)
+
+### Phase E Step 5 — certification close-out ✅ (2026-07-09)
+
+**Authority:** `cursor_list.md` § E.0.0 Step 5 · plan lock `a9ee09c`  
+**Artifact:** [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md) (certification only — no new analysis)  
+**E-Q1…E-Q5:** answered with outward pointers; E-Q5 = scoped publication readiness only  
+**Pause:** before Zenodo V3 / grant submission using new numbers
 
 ### E2 Phase D3 — Observability without influence ✅ complete (2026-07-07)
 
@@ -99,7 +647,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 **Key files:** `metrics_subscriber.*`, `trace_subscriber.*`, `basic_agent_plugin.cpp`, `config.h` / `config.cpp`, `tests/unit_tests.cpp`
 
-**Next:** D4 — paused for explicit authorization.
+**Next:** D4–D5 ✅ complete — see Phase D section below.
 
 ### E2 Phase D — Evolution tier ✅ complete (2026-07-08)
 
@@ -120,7 +668,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 **Closure (2026-07-08):** `THOTH_E2_D5=1` green (~4.3 min sequential). Phase seal recorded in `PHASE_D_COMPLETE.md`. Preservation only — not promotion.
 
-**Next:** Phase E — scientific defense (planned).
+**Next:** Phase E v0.1 ✅ certified 2026-07-09 — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md). Paused before Zenodo V3.
 
 ### Cognitive hardening roadmap (C1–C7) — status at a glance
 

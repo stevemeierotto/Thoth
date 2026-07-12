@@ -57,7 +57,7 @@ Before making any changes:
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
-**Active work:** Remaining Phase 3–4 items are listed below with per-step status. **Phase 5 (Self-Building)** is an optional future expansion the owner may revisit — not scheduled active work. **E1 benchmark environment pinning ✅ complete** (2026-07-01 — see `completed_improvements_log.md`); next eval track: **E2**, **G1d**, **C6 Phase 3**, **E3**. Benchmark case design: [`new_corpus_tests.md`](new_corpus_tests.md). See `completed_improvements_log.md` and `cursor_list.md`.
+**Active work:** Remaining Phase 3–4 items (M4 range restore, G2 subgoals, G1d trajectory diagnostic, M5 vector benchmarks). **Phase 5 (Self-Building)** is optional future expansion — not scheduled. **E1 ✅**; **E2 Phases A–E ✅ certified** (2026-07-09). **C6.3-03 ✅** sealed; **C6.3-04 ✅** promotion policy; **C6.3-05 ✅** operator guide; **C6.3-06 ✅** regression fixtures — see [`completed_improvements_log.md`](completed_improvements_log.md). Next forks: **B1**, **G1d**, **E3**, **M4**. See `cursor_list.md`.
 
 ---
 
@@ -66,14 +66,119 @@ Before making any changes:
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
 | **E1** | Benchmark environment pinning | ✅ | Checkpoints A–E complete 2026-07-01 — spec `docs/benchmark_environment.md`; sidecar + JSONL + harness attribution; Step 7 double-bind mismatch; `compare_benchmark_env.py`; `check_baseline.py --require-env` (opt-in) |
-| **E2** | Episodic memory learning eval | 🔶 | Protocol v1.2 + eval kernel ✅; **D1–D3 ✅ 2026-07-07** (see `completed_improvements_log.md`) — D4 next; **`cursor_list.md` § E2** + **`docs/E2_PROTOCOL.md`** |
+| **E2** | Episodic memory learning eval | ✅ | Phases A–E complete; Phase E v0.1 certified 2026-07-09 — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); scoped `n=3_strict_trio`; lift=0.0; paused before Zenodo V3 |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI |
 
 **E1 close-out:** All harnesses (D1–D5) emit `run_id` + `env_hash` + `index_hash`; cognitive metrics attribution on D1–D3; retrieval-only harnesses D4–D5 emit 0 metrics rows. Unblocks **B1** and **V3** under pinned environment.
 
-**E2 active work:** Kernel wiring migration (Phase 0 pin bug → checkpoints A1–A5 → re-baseline). Implementation checkpoints and gate architecture: **`cursor_list.md` § E2**. Preregistered protocol: **`docs/E2_PROTOCOL.md`** v1.2.
+**E2 close-out:** Kernel + integration + evolution trust + empirical certification complete. Protocol: **`docs/E2_PROTOCOL.md`** v1.2. Checkpoints: **`cursor_list.md` § E2**. Post-E work is product/eval forks (B1, C6.3-05/06, E3, M4, G1d) — not further E2 phase checkpoints unless a new protocol version.
 
 ---
+
+## C6 Phase 3 — F-series promotion gate (C6.3-04)
+
+**Status:** ✅ **Normative policy** — 2026-07-11  
+**Authority:** [`C6_phase3_protocol.md`](C6_phase3_protocol.md) C6.3 v0.2.1 § F-series promotion gate · § C6.3-04 implementation lock  
+**Checkpoint:** C6.3-04 — promotion criteria for horizon items F1–F8
+
+### Purpose
+
+Define when an F-series horizon item may move from 📋 deferred to **active** roadmap work. C6 longitudinal evidence informs the decision; **promotion is a human governance act**, not an analyzer output.
+
+Horizon descriptions for F1–F8 remain in [`cursor_list.md`](cursor_list.md) §8 (informational). **This section is the sole normative source for promotion criteria.**
+
+### Authority
+
+| Document | Role |
+|----------|------|
+| **`docs/improvements.md`** (this section) | **Normative** — promotion gates, procedure, record template, governance |
+| [`docs/C6_phase3_protocol.md`](C6_phase3_protocol.md) | Constitutional floor |
+| [`docs/C6_phase3_analyzer_contract.md`](C6_phase3_analyzer_contract.md) | **Normative for thresholds** — `evidence_scope`, trend rules, sample gates; **not duplicated here** |
+| [`docs/C6_phase3_reporting_contract.md`](C6_phase3_reporting_contract.md) | Safety gate interpretation, required harnesses, incomplete-report rules |
+| [`docs/cursor_list.md`](cursor_list.md) | **Informational only** — F-series horizon table; **shall reference, not duplicate**, this section |
+
+### Mandatory Promotion Gates
+
+**All mandatory gates must pass.** Failure on **any** gate **blocks** promotion, regardless of supporting evidence.
+
+| Gate | Requirement | Verify via |
+|------|-------------|------------|
+| **Longitudinal evidence** | Two consecutive official evaluation windows (definition below); each summary: `evidence_scope: official_longitudinal`, `report_completeness: complete`, `confidence_label` not `low` | Latest C6 summary JSON + markdown report per window; scope rules in AC § `evidence_scope` |
+| **No benchmark regression** | `categories.safety.benchmark_regression == false` | RC § Safety gate interpretation |
+| **Reproducibility** | `categories.safety.reproducibility_ok == true`; no unresolved E1 hash / fingerprint drift on pinned reruns | Summary `flags`, `reproducibility`; [`benchmark_environment.md`](benchmark_environment.md) |
+| **Official gates green** | `categories.safety.official_gates_green == true`; no `gate_evidence_missing:*` for required harnesses | RC required harnesses: `reflection_ab`, `robustness`, `episodic_learning` |
+| **Owner approval** | Explicit owner approval recorded in a promotion record (template below) | This document — promotion record section |
+
+**Two consecutive official evaluation windows** means two **non-overlapping** official longitudinal analyses under the **same** `protocol_version` and `metric_schema_version`, each with a valid official anchor and qualifying for `official_longitudinal` scope, with **no intervening failed official evaluation** between them.
+
+| Term | Meaning |
+|------|---------|
+| **Non-overlapping** | Window `[start_ms, end_ms]` pairs do not share interior overlap (adjacent boundaries allowed) |
+| **Failed official evaluation** | Any mandatory gate would have failed at close-out (regression, `reproducibility_ok: false`, `official_gates_green: false`, or scope below `official_longitudinal`) |
+| **Not calendar months** | Consecutive means **evaluation windows**, not wall-clock months unless they coincide |
+
+Retain `cognitive_longitudinal.jsonl` history; compare the two most recent qualifying official windows.
+
+**Owner approval governance:** Promotion requires explicit owner approval recorded in the promotion record. **Analyzer output informs the decision but never authorizes promotion automatically.**
+
+**Forbidden:** Promotion while any Safety gate is red. Incomplete longitudinal reports (RC incomplete banner) are not valid promotion evidence.
+
+### Supporting Evidence
+
+**Advisory only — does not block promotion when all mandatory gates pass.**
+
+| Evidence | Role | Source |
+|----------|------|--------|
+| **Segment signal** | Informs *which* F-item is most justified | `segments.*` in C6 summary — trend and CI rules per AC (do not restate thresholds here) |
+| **Mechanism alignment** | Informs whether the bottleneck matches the proposed F-item | E2 diagnostics / E3 SCR artifacts when present — qualitative crosswalk |
+
+**Rule:** Supporting evidence is advisory. Unclear mechanism alignment or weak segment signal may justify deferring owner approval, but they are **not** formal veto conditions unless the owner chooses not to sign.
+
+### Promotion Procedure
+
+1. Run longitudinal analysis for the current official evaluation window — see [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md) (C6.3-05).
+2. Confirm all **five mandatory gates** against the latest summary JSON and markdown report.
+3. Confirm **two consecutive official evaluation windows** via JSONL history or archived summaries.
+4. Review **supporting evidence** (segments, E2/E3) to select target F-id and rationale.
+5. Owner records approval using the promotion record template below.
+6. Update the target F-item status in this roadmap from 📋 to active, with date and pointer to the record.
+
+**Reversibility:** Promotion is not permanent. Later evidence may return an F-series item to deferred status if mandatory promotion criteria are no longer satisfied. Record reversals in this document with the same evidence discipline.
+
+### Promotion Record Template
+
+Copy and fill when promoting an F-item:
+
+```markdown
+### F-series promotion record — C6.3-04
+
+- **Item:** F_ — _title_
+- **Date:** YYYY-MM-DD
+- **Approved by:** _owner name_ (explicit owner approval required)
+- **Windows reviewed:**
+  - W1: `generated_at_ms` / window `[start_ms, end_ms]` — summary path or commit
+  - W2: `generated_at_ms` / window `[start_ms, end_ms]` — summary path or commit
+- **Mandatory gates (all required):**
+  - [ ] Longitudinal evidence (two consecutive official windows, `official_longitudinal`, complete, confidence not low)
+  - [ ] `benchmark_regression: false`
+  - [ ] `reproducibility_ok: true`
+  - [ ] `official_gates_green: true`
+  - [ ] Owner approval (this record)
+- **Supporting evidence (advisory):**
+  - Segment signal: _brief note_
+  - Mechanism alignment (E2/E3): _brief note or N/A_
+- **Rationale:** _why this F-item now_
+```
+
+*(No promotion records yet — F1–F8 remain 📋 until owner signs.)*
+
+### Governance Notes
+
+- **No causal claims:** Promotion authorizes **roadmap work**, not proof that a code change caused a trend (protocol No Causal Claims).
+- **Thresholds:** Minimum sample sizes, trend rules, and `evidence_scope` qualification are defined by [`C6_phase3_analyzer_contract.md`](C6_phase3_analyzer_contract.md) AC v1.0 — **shall not be duplicated** in this section.
+- **Automation:** No CI gate, script, or analyzer flag may auto-promote an F-item.
+- **C6.3-04 invariant:** No executable logic, analyzer behavior changes, schema revisions, or automated promotion mechanism were introduced by this checkpoint.
+- **C6.3-06 ✅:** Regression fixtures sealed — see [`completed_improvements_log.md`](completed_improvements_log.md) · [`C6_phase3_protocol.md`](C6_phase3_protocol.md) § C6.3-06. Operator invocation: [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md) ✅. Fixture catalog: [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md).
 
 ---
 
@@ -84,7 +189,7 @@ Before making any changes:
 | Step | Status | Notes |
 |------|--------|-------|
 | 3.1 Pruning design | ✅ | `PruningPolicy`, `archived_turns` schema in code |
-| 3.2 Pruning implementation | 🔶 | Runtime + GUI trim wired (2026-06-16); summarize/age/admin/range restore open |
+| 3.2 Pruning implementation | 🔶 | M1–M3 ✅ (consolidate + age + `/prune`); **M4 range restore** still open |
 | 3.3 Fact Store | ✅ | `FactStore` + `store_fact` tool |
 | 3.4 IVectorStore | 🔶 | `IVectorStore` + `FlatVectorStore`; full benchmark contract tests not done |
 
@@ -290,7 +395,7 @@ Before moving to Phase 4:
 - ✅ Verify `facts` table exists and `store_fact` tool is accessible via tool registry
 - ✅ Confirm `IVectorStore` builds cleanly and existing RAG behavior is unchanged
 - 🔶 Verify `step_metrics` populated after goal execution (infrastructure exists; manual verify optional)
-- 🔶 Pruning: summarize-before-archive, age policy, admin restore path
+- 🔶 Pruning: **M4** range restore still open (M1 consolidate ✅; M2 age ✅; M3 `/prune` ✅)
 
 **Deferred:** Vector store benchmark contract suite; pruning warm-tier summarization.
 

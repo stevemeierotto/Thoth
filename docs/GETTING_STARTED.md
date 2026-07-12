@@ -159,6 +159,16 @@ cmake --build --preset build-debug
 ctest --test-dir build/debug -R test-suite-full --output-on-failure --timeout 3600
 ```
 
+### Longitudinal analysis (C6 Phase 3)
+
+After production logs have accumulated, run from the repository root:
+
+```bash
+python3 scripts/analyze_cognitive_longitudinal.py
+```
+
+Operator procedures, expected outputs, and troubleshooting: **[cognitive_longitudinal_ops.md](cognitive_longitudinal_ops.md)**. Normative semantics: `C6_phase3_analyzer_contract.md` and `C6_phase3_reporting_contract.md`.
+
 ---
 
 ## First Run

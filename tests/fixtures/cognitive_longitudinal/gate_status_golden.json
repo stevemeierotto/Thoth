@@ -1,0 +1,32 @@
+{
+  "cases": {
+    "default_missing_gates": {
+      "benchmark_env": "benchmark_env.jsonl",
+      "safety": {
+        "benchmark_regression": false,
+        "official_gates_green": false
+      },
+      "flags_contains": [
+        "gate_evidence_missing:reflection_ab",
+        "gate_evidence_missing:robustness",
+        "gate_evidence_missing:episodic_learning"
+      ]
+    },
+    "aborted_regression": {
+      "benchmark_env": "benchmark_env_gates_aborted.jsonl",
+      "safety": {
+        "benchmark_regression": true,
+        "official_gates_green": false
+      }
+    },
+    "gates_green": {
+      "benchmark_env": "benchmark_env_gates_green.jsonl",
+      "metrics": "metrics_gates_green.jsonl",
+      "safety": {
+        "benchmark_regression": false,
+        "official_gates_green": true,
+        "reproducibility_ok": true
+      }
+    }
+  }
+}

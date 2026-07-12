@@ -21,17 +21,17 @@
 
 ---
 
-## Current maturity (honest assessment)
+## Current maturity (honest assessment — post certification)
 
 | Area | Assessment |
 |------|------------|
 | Engineering rigor | **Strong** |
-| Reproducibility infrastructure | **Strong** |
+| Reproducibility infrastructure | **Strong** (L4 verification ✅; execution-based reproduction deferred) |
 | Benchmark methodology | **Good but limited** (n=3 official STRICT trio; B1 not yet run) |
 | Statistical rigor | **Early** — inference intentionally deferred |
-| Publication readiness | **Not yet** |
+| Publication readiness | **Scoped yes** within certified evidence (`n=3_strict_trio`) — Zenodo V3 / generalization **not yet** |
 
-Phase E does not overstate what has been demonstrated. It **closes the gap** between engineering proof and external empirical claims.
+Phase E v0.1 is **certified complete** for the documented evidence scope. It does not overstate what has been demonstrated. External use of Phase E numbers must carry `evidence_scope: n=3_strict_trio` and must not imply positive episodic lift or generalization beyond the certified record.
 
 ---
 
