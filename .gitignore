@@ -34,3 +34,9 @@ Thumbs.db
 # Submodule build artifacts
 external/basic_agent/build/
 external/basic_agent/agent_workspace/
+
+# Python (analysis / reporting scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
