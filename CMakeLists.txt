@@ -27,6 +27,10 @@ if(ENABLE_ASAN AND ENABLE_TSAN)
     message(FATAL_ERROR "ENABLE_ASAN and ENABLE_TSAN cannot both be ON")
 endif()
 
+# --- Build targets ---
+option(THOTH_BUILD_GUI "Build wxWidgets control panel" ON)
+option(THOTH_BUILD_ENGINE "Build headless thoth-engine binary" ON)
+
 # --- Compiler warnings ---
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -pedantic)
@@ -42,60 +46,57 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
-# --- wxWidgets ---
-find_package(wxWidgets REQUIRED COMPONENTS core base adv aui stc)
-include(${wxWidgets_USE_FILE})
-
 # --- CURL ---
 find_package(CURL REQUIRED)
 
-# --- Source files ---
-set(SOURCES
-    src/main.cpp
-    src/MainFrame.cpp
-    src/ChatSessionDataViewModel.cpp
-    src/ChatSessionRenderer.cpp
-    src/FileDropTarget.cpp
-    src/AgentInterface.cpp
-    src/VisualizationFrame.cpp
-    src/ChatMessagePanel.cpp
-    src/GragDiagnosticsPanel.cpp
-    src/StrategyPanel.cpp
-    src/PlanExecutionPanel.cpp
-    src/TrajectoryViewer.cpp
-    src/ExperimentLabPanel.cpp
-    src/GraphPanel.cpp
-    src/ExecutiveStateStrip.cpp
-    src/BenchmarkWindow.cpp
-)
-
-# --- Add the external basic_agent project ---
+# --- Core library + optional headless engine ---
+set(THOTH_ENGINE_VERSION ${PROJECT_VERSION})
 add_subdirectory(external/basic_agent)
 
-# --- Main executable ---
-add_executable(thoth-control-panel ${SOURCES})
+if(THOTH_BUILD_GUI)
+    find_package(wxWidgets REQUIRED COMPONENTS core base adv aui stc)
+    include(${wxWidgets_USE_FILE})
 
-# --- Include directories ---
-target_include_directories(thoth-control-panel PRIVATE
-    ${CMAKE_SOURCE_DIR}/includes
-    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
-    ${wxWidgets_INCLUDE_DIRS}
-)
+    set(SOURCES
+        src/main.cpp
+        src/MainFrame.cpp
+        src/ChatSessionDataViewModel.cpp
+        src/ChatSessionRenderer.cpp
+        src/FileDropTarget.cpp
+        src/AgentInterface.cpp
+        src/VisualizationFrame.cpp
+        src/ChatMessagePanel.cpp
+        src/GragDiagnosticsPanel.cpp
+        src/StrategyPanel.cpp
+        src/PlanExecutionPanel.cpp
+        src/TrajectoryViewer.cpp
+        src/ExperimentLabPanel.cpp
+        src/GraphPanel.cpp
+        src/ExecutiveStateStrip.cpp
+        src/BenchmarkWindow.cpp
+    )
 
-# --- Link libraries ---
-target_link_libraries(thoth-control-panel
-    PRIVATE
-        ${wxWidgets_LIBRARIES}
-        ${CURL_LIBRARIES}
-        basic_agent
-)
+    add_executable(thoth-control-panel ${SOURCES})
 
-# --- Install target ---
-install(TARGETS thoth-control-panel RUNTIME DESTINATION bin)
+    target_include_directories(thoth-control-panel PRIVATE
+        ${CMAKE_SOURCE_DIR}/includes
+        ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+        ${wxWidgets_INCLUDE_DIRS}
+    )
 
-# --- Optional: Group IDE targets ---
-set_target_properties(thoth-control-panel PROPERTIES FOLDER "apps")
+    target_link_libraries(thoth-control-panel
+        PRIVATE
+            ${wxWidgets_LIBRARIES}
+            ${CURL_LIBRARIES}
+            basic_agent
+    )
+
+    install(TARGETS thoth-control-panel RUNTIME DESTINATION bin)
+    set_target_properties(thoth-control-panel PROPERTIES FOLDER "apps")
+endif()
+
 set_target_properties(basic_agent PROPERTIES FOLDER "libs")
 
-add_subdirectory(tests)
-
+if(THOTH_BUILD_GUI OR THOTH_BUILD_ENGINE)
+    add_subdirectory(tests)
+endif()

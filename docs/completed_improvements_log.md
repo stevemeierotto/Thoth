@@ -1,7 +1,45 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-11 (C6.3-06 regression fixtures ✅)
+Last updated: 2026-07-11 (memory consolidation lockup fix ✅)
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+
+### Bug fix — memory consolidation lockup / control-panel freeze ✅ (2026-07-11)
+
+**Symptom:** Control panel froze (required kill) while stderr repeated
+`[Memory] Consolidated 0 turn(s) for session … (reasons: HOT_COUNT) [deferred: batch cap reached]`.
+
+**Root cause (confirmed from `agent_workspace/decision_trace.jsonl`):** A poisoned
+SQLite transaction. `SQLiteMemoryRepository::commit()` did not roll back on a
+failed `COMMIT`, so after the first COMMIT failure the single shared connection
+was left mid-transaction; every subsequent `beginTransaction()` failed instantly
+(`transaction_ms: 0`, "cannot start a transaction within a transaction"). Because
+the batch never archived, `HOT_COUNT` never cleared, so every new message
+re-ran a multi-minute, **timeout-less** LLM summary + embed on the worker thread
+(`summary_ms` up to ~227 s), which manifested as a lockup. The
+`[deferred: batch cap reached]` label was also misleading — the loop actually
+stopped on the no-progress guard, not the batch cap.
+
+**Fixes:**
+
+- `sqlite_memory_repository.cpp` — `commit()` now rolls back on COMMIT failure;
+  `beginTransaction()` self-heals a stale open transaction; `rollback()` is a
+  no-op when no transaction is active. Connection hardened at open with
+  `busy_timeout=5000`, `journal_mode=WAL`, `synchronous=NORMAL`.
+- `memory_pruner.{h,cpp}` — added a no-progress circuit breaker
+  (`kMaxConsecutiveNoProgress=3`): automatic consolidation that repeatedly makes
+  no progress is suppressed (emits `consolidation_backoff` trace, sets
+  `ConsolidationResult::blocked`) until a successful archive, a manual
+  consolidation, or session (re)activation. The `consolidation_deferred` trace
+  now distinguishes an honest batch-cap pause from a no-progress failure.
+- `memory.cpp` — `onSessionActivated()` clears the backoff; the `[Memory]` log
+  line now reports `no forward progress — consolidation failing` vs
+  `batch cap reached` accurately.
+- `llm_interface.cpp` — the Ollama curl handle now sets `CONNECTTIMEOUT=10s` and
+  a bounded `CURLOPT_TIMEOUT` (default 600 s, override `THOTH_LLM_TIMEOUT_SECONDS`)
+  so a stalled Ollama can no longer block the worker thread indefinitely.
+
+**Verification:** Debug build clean; full `thoth-unit-tests` suite passes
+(includes `testConsolidationFailureTransaction`, `testConsolidationFailureEmbed`).
 
 ### E2 track — status at a glance
 

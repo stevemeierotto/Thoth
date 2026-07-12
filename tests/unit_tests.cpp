@@ -11,11 +11,16 @@
 #include <string>
 #include <thread>
 
+#if THOTH_HAS_GUI
 #include "AgentInterface.h"
+#endif
 #include "command_processor.h"
 #include "config.h"
 #include "embedding_engine.h"
 #include "file_handler.h"
+#include "inference_endpoint.h"
+#include "runtime_bootstrap.h"
+#include "env_loader.h"
 #include "index_manager.h"
 #include "llm_interface.h"
 #include "logger.h"
@@ -111,6 +116,342 @@ static bool testConfigRoundTrip() {
     return ok;
 }
 
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const char* key, const char* value) : key_(key) {
+        const char* previous = std::getenv(key);
+        if (previous) {
+            hadPrevious_ = true;
+            previous_ = previous;
+        }
+        if (value) {
+            setenv(key, value, 1);
+        } else {
+            unsetenv(key);
+        }
+    }
+
+    ~ScopedEnvVar() {
+        if (hadPrevious_) {
+            setenv(key_.c_str(), previous_.c_str(), 1);
+        } else {
+            unsetenv(key_.c_str());
+        }
+    }
+
+private:
+    std::string key_;
+    std::string previous_;
+    bool hadPrevious_ = false;
+};
+
+static bool testInferenceEndpointResolution() {
+    bool ok = true;
+
+    {
+        ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+        ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+        ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+
+        const auto endpoints = Thoth::resolveInferenceEndpoints();
+        if (endpoints.base_url != "http://127.0.0.1:11434") {
+            std::cerr << "testInferenceEndpointResolution: default base_url mismatch: "
+                      << endpoints.base_url << "\n";
+            ok = false;
+        }
+        if (endpoints.embed_base_url != "http://127.0.0.1:11434") {
+            std::cerr << "testInferenceEndpointResolution: default embed_base_url mismatch: "
+                      << endpoints.embed_base_url << "\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar inference("THOTH_INFERENCE_BASE_URL", "http://custom-host:11434");
+        ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+        ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+
+        const auto endpoints = Thoth::resolveInferenceEndpoints();
+        if (endpoints.base_url != "http://custom-host:11434") {
+            std::cerr << "testInferenceEndpointResolution: env override failed\n";
+            ok = false;
+        }
+        if (endpoints.embed_base_url != "http://custom-host:11434") {
+            std::cerr << "testInferenceEndpointResolution: embed fallback failed\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+        ScopedEnvVar host("OLLAMA_HOST", "custom-host:11434");
+        ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+
+        const auto endpoints = Thoth::resolveInferenceEndpoints();
+        if (endpoints.base_url != "http://custom-host:11434") {
+            std::cerr << "testInferenceEndpointResolution: OLLAMA_HOST compat failed\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar inference("THOTH_INFERENCE_BASE_URL", "http://env-host:11434");
+        ScopedEnvVar embed("THOTH_EMBED_BASE_URL", "http://embed-host:9999");
+
+        const auto endpoints = Thoth::resolveInferenceEndpoints();
+        if (endpoints.embed_base_url != "http://embed-host:9999") {
+            std::cerr << "testInferenceEndpointResolution: embed override failed\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+        ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+        ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+
+        Config cfg;
+        cfg.inference_base_url = "http://config-host:11434";
+        cfg.embed_base_url = "http://config-embed:11434";
+        const auto endpoints = Thoth::resolveInferenceEndpoints(cfg);
+        if (endpoints.base_url != "http://config-host:11434") {
+            std::cerr << "testInferenceEndpointResolution: config base_url failed\n";
+            ok = false;
+        }
+        if (endpoints.embed_base_url != "http://config-embed:11434") {
+            std::cerr << "testInferenceEndpointResolution: config embed_base_url failed\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar inference("THOTH_INFERENCE_BASE_URL", "http://env-host:11434");
+        Config cfg;
+        cfg.inference_base_url = "http://config-host:11434";
+        const auto endpoints = Thoth::resolveInferenceEndpoints(cfg);
+        if (endpoints.base_url != "http://env-host:11434") {
+            std::cerr << "testInferenceEndpointResolution: env should beat config\n";
+            ok = false;
+        }
+    }
+
+    {
+        const std::string joined =
+            Thoth::inferenceUrl("https://server:11434/", "/api/generate");
+        if (joined != "https://server:11434/api/generate") {
+            std::cerr << "testInferenceEndpointResolution: path join failed: " << joined << "\n";
+            ok = false;
+        }
+        if (joined.find("//api") != std::string::npos) {
+            std::cerr << "testInferenceEndpointResolution: double slash in joined URL\n";
+            ok = false;
+        }
+    }
+
+    {
+        const std::string joined =
+            Thoth::inferenceUrl("http://host:11434", "api/tags");
+        if (joined != "http://host:11434/api/tags") {
+            std::cerr << "testInferenceEndpointResolution: missing leading slash normalization failed\n";
+            ok = false;
+        }
+    }
+
+    {
+        const fs::path tempPath = makeTempPath("thoth_inference_config_test.json");
+        Config cfg;
+        cfg.inference_base_url = "http://json-host:11434";
+        cfg.embed_base_url = "http://json-embed:11434";
+        if (!cfg.saveToJson(tempPath.string())) {
+            std::cerr << "testInferenceEndpointResolution: failed to save config\n";
+            ok = false;
+        } else {
+            Config loaded;
+            if (!loaded.loadFromJson(tempPath.string())) {
+                std::cerr << "testInferenceEndpointResolution: failed to load config\n";
+                ok = false;
+            } else {
+                ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+                ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+                ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+                const auto endpoints = Thoth::resolveInferenceEndpoints(loaded);
+                if (endpoints.base_url != "http://json-host:11434"
+                    || endpoints.embed_base_url != "http://json-embed:11434") {
+                    std::cerr << "testInferenceEndpointResolution: config json fields failed\n";
+                    ok = false;
+                }
+            }
+        }
+        fs::remove(tempPath);
+    }
+
+    return ok;
+}
+
+static bool testFileHandlerWorkspaceOverride() {
+    const fs::path workspace = makeTempPath("thoth_workspace_override");
+    fs::remove_all(workspace);
+
+    ScopedEnvVar workspaceEnv("THOTH_WORKSPACE_PATH", workspace.string().c_str());
+    {
+        FileHandler fh;
+        const std::string dbPath = fh.getAgentWorkspacePath("memory.db");
+        const std::string ragDir = fh.getRagPath();
+        if (dbPath != (workspace / "memory.db").string()) {
+            std::cerr << "testFileHandlerWorkspaceOverride: memory.db path mismatch: "
+                      << dbPath << "\n";
+            fs::remove_all(workspace);
+            return false;
+        }
+        if (ragDir != (workspace / "rag").string()) {
+            std::cerr << "testFileHandlerWorkspaceOverride: rag path mismatch: "
+                      << ragDir << "\n";
+            fs::remove_all(workspace);
+            return false;
+        }
+    }
+
+    fs::remove_all(workspace);
+    return true;
+}
+
+static bool testFileHandlerLogsOverride() {
+    const fs::path logs = makeTempPath("thoth_logs_override");
+    fs::remove_all(logs);
+
+    ScopedEnvVar logsEnv("THOTH_LOGS_PATH", logs.string().c_str());
+    {
+        FileHandler fh;
+        const std::string logPath = fh.getLogsPath("cognitive_metrics.jsonl");
+        if (logPath != (logs / "cognitive_metrics.jsonl").string()) {
+            std::cerr << "testFileHandlerLogsOverride: path mismatch: " << logPath << "\n";
+            fs::remove_all(logs);
+            return false;
+        }
+        if (!fs::exists(logs)) {
+            std::cerr << "testFileHandlerLogsOverride: logs directory not created\n";
+            fs::remove_all(logs);
+            return false;
+        }
+    }
+
+    fs::remove_all(logs);
+    return true;
+}
+
+static bool testLogsPathPrecedence() {
+    bool ok = true;
+
+    {
+        ScopedEnvVar unsetMetrics("THOTH_COGNITIVE_METRICS_LOG", nullptr);
+        ScopedEnvVar unsetLogs("THOTH_LOGS_PATH", nullptr);
+        FileHandler fh;
+        const fs::path expected = fs::path(fh.getProjectRoot()) / "logs" / "cognitive_metrics.jsonl";
+        if (Thoth::CognitiveMetricsLogger::resolveLogFilePath() != expected.string()) {
+            std::cerr << "testLogsPathPrecedence: default path mismatch\n";
+            ok = false;
+        }
+    }
+
+    {
+        const fs::path logs = makeTempPath("thoth_logs_precedence");
+        fs::remove_all(logs);
+        ScopedEnvVar unsetMetrics("THOTH_COGNITIVE_METRICS_LOG", nullptr);
+        ScopedEnvVar logsEnv("THOTH_LOGS_PATH", logs.string().c_str());
+        const std::string expected = (logs / "cognitive_metrics.jsonl").string();
+        if (Thoth::CognitiveMetricsLogger::resolveLogFilePath() != expected) {
+            std::cerr << "testLogsPathPrecedence: THOTH_LOGS_PATH override failed\n";
+            ok = false;
+        }
+        fs::remove_all(logs);
+    }
+
+    {
+        ScopedEnvVar metricsEnv("THOTH_COGNITIVE_METRICS_LOG", "/custom/metrics.jsonl");
+        ScopedEnvVar logsEnv("THOTH_LOGS_PATH", "/tmp/logs");
+        if (Thoth::CognitiveMetricsLogger::resolveLogFilePath() != "/custom/metrics.jsonl") {
+            std::cerr << "testLogsPathPrecedence: THOTH_COGNITIVE_METRICS_LOG should win\n";
+            ok = false;
+        }
+    }
+
+    return ok;
+}
+
+static bool testRuntimeBootstrapLoadsEnv() {
+    const fs::path dir = makeTempPath("thoth_bootstrap_load");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path envFile = dir / "bootstrap.env";
+    {
+        std::ofstream out(envFile);
+        out << "THOTH_INFERENCE_BASE_URL=http://from-dotenv:11434\n";
+    }
+
+    ScopedEnvVar envPath("THOTH_ENV_PATH", envFile.string().c_str());
+    ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+    ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+    ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+
+    Thoth::bootstrapRuntimeEnvironment();
+    const auto endpoints = Thoth::resolveInferenceEndpoints();
+    fs::remove_all(dir);
+
+    if (endpoints.base_url != "http://from-dotenv:11434") {
+        std::cerr << "testRuntimeBootstrapLoadsEnv: expected .env inference URL, got "
+                  << endpoints.base_url << "\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testRuntimeBootstrapRespectsExistingEnv() {
+    const fs::path dir = makeTempPath("thoth_bootstrap_precedence");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path envFile = dir / "bootstrap.env";
+    {
+        std::ofstream out(envFile);
+        out << "THOTH_INFERENCE_BASE_URL=http://from-dotenv:11434\n";
+    }
+
+    ScopedEnvVar exported("THOTH_INFERENCE_BASE_URL", "http://exported:11434");
+    ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+    ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+
+    if (!EnvLoader::loadEnvFileIfUnset(envFile.string())) {
+        std::cerr << "testRuntimeBootstrapRespectsExistingEnv: failed to read .env\n";
+        fs::remove_all(dir);
+        return false;
+    }
+
+    const auto endpoints = Thoth::resolveInferenceEndpoints();
+    fs::remove_all(dir);
+
+    if (endpoints.base_url != "http://exported:11434") {
+        std::cerr << "testRuntimeBootstrapRespectsExistingEnv: exported env should win, got "
+                  << endpoints.base_url << "\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testRuntimeBootstrapIdempotent() {
+    Thoth::bootstrapRuntimeEnvironment();
+    Thoth::bootstrapRuntimeEnvironment();
+
+    ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+    ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+    ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+    const auto endpoints = Thoth::resolveInferenceEndpoints();
+    return endpoints.base_url == "http://127.0.0.1:11434";
+}
+
+static bool testRuntimeBootstrapDiagnosticsDisabledByDefault() {
+    ScopedEnvVar unsetFlag("THOTH_LOG_CONFIG", nullptr);
+    return !Thoth::runtimeConfigDiagnosticsEnabled(nullptr);
+}
+
 static bool testMemoryPersistence() {
     const fs::path tempDir = makeTempPath("thoth_memory_dir");
     fs::create_directories(tempDir);
@@ -195,6 +536,7 @@ static bool testCommandProcessorSlashTrim() {
     return true;
 }
 
+#if THOTH_HAS_GUI
 static bool testAgentInterfaceLifecycle() {
     try {
         auto agent = std::make_unique<AgentInterface>();
@@ -208,6 +550,7 @@ static bool testAgentInterfaceLifecycle() {
         return false;
     }
 }
+#endif
 
 static bool testStructuredLoggerRedaction() {
     const std::string requestId = "test-redaction-" + std::to_string(
@@ -10796,12 +11139,32 @@ int main() {
         }
     }
 
+#if defined(THOTH_GUI_TESTS_ONLY)
     int failures = 0;
+    if (!testAgentInterfaceLifecycle()) failures++;
+    if (failures == 0) {
+        std::cout << "All GUI tests passed.\n";
+        return 0;
+    }
+    std::cerr << failures << " GUI test(s) failed.\n";
+    return 1;
+#else
+    int failures = 0;
+    if (!testRuntimeBootstrapLoadsEnv()) failures++;
+    if (!testRuntimeBootstrapRespectsExistingEnv()) failures++;
+    if (!testRuntimeBootstrapIdempotent()) failures++;
+    if (!testRuntimeBootstrapDiagnosticsDisabledByDefault()) failures++;
     if (!testConfigRoundTrip()) failures++;
+    if (!testInferenceEndpointResolution()) failures++;
+    if (!testFileHandlerWorkspaceOverride()) failures++;
+    if (!testFileHandlerLogsOverride()) failures++;
+    if (!testLogsPathPrecedence()) failures++;
     if (!testMemoryPersistence()) failures++;
     if (!testCommandProcessorSetCommand()) failures++;
     if (!testCommandProcessorSlashTrim()) failures++;
+#if THOTH_HAS_GUI
     if (!testAgentInterfaceLifecycle()) failures++;
+#endif
     if (!testStructuredLoggerRedaction()) failures++;
     if (!testRetrievalDiagnosticsEvent()) failures++;
     if (!testBootstrapIndexing()) failures++;
@@ -10946,4 +11309,5 @@ int main() {
     }
     std::cerr << failures << " test(s) failed.\n";
     return 1;
+#endif
 }

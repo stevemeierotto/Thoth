@@ -1,25 +1,3 @@
-add_executable(thoth-unit-tests
-    unit_tests.cpp
-    ${CMAKE_SOURCE_DIR}/src/AgentInterface.cpp
-)
-
-target_include_directories(thoth-unit-tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/includes
-    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
-    ${wxWidgets_INCLUDE_DIRS}
-)
-
-target_link_libraries(thoth-unit-tests PRIVATE
-    basic_agent
-    ${wxWidgets_LIBRARIES}
-)
-
-add_test(NAME thoth-unit-tests COMMAND thoth-unit-tests)
-set_tests_properties(thoth-unit-tests PROPERTIES
-    LABELS "pr;unit"
-    TIMEOUT 1800
-)
-
 add_executable(run_test_suite run_test_suite.cpp)
 target_include_directories(run_test_suite PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/include
@@ -32,6 +10,54 @@ set_tests_properties(test-suite-dev PROPERTIES
     TIMEOUT 180
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+
+# Core unit tests — no wxWidgets; always built when tests/ is in the graph.
+add_executable(thoth-core-tests unit_tests.cpp)
+target_compile_definitions(thoth-core-tests PRIVATE THOTH_HAS_GUI=0)
+target_include_directories(thoth-core-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+)
+target_link_libraries(thoth-core-tests PRIVATE basic_agent)
+add_test(NAME thoth-core-tests COMMAND thoth-core-tests)
+set_tests_properties(thoth-core-tests PROPERTIES
+    LABELS "pr;unit"
+    TIMEOUT 1800
+)
+
+if(THOTH_BUILD_GUI)
+    add_executable(thoth-gui-tests
+        unit_tests.cpp
+        ${CMAKE_SOURCE_DIR}/src/AgentInterface.cpp
+    )
+    target_compile_definitions(thoth-gui-tests PRIVATE
+        THOTH_HAS_GUI=1
+        THOTH_GUI_TESTS_ONLY=1
+    )
+    target_include_directories(thoth-gui-tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/includes
+        ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+        ${wxWidgets_INCLUDE_DIRS}
+    )
+    target_link_libraries(thoth-gui-tests PRIVATE
+        basic_agent
+        ${wxWidgets_LIBRARIES}
+    )
+    add_test(NAME thoth-gui-tests COMMAND thoth-gui-tests)
+    set_tests_properties(thoth-gui-tests PROPERTIES
+        LABELS "gui"
+        TIMEOUT 300
+    )
+endif()
+
+# Build-level compatibility alias — not a CTest entry. Run tests via
+# ctest -R thoth-core-tests (and ctest -L gui for GUI tests).
+add_custom_target(thoth-unit-tests
+    DEPENDS thoth-core-tests
+    COMMENT "Build alias — run ctest -R thoth-core-tests; GUI: ctest -L gui"
+)
+if(THOTH_BUILD_GUI)
+    add_dependencies(thoth-unit-tests thoth-gui-tests)
+endif()
 
 if(TARGET run_reflection_ab_benchmark)
     add_test(NAME reflection-ab-benchmark COMMAND run_reflection_ab_benchmark)

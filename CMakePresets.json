@@ -53,6 +53,20 @@
         "ENABLE_ASAN": "OFF",
         "ENABLE_TSAN": "ON"
       }
+    },
+    {
+      "name": "engine-only",
+      "displayName": "Engine Only (no GUI)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/engine-only",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "THOTH_BUILD_GUI": "OFF",
+        "THOTH_BUILD_ENGINE": "ON",
+        "ENABLE_ASAN": "OFF",
+        "ENABLE_TSAN": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -75,6 +89,11 @@
       "name": "build-tsan",
       "displayName": "Build TSan",
       "configurePreset": "tsan"
+    },
+    {
+      "name": "build-engine-only",
+      "displayName": "Build Engine Only",
+      "configurePreset": "engine-only"
     }
   ]
 }

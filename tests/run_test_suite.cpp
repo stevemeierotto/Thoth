@@ -8,6 +8,8 @@
  */
 #include "basic_agent_plugin.h"
 #include "file_handler.h"
+#include "inference_endpoint.h"
+#include "runtime_bootstrap.h"
 #include "executive_controller.h"
 #include "benchmark_context.h"
 
@@ -57,7 +59,10 @@ static void configureFullTier() {
 }
 
 static bool ollamaReachable() {
-    const int code = std::system("curl -sf http://localhost:11434/api/tags >/dev/null 2>&1");
+    const auto endpoints = Thoth::resolveInferenceEndpoints();
+    const std::string tagsUrl = Thoth::inferenceUrl(endpoints.base_url, "/api/tags");
+    const std::string cmd = "curl -sf \"" + tagsUrl + "\" >/dev/null 2>&1";
+    const int code = std::system(cmd.c_str());
     return code == 0;
 }
 
@@ -282,7 +287,9 @@ int main(int argc, char** argv) {
     } else {
         configureFullTier();
         if (!ollamaReachable()) {
-            std::cerr << "TEST_SUITE: Ollama not reachable at http://localhost:11434 — start Ollama first.\n";
+            const auto endpoints = Thoth::resolveInferenceEndpoints();
+            std::cerr << "TEST_SUITE: Ollama not reachable at "
+                      << endpoints.base_url << " — start Ollama first.\n";
             return 2;
         }
         std::cout << "TEST_SUITE tier: full (Ollama required)\n";
@@ -300,6 +307,8 @@ int main(int argc, char** argv) {
     const int goalWaitMs = devTier ? 120000 : 600000;
     const int chatWaitMs = devTier ? 30000 : 120000;
     const int execWaitMs = devTier ? 15000 : 60000;
+
+    Thoth::bootstrapRuntimeEnvironment();
 
     RunFlags flags;
     BasicAgentPlugin plugin;

@@ -28,6 +28,33 @@ jobs:
             ninja-build \
             g++ \
             pkg-config \
+            libcurl4-openssl-dev
+
+      - name: Configure (engine-only)
+        run: cmake --preset engine-only
+
+      - name: Build (engine-only)
+        run: cmake --build --preset build-engine-only --parallel
+
+      - name: Run PR tests (core unit + dev TEST_SUITE + reflection A/B)
+        run: ctest --test-dir build/engine-only -L pr --output-on-failure
+
+  gui-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            g++ \
+            pkg-config \
             libcurl4-openssl-dev \
             libwxgtk3.2-dev
 
@@ -37,8 +64,8 @@ jobs:
       - name: Build
         run: cmake --build --preset build-debug --parallel
 
-      - name: Run PR tests (unit + dev TEST_SUITE + reflection A/B)
-        run: ctest --test-dir build/debug -L pr --output-on-failure
+      - name: Run GUI unit tests
+        run: ctest --test-dir build/debug -L gui --output-on-failure
 
   static-analysis:
     runs-on: ubuntu-latest

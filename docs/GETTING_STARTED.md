@@ -1,6 +1,6 @@
 # Getting Started with Thoth
 
-**Last Updated:** 2026-03-10  
+**Last Updated:** 2026-07-12  
 **Purpose:** Complete setup guide for building and running Thoth
 
 ---
@@ -113,9 +113,12 @@ cmake --preset asan
 
 # Debug with ThreadSanitizer (for concurrency debugging)
 cmake --preset tsan
+
+# Headless engine only (no wxWidgets required)
+cmake --preset engine-only
 ```
 
-**Build Directory:** Presets create builds in `build/debug`, `build/release`, etc.
+**Build Directory:** Presets create builds in `build/debug`, `build/release`, `build/engine-only`, etc.
 
 ### Step 3: Build
 
@@ -131,9 +134,11 @@ make -j$(sysctl -n hw.ncpu)  # macOS
 ```
 
 **Output:**
-- Main executable: `build/debug/thoth-control-panel`
+- GUI executable: `build/debug/thoth-control-panel`
+- Headless engine: `build/debug/external/basic_agent/thoth-engine`
 - Core library: `build/debug/libbasic_agent.so` (Linux) or `.dylib` (macOS)
-- Unit tests: `build/debug/tests/thoth-unit-tests`
+- Unit tests (core): `build/debug/tests/thoth-core-tests`
+- Unit tests (GUI): `build/debug/tests/thoth-gui-tests` (when GUI is built)
 
 ### Step 4: Verify Build
 
@@ -142,6 +147,12 @@ make -j$(sysctl -n hw.ncpu)  # macOS
 ls -lh build/debug/thoth-control-panel
 
 # Run unit tests
+# Core suite (no wxWidgets):
+ctest --test-dir build/debug -R thoth-core-tests --output-on-failure
+
+# GUI lifecycle tests (wxWidgets required):
+ctest --test-dir build/debug -L gui --output-on-failure
+
 # Quick dev loop (~70s, no Ollama): dev TEST_SUITE + reflection A/B + robustness suite
 ctest --test-dir build/debug -L fast --output-on-failure
 
@@ -150,14 +161,50 @@ ctest --test-dir build/debug -L fast --output-on-failure
 # ./build/debug/external/basic_agent/run_reflection_ab_benchmark
 # ./build/debug/external/basic_agent/run_robustness_suite
 
-# PR-equivalent (unit + cognitive):
+# PR-equivalent (core unit + cognitive; no wxWidgets on engine-only):
 ctest --test-dir build/debug -L pr --output-on-failure
+
+# Full local coverage (core + GUI):
+ctest --test-dir build/debug -L "pr|gui" --output-on-failure
 
 # Full Ollama regression (~40 min; nightly / manual only)
 cmake --preset debug -DTHOTH_TEST_SUITE_FULL=ON
 cmake --build --preset build-debug
 ctest --test-dir build/debug -R test-suite-full --output-on-failure --timeout 3600
 ```
+
+### Headless engine (`thoth-engine`)
+
+The headless binary runs the full cognitive stack (`BasicAgentPlugin`) without wxWidgets. Use the `engine-only` preset on machines without GUI dependencies, or the default `debug` preset when both GUI and engine are needed.
+
+```bash
+# Build engine only (no wxWidgets)
+cmake --preset engine-only
+cmake --build --preset build-engine-only
+
+# One-shot prompt (scripts / CI smoke)
+export THOTH_WORKSPACE_PATH=/tmp/thoth-ws
+export THOTH_INFERENCE_BASE_URL=http://127.0.0.1:11434
+mkdir -p "$THOTH_WORKSPACE_PATH"
+./build/engine-only/external/basic_agent/thoth-engine --execute "/prune status"
+
+# Interactive REPL (stdin)
+./build/engine-only/external/basic_agent/thoth-engine
+```
+
+**Modes:**
+- `--help` / `--version` — usage and version
+- `--execute "<prompt>"` — single `processInput()` call, then exit
+- (default) — read prompts from stdin until EOF or Ctrl+C
+
+**Portable paths** (see Environment Variables):
+- `THOTH_WORKSPACE_PATH` — workspace (`memory.db`, `rag/`, config)
+- `THOTH_LOGS_PATH` — benchmark and metrics JSONL logs
+- `THOTH_INFERENCE_BASE_URL` — Ollama or compatible inference host
+
+**Tests on engine-only builds:** `ctest -L pr` runs the full PR suite (core unit tests + cognitive/Python tests) without wxWidgets.
+
+**Test targets:** `thoth-core-tests` (engine/core), `thoth-gui-tests` (GUI lifecycle). `cmake --build --target thoth-unit-tests` is a build alias for both binaries; use `ctest -R thoth-core-tests` instead of the old `ctest -R thoth-unit-tests` name.
 
 ### Longitudinal analysis (C6 Phase 3)
 
@@ -225,11 +272,25 @@ The GUI should show Ollama connection status. If it fails:
 
 ### Environment Variables
 
-Create a `.env` file in the project root (optional):
+Create a `.env` file in the project root (optional). Entry points (`thoth-engine`, GUI app, `run_test_suite`) load it automatically at startup via `bootstrapRuntimeEnvironment()`.
+
+**Precedence:** exported shell environment > `.env` > `config.json` > defaults.
+
+Point to a custom file with `THOTH_ENV_PATH=/path/to/.env`.
+
+Print resolved paths at startup with `THOTH_LOG_CONFIG=1`:
+
+```bash
+THOTH_LOG_CONFIG=1 ./build/debug/external/basic_agent/thoth-engine --version
+```
 
 ```bash
 # .env file (DO NOT COMMIT)
-OLLAMA_HOST=localhost:11434
+THOTH_WORKSPACE_PATH=          # optional: override agent_workspace location
+THOTH_LOGS_PATH=               # optional: override logs/ directory
+THOTH_INFERENCE_BASE_URL=http://127.0.0.1:11434
+THOTH_LOG_CONFIG=0             # set to 1 to print resolved startup paths
+OLLAMA_HOST=localhost:11434    # compat alias for inference host
 OLLAMA_MODEL=qwen2.5:3b
 OLLAMA_EMBED_MODEL=nomic-embed-text
 
@@ -318,7 +379,7 @@ chmod -R u+w agent_workspace/
 **Unit tests fail:**
 - Ensure workspace directory is writable
 - Check Ollama is running (some tests require it)
-- Run with verbose output: `./tests/thoth-unit-tests --verbose`
+- Run core unit tests: `./build/debug/tests/thoth-core-tests`
 
 **Integration tests fail:**
 - Verify `agent_workspace/rag/` has bootstrap corpus
@@ -401,11 +462,18 @@ cmake --preset debug
 # Build
 cmake --build --preset build-debug
 
+# Headless engine only
+cmake --preset engine-only
+cmake --build --preset build-engine-only
+
 # Test
 cd build/debug && ctest
 
-# Run
+# Run GUI
 ./build/debug/thoth-control-panel
+
+# Run headless engine
+./build/debug/external/basic_agent/thoth-engine --help
 ```
 
 ### Directory Structure

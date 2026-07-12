@@ -6,10 +6,13 @@
 #include <wx/wx.h>
 #include <curl/curl.h>
 #include "MainFrame.h"
+#include "runtime_bootstrap.h"
 
 class ThothApp : public wxApp {
 public:
     bool OnInit() override {
+        Thoth::bootstrapRuntimeEnvironment();
+
         // Initialize libcurl globally
         curl_global_init(CURL_GLOBAL_ALL);
 
