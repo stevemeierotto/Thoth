@@ -775,6 +775,16 @@ Before moving to next Roadmap iteration:
 
 ---
 
+## Containerization — Future Enhancements (Post Plan F)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) · **Plan F spec:** [`plan_f_engine_runtime_http.md`](plan_f_engine_runtime_http.md)
+
+| ID | Enhancement | Status | Notes |
+|----|-------------|--------|-------|
+| **F+1** | `EngineRuntime::submitGoalAsync()` | 📋 Locked backlog | Return immediately after enqueueing the goal (fire-and-forget, analogous to `AgentInterface::executeGoal`). Acceptance and progress notifications delivered through the **Plan G** event stream (`GET /v1/events`). **Out of scope for locked Plan F and Plan G** — separate API change now that G is implemented. Spec: [`plan_f_engine_runtime_http.md`](plan_f_engine_runtime_http.md) § Plan lock; [`plan_g_streaming_observability.md`](plan_g_streaming_observability.md) 🔒 § Deferred. |
+
+---
+
 ## Toolchain Roadmap (Ongoing — Not Phased)
 
 These tools can be implemented independently of the phase structure above. They must comply with `TOOLS.md v1.0`.

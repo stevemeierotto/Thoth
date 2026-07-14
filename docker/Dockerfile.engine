@@ -1,0 +1,72 @@
+# Thoth engine-only runtime image (Plan I — packaging)
+# Multi-stage: Release headless build, slim runtime (no GUI / wx / Qt).
+
+# --- builder -----------------------------------------------------------------
+FROM debian:bookworm-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    git \
+    libcurl4-openssl-dev \
+    libsqlite3-dev \
+    libuuid1 \
+    pkg-config \
+    uuid-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+ARG THOTH_ENGINE_VERSION=0.2
+ARG CMAKE_BUILD_TYPE=Release
+
+RUN cmake -S . -B build \
+    -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DTHOTH_BUILD_GUI=OFF \
+    -DTHOTH_BUILD_ENGINE=ON \
+    -DTHOTH_ENGINE_VERSION="${THOTH_ENGINE_VERSION}" \
+    -DENABLE_ASAN=OFF \
+    -DENABLE_TSAN=OFF \
+    && cmake --build build --target thoth-engine -j"$(nproc)"
+
+# --- runtime -----------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libcurl4 \
+    libsqlite3-0 \
+    libuuid1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 1000 thoth \
+    && useradd --uid 1000 --gid thoth --shell /bin/sh --create-home thoth
+
+COPY --from=builder /src/build/external/basic_agent/thoth-engine /usr/local/bin/thoth-engine
+COPY --from=builder /src/build/external/basic_agent/libbasic_agent.so /usr/local/lib/libbasic_agent.so
+
+RUN ldconfig \
+    && chmod 755 /usr/local/bin/thoth-engine
+
+COPY docker/entrypoint-engine.sh /usr/local/bin/entrypoint-engine.sh
+RUN chmod 755 /usr/local/bin/entrypoint-engine.sh
+
+WORKDIR /workspace
+EXPOSE 8090
+
+ENV THOTH_WORKSPACE_PATH=/workspace \
+    THOTH_LOGS_PATH=/logs \
+    THOTH_PROJECT_ROOT=/workspace \
+    LD_LIBRARY_PATH=/usr/local/lib
+
+USER root
+ENTRYPOINT ["/usr/local/bin/entrypoint-engine.sh"]
+CMD ["--serve", "--bind", "0.0.0.0", "--port", "8090"]
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
+    CMD curl -sf http://127.0.0.1:8090/health || exit 1

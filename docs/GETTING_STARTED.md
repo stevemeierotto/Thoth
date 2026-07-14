@@ -195,12 +195,74 @@ mkdir -p "$THOTH_WORKSPACE_PATH"
 **Modes:**
 - `--help` / `--version` — usage and version
 - `--execute "<prompt>"` — single `processInput()` call, then exit
+- `--serve [--bind HOST] [--port PORT]` — HTTP API server (Plan F)
 - (default) — read prompts from stdin until EOF or Ctrl+C
+
+**HTTP server (`--serve`):**
+
+Configuration precedence: CLI flags → environment variables → defaults.
+
+| Setting | CLI | Environment | Default |
+|---------|-----|-------------|---------|
+| Bind address | `--bind` | `THOTH_ENGINE_BIND` | `127.0.0.1` |
+| Port | `--port` | `THOTH_ENGINE_PORT` | `8090` |
+
+```bash
+./build/engine-only/external/basic_agent/thoth-engine --serve --port 8090
+
+# Ops
+curl -s http://127.0.0.1:8090/health
+curl -s http://127.0.0.1:8090/ready
+curl -s http://127.0.0.1:8090/version
+
+# API v1
+curl -s -X POST http://127.0.0.1:8090/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"/help","session_id":"default"}'
+
+curl -s -X POST http://127.0.0.1:8090/v1/goals \
+  -H 'Content-Type: application/json' \
+  -d '{"goal":"...","session_id":"default"}'
+
+curl -s -X POST http://127.0.0.1:8090/v1/control/pause
+curl -s -X POST http://127.0.0.1:8090/v1/control/resume
+curl -s -X POST http://127.0.0.1:8090/v1/control/abort
+
+# SSE observability (Plan G)
+curl -N -H 'Accept: text/event-stream' http://127.0.0.1:8090/v1/events
+```
+
+`GET /ready` `capabilities` describe **engine features** (`EngineRuntime`), not which HTTP routes are wired in a given build checkpoint. When SSE is live, capabilities include `"events"`.
+
+`GET /v1/events` streams live `EngineEvent` JSON over SSE. See [`ENGINE_EVENTS.md`](ENGINE_EVENTS.md) for guarantees, event types, and reconnect guidance.
+
+`POST /v1/goals` returns after the engine accepts the goal and completes **initial planning**; step execution continues asynchronously on the executive loop.
+
+Graceful shutdown: `SIGINT` / `SIGTERM` stop accepting new HTTP connections (including SSE), return `503 ENGINE_BUSY` to new API requests, drain the command queue (bounded, default 5 s), flush open SSE clients, then tear down the plugin. Suitable for container stop signals.
+
+Specs: [`plan_f_engine_runtime_http.md`](plan_f_engine_runtime_http.md) · [`plan_g_streaming_observability.md`](plan_g_streaming_observability.md)
+
+### Docker Compose (Plan I)
+
+Packaging-only stack: `thoth-engine` + `llama-server` with named volumes. Plans F–H runtime code is unchanged inside the container.
+
+```bash
+# From repo root — see docker/README.md for model setup
+docker compose up -d --build
+curl -s http://127.0.0.1:8090/health
+./docker/smoke.sh   # full 8-step verification (models required for /v1/goals)
+```
+
+Operator guide: [`docker/README.md`](../docker/README.md) · Spec: [`plan_i_docker_compose_v1.md`](plan_i_docker_compose_v1.md)
+
+Host-native `cmake --preset engine-only` remains the primary developer workflow; Docker is additive.
 
 **Portable paths** (see Environment Variables):
 - `THOTH_WORKSPACE_PATH` — workspace (`memory.db`, `rag/`, config)
 - `THOTH_LOGS_PATH` — benchmark and metrics JSONL logs
-- `THOTH_INFERENCE_BASE_URL` — Ollama or compatible inference host
+- `THOTH_INFERENCE_BASE_URL` — inference service origin (Ollama default `http://127.0.0.1:11434`; llama-server e.g. `http://127.0.0.1:8080`)
+- `THOTH_INFERENCE_BACKEND` — `ollama` (default) or `llama_cpp`
+- `THOTH_EMBED_BASE_URL` — optional separate embed endpoint (defaults to inference base)
 
 **Tests on engine-only builds:** `ctest -L pr` runs the full PR suite (core unit tests + cognitive/Python tests) without wxWidgets.
 
@@ -289,6 +351,7 @@ THOTH_LOG_CONFIG=1 ./build/debug/external/basic_agent/thoth-engine --version
 THOTH_WORKSPACE_PATH=          # optional: override agent_workspace location
 THOTH_LOGS_PATH=               # optional: override logs/ directory
 THOTH_INFERENCE_BASE_URL=http://127.0.0.1:11434
+THOTH_INFERENCE_BACKEND=ollama   # ollama | llama_cpp
 THOTH_LOG_CONFIG=0             # set to 1 to print resolved startup paths
 OLLAMA_HOST=localhost:11434    # compat alias for inference host
 OLLAMA_MODEL=qwen2.5:3b

@@ -1,0 +1,41 @@
+# Build outputs
+build/
+bin/
+lib/
+
+# Runtime state (belongs on named volumes, not in image)
+agent_workspace/
+logs/
+
+# Secrets and local env
+.env
+.env.*
+secrets.json
+
+# Git and IDE
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docs and non-build assets (not needed for engine image)
+docs/
+*.md
+!external/basic_agent/include/json.hpp
+
+# Python / analysis
+__pycache__/
+*.py[cod]
+.pytest_cache/
+scripts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Submodule build artifacts
+external/basic_agent/build/
+external/basic_agent/agent_workspace/

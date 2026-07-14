@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -19,7 +20,19 @@
 #include "embedding_engine.h"
 #include "file_handler.h"
 #include "inference_endpoint.h"
+#include "inference_client.h"
+#include "mock_inference_client.h"
+#include "ollama_client.h"
+#include "llama_server_client.h"
+#include "ollama_snapshot.h"
+#include "inference_http.h"
 #include "runtime_bootstrap.h"
+#include "engine_runtime.h"
+#include "engine_error.h"
+#include "engine_http_transport.h"
+#include "engine_event.h"
+#include "engine_sse_session.h"
+#include "controller_event.h"
 #include "env_loader.h"
 #include "index_manager.h"
 #include "llm_interface.h"
@@ -76,6 +89,7 @@
 #include "e2_strict_enforcement.h"
 #include "e2_strict_retrieval.h"
 #include "workflow_engine.h"
+#include <httplib.h>
 #include <json.hpp>
 
 namespace fs = std::filesystem;
@@ -288,6 +302,354 @@ static bool testInferenceEndpointResolution() {
     return ok;
 }
 
+static bool testInferenceBackendResolution() {
+    bool ok = true;
+
+    {
+        ScopedEnvVar unset("THOTH_INFERENCE_BACKEND", nullptr);
+        std::string error;
+        const auto backend = Thoth::tryResolveInferenceBackend(error);
+        if (!backend || *backend != Thoth::InferenceBackend::Ollama || !error.empty()) {
+            std::cerr << "testInferenceBackendResolution: default should be ollama\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "ollama");
+        std::string error;
+        const auto resolved = Thoth::tryResolveInferenceBackend(error);
+        if (!resolved || *resolved != Thoth::InferenceBackend::Ollama) {
+            std::cerr << "testInferenceBackendResolution: explicit ollama failed\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "llama_cpp");
+        std::string error;
+        const auto resolved = Thoth::tryResolveInferenceBackend(error);
+        if (!resolved || *resolved != Thoth::InferenceBackend::LlamaCpp) {
+            std::cerr << "testInferenceBackendResolution: llama_cpp failed\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "invalid");
+        std::string error;
+        const auto resolved = Thoth::tryResolveInferenceBackend(error);
+        if (resolved || error.empty()) {
+            std::cerr << "testInferenceBackendResolution: invalid backend should fail\n";
+            ok = false;
+        }
+    }
+
+    return ok;
+}
+
+static bool testMockInferenceClient() {
+    Thoth::MockInferenceClient client;
+    client.on_generate = [](const Thoth::InferenceGenerateRequest& req) {
+        Thoth::InferenceGenerateResult result;
+        result.ok = true;
+        result.text = "generated:" + req.prompt;
+        return result;
+    };
+    client.on_embed = [](const Thoth::InferenceEmbedRequest& req) {
+        Thoth::InferenceEmbedResult result;
+        result.ok = true;
+        for (std::size_t i = 0; i < req.inputs.size(); ++i) {
+            result.embeddings.push_back(std::vector<float>(768, 0.25f));
+        }
+        return result;
+    };
+    client.on_health = []() {
+        Thoth::InferenceHealthResult result;
+        result.reachable = true;
+        result.available_models = {"mock-model"};
+        return result;
+    };
+
+    Thoth::InferenceGenerateRequest gen_req;
+    gen_req.model = "mock-model";
+    gen_req.prompt = "hello";
+    gen_req.temperature = 0.1;
+    gen_req.top_p = 0.9;
+    gen_req.max_tokens = 32;
+    const auto generated = client.generate(gen_req);
+    if (!generated.ok || generated.text != "generated:hello") {
+        std::cerr << "testMockInferenceClient: generate failed\n";
+        return false;
+    }
+
+    Thoth::InferenceEmbedRequest embed_req;
+    embed_req.model = "mock-embed";
+    embed_req.inputs = {"a", "b"};
+    const auto embedded = client.embed(embed_req);
+    if (!embedded.ok || embedded.embeddings.size() != 2 || embedded.embeddings[0].size() != 768) {
+        std::cerr << "testMockInferenceClient: embed failed\n";
+        return false;
+    }
+
+    const auto health = client.health();
+    if (!health.reachable || health.available_models.empty()) {
+        std::cerr << "testMockInferenceClient: health failed\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testOllamaClientParse() {
+    const auto generated = Thoth::OllamaClient::parseGenerateResponse(
+        R"({"response":"hello","prompt_eval_count":3,"eval_count":5})");
+    if (!generated.ok || generated.text != "hello" || generated.token_usage.total_tokens != 8) {
+        std::cerr << "testOllamaClientParse: generate parse failed\n";
+        return false;
+    }
+
+    const auto embedded = Thoth::OllamaClient::parseEmbedResponse(
+        R"({"embeddings":[[0.1,0.2],[0.3,0.4]]})");
+    if (!embedded.ok || embedded.embeddings.size() != 2) {
+        std::cerr << "testOllamaClientParse: embed parse failed\n";
+        return false;
+    }
+
+    const auto health = Thoth::OllamaClient::parseTagsResponse(
+        R"({"models":[{"name":"qwen2.5:3b"}]})");
+    if (!health.reachable || health.available_models.size() != 1) {
+        std::cerr << "testOllamaClientParse: health parse failed\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testLlamaServerClientParse() {
+    const auto generated = Thoth::LlamaServerClient::parseCompletionResponse(
+        R"({"choices":[{"text":"hello"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}})");
+    if (!generated.ok || generated.text != "hello" || generated.token_usage.total_tokens != 5) {
+        std::cerr << "testLlamaServerClientParse: completion parse failed\n";
+        return false;
+    }
+
+    const auto embedded = Thoth::LlamaServerClient::parseEmbeddingsResponse(
+        R"({"data":[{"embedding":[0.1,0.2,0.3],"index":0},{"embedding":[0.4,0.5,0.6],"index":1}]})");
+    if (!embedded.ok || embedded.embeddings.size() != 2) {
+        std::cerr << "testLlamaServerClientParse: embeddings parse failed\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testInferenceFactorySelection() {
+    const Thoth::InferenceEndpointConfig endpoints{
+        "http://127.0.0.1:11434",
+        "http://127.0.0.1:11434",
+    };
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "ollama");
+        try {
+            const auto client = Thoth::createInferenceClient(endpoints);
+            if (!client || client->backendName() != "ollama") {
+                std::cerr << "testInferenceFactorySelection: ollama factory failed\n";
+                return false;
+            }
+        } catch (...) {
+            std::cerr << "testInferenceFactorySelection: ollama factory threw\n";
+            return false;
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "llama_cpp");
+        try {
+            const auto client = Thoth::createInferenceClient(endpoints);
+            if (!client || client->backendName() != "llama_cpp") {
+                std::cerr << "testInferenceFactorySelection: llama_cpp factory failed\n";
+                return false;
+            }
+        } catch (...) {
+            std::cerr << "testInferenceFactorySelection: llama_cpp factory threw\n";
+            return false;
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "bad");
+        try {
+            (void)Thoth::createInferenceClient(endpoints);
+            std::cerr << "testInferenceFactorySelection: invalid backend should throw\n";
+            return false;
+        } catch (const std::invalid_argument&) {
+        } catch (...) {
+            std::cerr << "testInferenceFactorySelection: expected invalid_argument\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool testInferenceEmbeddingDimensionProbe() {
+    constexpr int kExpectedDim = 768;
+    constexpr const char* kProbe = "thoth-embedding-probe";
+
+    auto check_client = [&](Thoth::InferenceClient& client, const char* label) -> bool {
+        Thoth::InferenceEmbedRequest request;
+        request.model = "nomic-embed-text:v1.5";
+        request.inputs = {kProbe};
+        const auto result = client.embed(request);
+        if (!result.ok || result.embeddings.empty()) {
+            std::cout << "testInferenceEmbeddingDimensionProbe: skipping " << label
+                      << " (unreachable)\n";
+            return true;
+        }
+        if (static_cast<int>(result.embeddings.front().size()) != kExpectedDim) {
+            std::cerr << "testInferenceEmbeddingDimensionProbe: " << label
+                      << " dimension mismatch: " << result.embeddings.front().size() << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    const Thoth::InferenceEndpointConfig endpoints = Thoth::resolveInferenceEndpoints();
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "ollama");
+        if (Thoth::isOllamaReachable()) {
+            try {
+                const auto client = Thoth::createInferenceClient(endpoints);
+                if (!check_client(*client, "ollama")) {
+                    return false;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "testInferenceEmbeddingDimensionProbe: ollama client error: "
+                          << e.what() << '\n';
+                return false;
+            }
+        } else {
+            std::cout << "testInferenceEmbeddingDimensionProbe: Ollama unreachable, skipping\n";
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "llama_cpp");
+        Thoth::OllamaFetchOptions options;
+        options.base_url = endpoints.base_url;
+        const std::string health_url = Thoth::inferenceUrl(options.base_url, "/health");
+        const auto health = Thoth::inferenceHttpGet(health_url, 2);
+        if (health.ok) {
+            try {
+                const auto client = Thoth::createInferenceClient(endpoints);
+                if (!check_client(*client, "llama_cpp")) {
+                    return false;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "testInferenceEmbeddingDimensionProbe: llama_cpp client error: "
+                          << e.what() << '\n';
+                return false;
+            }
+        } else {
+            std::cout << "testInferenceEmbeddingDimensionProbe: llama-server unreachable, skipping\n";
+        }
+    }
+
+    return true;
+}
+
+static bool runInferenceIntegrationTests() {
+    int failures = 0;
+    if (!testInferenceEmbeddingDimensionProbe()) {
+        ++failures;
+    }
+    return failures == 0;
+}
+
+class ScopedCwd {
+public:
+    explicit ScopedCwd(const fs::path& target) : previous_(fs::current_path()) {
+        fs::current_path(target);
+    }
+    ~ScopedCwd() {
+        std::error_code ec;
+        fs::current_path(previous_, ec);
+    }
+
+private:
+    fs::path previous_;
+};
+
+/** getProjectRoot walks terminate at filesystem root; markers and THOTH_PROJECT_ROOT still work. */
+static bool testFileHandlerProjectRootWalk() {
+    bool ok = true;
+
+    {
+        const fs::path tempRoot = makeTempPath("thoth_project_root_marker");
+        const fs::path nested = tempRoot / "deep" / "nested";
+        fs::create_directories(nested);
+        fs::create_directories(tempRoot / ".git");
+
+        ScopedEnvVar unsetRoot("THOTH_PROJECT_ROOT", nullptr);
+        ScopedCwd cwd(nested);
+        FileHandler fh;
+        const fs::path got = fs::path(fh.getProjectRoot()).lexically_normal();
+        const fs::path expected = fs::absolute(tempRoot).lexically_normal();
+        if (got != expected) {
+            std::cerr << "testFileHandlerProjectRootWalk: marker walk mismatch: got="
+                      << got << " expected=" << expected << "\n";
+            ok = false;
+        }
+        fs::remove_all(tempRoot);
+    }
+
+    {
+        const fs::path tempRoot = makeTempPath("thoth_project_root_override");
+        const fs::path nested = tempRoot / "nested";
+        fs::create_directories(nested);
+        fs::create_directories(tempRoot / ".git");
+
+        const fs::path overrideRoot = makeTempPath("thoth_project_root_explicit");
+        fs::create_directories(overrideRoot);
+
+        ScopedEnvVar rootEnv("THOTH_PROJECT_ROOT", overrideRoot.string().c_str());
+        ScopedCwd cwd(nested);
+        FileHandler fh;
+        const fs::path got = fs::path(fh.getProjectRoot()).lexically_normal();
+        const fs::path expected = fs::absolute(overrideRoot).lexically_normal();
+        if (got != expected) {
+            std::cerr << "testFileHandlerProjectRootWalk: THOTH_PROJECT_ROOT override failed: got="
+                      << got << " expected=" << expected << "\n";
+            ok = false;
+        }
+        fs::remove_all(tempRoot);
+        fs::remove_all(overrideRoot);
+    }
+
+    {
+        const fs::path tempRoot = makeTempPath("thoth_project_root_nomarker");
+        const fs::path nested = tempRoot / "leaf";
+        fs::create_directories(nested);
+
+        ScopedEnvVar unsetRoot("THOTH_PROJECT_ROOT", nullptr);
+        ScopedCwd cwd(nested);
+
+        // Must terminate at filesystem root and fall back (never spin at "/").
+        FileHandler fh;
+        const std::string root = fh.getProjectRoot();
+        if (root.empty()) {
+            std::cerr << "testFileHandlerProjectRootWalk: empty fallback root\n";
+            ok = false;
+        }
+        fs::remove_all(tempRoot);
+    }
+
+    return ok;
+}
+
 static bool testFileHandlerWorkspaceOverride() {
     const fs::path workspace = makeTempPath("thoth_workspace_override");
     fs::remove_all(workspace);
@@ -450,6 +812,635 @@ static bool testRuntimeBootstrapIdempotent() {
 static bool testRuntimeBootstrapDiagnosticsDisabledByDefault() {
     ScopedEnvVar unsetFlag("THOTH_LOG_CONFIG", nullptr);
     return !Thoth::runtimeConfigDiagnosticsEnabled(nullptr);
+}
+
+static bool testEngineErrorSchema() {
+    const Thoth::EngineError invalid =
+        Thoth::EngineError::invalidRequest("Goal cannot be empty.");
+    const auto json = nlohmann::json::parse(invalid.toJson());
+    if (!json.contains("error") || !json["error"].is_object()) {
+        std::cerr << "testEngineErrorSchema: missing error object\n";
+        return false;
+    }
+    if (json["error"]["code"] != "INVALID_REQUEST") {
+        std::cerr << "testEngineErrorSchema: unexpected code\n";
+        return false;
+    }
+    if (json["error"]["message"] != "Goal cannot be empty.") {
+        std::cerr << "testEngineErrorSchema: unexpected message\n";
+        return false;
+    }
+
+    if (Thoth::engineErrorHttpStatus(Thoth::EngineErrorCode::INVALID_REQUEST) != 400) {
+        std::cerr << "testEngineErrorSchema: INVALID_REQUEST status mismatch\n";
+        return false;
+    }
+    if (Thoth::engineErrorHttpStatus(Thoth::EngineErrorCode::NOT_FOUND) != 404) {
+        std::cerr << "testEngineErrorSchema: NOT_FOUND status mismatch\n";
+        return false;
+    }
+    if (Thoth::engineErrorHttpStatus(Thoth::EngineErrorCode::ENGINE_BUSY) != 503) {
+        std::cerr << "testEngineErrorSchema: ENGINE_BUSY status mismatch\n";
+        return false;
+    }
+    if (Thoth::engineErrorHttpStatus(Thoth::EngineErrorCode::INTERNAL_ERROR) != 500) {
+        std::cerr << "testEngineErrorSchema: INTERNAL_ERROR status mismatch\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testEngineSessionNormalization() {
+    if (Thoth::normalizeEngineSessionId("") != "default") {
+        std::cerr << "testEngineSessionNormalization: empty session not default\n";
+        return false;
+    }
+    if (Thoth::normalizeEngineSessionId("default") != "default") {
+        std::cerr << "testEngineSessionNormalization: default session changed\n";
+        return false;
+    }
+    if (Thoth::normalizeEngineSessionId("session-b") != "session-b") {
+        std::cerr << "testEngineSessionNormalization: custom session changed\n";
+        return false;
+    }
+    return true;
+}
+
+static bool expectEngineFutureError(std::future<std::string> future,
+                                    Thoth::EngineErrorCode expected) {
+    try {
+        (void)future.get();
+        std::cerr << "testEngineRuntimeValidation: expected EngineException\n";
+        return false;
+    } catch (const Thoth::EngineException& ex) {
+        if (ex.error().code != expected) {
+            std::cerr << "testEngineRuntimeValidation: code mismatch\n";
+            return false;
+        }
+        return true;
+    } catch (...) {
+        std::cerr << "testEngineRuntimeValidation: unexpected exception type\n";
+        return false;
+    }
+}
+
+static bool testEngineRuntimeValidation() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineRuntimeValidation: runtime not ready\n";
+        return false;
+    }
+
+    if (!expectEngineFutureError(runtime->submitChat("default", ""),
+                                 Thoth::EngineErrorCode::INVALID_REQUEST)) {
+        return false;
+    }
+    if (!expectEngineFutureError(runtime->submitGoal("default", ""),
+                                 Thoth::EngineErrorCode::INVALID_REQUEST)) {
+        return false;
+    }
+
+    runtime->beginShutdown();
+    if (runtime->isReady()) {
+        std::cerr << "testEngineRuntimeValidation: runtime still ready after beginShutdown\n";
+        return false;
+    }
+    if (!expectEngineFutureError(runtime->submitChat("default", "/help"),
+                                 Thoth::EngineErrorCode::ENGINE_BUSY)) {
+        return false;
+    }
+
+    runtime->shutdown();
+    if (runtime->isReady()) {
+        std::cerr << "testEngineRuntimeValidation: runtime still ready after shutdown\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testEngineRuntimeLazySessions() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineRuntimeLazySessions: runtime not ready\n";
+        return false;
+    }
+
+    try {
+        const std::string alpha =
+            runtime->submitChat("session-alpha", "/help").get();
+        const std::string beta =
+            runtime->submitChat("session-beta", "/help").get();
+        if (alpha.find("/help") == std::string::npos) {
+            std::cerr << "testEngineRuntimeLazySessions: alpha session failed\n";
+            return false;
+        }
+        if (beta.find("/help") == std::string::npos) {
+            std::cerr << "testEngineRuntimeLazySessions: beta session failed\n";
+            return false;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineRuntimeLazySessions: exception: " << e.what() << '\n';
+        return false;
+    }
+
+    runtime->shutdown();
+    return true;
+}
+
+static bool testEngineHttpChatEndpoint() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpChatEndpoint: runtime not ready\n";
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28092;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    try {
+        const std::string direct = runtime->submitChat("default", "/help").get();
+
+        httplib::Client client("127.0.0.1", 28092);
+        client.set_connection_timeout(5, 0);
+        client.set_read_timeout(30, 0);
+
+        const auto ok = client.Post("/v1/chat",
+                                    R"({"text":"/help","session_id":"default"})",
+                                    "application/json");
+        if (!ok) {
+            std::cerr << "testEngineHttpChatEndpoint: request failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        if (ok->status != 200) {
+            std::cerr << "testEngineHttpChatEndpoint: status=" << ok->status
+                      << " body=" << ok->body << '\n';
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto body = nlohmann::json::parse(ok->body);
+        if (body.value("response", "") != direct) {
+            std::cerr << "testEngineHttpChatEndpoint: response mismatch with submitChat\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        if (body.value("session_id", "") != "default") {
+            std::cerr << "testEngineHttpChatEndpoint: session_id mismatch\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto invalid = client.Post("/v1/chat", "{}", "application/json");
+        if (!invalid || invalid->status != 400) {
+            std::cerr << "testEngineHttpChatEndpoint: expected 400 for missing text\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpChatEndpoint: exception: " << e.what() << '\n';
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+
+    transport.requestStop();
+    server_thread.join();
+    runtime->shutdown();
+    return true;
+}
+
+static bool testEngineHttpGoalsAndControl() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpGoalsAndControl: runtime not ready\n";
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28093;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    httplib::Client client("127.0.0.1", 28093);
+    client.set_connection_timeout(5, 0);
+    client.set_read_timeout(120, 0);
+
+    const auto health = client.Get("/health");
+    if (!health || health->status != 200) {
+        std::cerr << "testEngineHttpGoalsAndControl: /health failed\n";
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+
+    auto cleanup = [&]() {
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+    };
+
+    try {
+        const std::string goal = "F5 HTTP acceptance test goal";
+
+        const auto empty_goal = client.Post("/v1/goals", "{}", "application/json");
+        if (!empty_goal || empty_goal->status != 400) {
+            std::cerr << "testEngineHttpGoalsAndControl: expected 400 for empty goal\n";
+            cleanup();
+            return false;
+        }
+
+        for (const char* path : {"/v1/control/pause", "/v1/control/resume", "/v1/control/abort"}) {
+            const auto control = client.Post(path, "{}", "application/json");
+            if (!control || control->status != 200) {
+                std::cerr << "testEngineHttpGoalsAndControl: " << path << " failed\n";
+                cleanup();
+                return false;
+            }
+            const auto control_json = nlohmann::json::parse(control->body);
+            if (control_json.value("status", "") != "ok") {
+                std::cerr << "testEngineHttpGoalsAndControl: " << path << " status not ok\n";
+                cleanup();
+                return false;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpGoalsAndControl: exception: " << e.what() << '\n';
+        cleanup();
+        return false;
+    }
+
+    cleanup();
+    return true;
+}
+
+static ControllerEvent makeTestControllerEvent() {
+    ControllerEvent event;
+    event.type = EventType::STATE_CHANGED;
+    event.session_id = "default";
+    event.plan_id = "plan-g-test";
+    event.step_id = "";
+    event.controller_state_name = "PLANNING";
+    event.timestamp_ms = 1'700'000'000'000;
+    event.metadata = nlohmann::json{{"source", "unit_test"}};
+    return event;
+}
+
+static bool waitForEventSequence(Thoth::EngineRuntime& runtime,
+                                 uint64_t expected,
+                                 std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (runtime.lastEventSequenceForTests() >= expected) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return runtime.lastEventSequenceForTests() >= expected;
+}
+
+static bool testEngineEventBus() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineEventBus: runtime not ready\n";
+        return false;
+    }
+
+    std::atomic<int> good_count{0};
+    const uint64_t bad_id = runtime->subscribeEvents([](const Thoth::EngineEvent&) {
+        throw std::runtime_error("subscriber failure probe");
+    });
+    const uint64_t good_id = runtime->subscribeEvents([&](const Thoth::EngineEvent& event) {
+        if (event.sequence == 0) {
+            throw std::runtime_error("unexpected zero sequence");
+        }
+        good_count.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < 1000; ++i) {
+        runtime->publishControllerEventForTests(makeTestControllerEvent());
+    }
+
+    if (!waitForEventSequence(*runtime, 1000, std::chrono::seconds(5))) {
+        std::cerr << "testEngineEventBus: timed out waiting for sequences\n";
+        runtime->unsubscribeEvents(bad_id);
+        runtime->unsubscribeEvents(good_id);
+        runtime->shutdown();
+        return false;
+    }
+
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - start)
+                                .count();
+    if (elapsed_ms > 5000) {
+        std::cerr << "testEngineEventBus: dispatch too slow (" << elapsed_ms << "ms)\n";
+        runtime->unsubscribeEvents(bad_id);
+        runtime->unsubscribeEvents(good_id);
+        runtime->shutdown();
+        return false;
+    }
+
+    if (good_count.load() != 1000) {
+        std::cerr << "testEngineEventBus: good subscriber count=" << good_count.load() << '\n';
+        runtime->unsubscribeEvents(bad_id);
+        runtime->unsubscribeEvents(good_id);
+        runtime->shutdown();
+        return false;
+    }
+
+    runtime->unsubscribeEvents(bad_id);
+    runtime->unsubscribeEvents(good_id);
+    runtime->shutdown();
+    return true;
+}
+
+static bool testEngineEventIntegration() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineEventIntegration: runtime not ready\n";
+        return false;
+    }
+
+    std::atomic<int> received{0};
+    const uint64_t sub_id = runtime->subscribeEvents([&](const Thoth::EngineEvent& event) {
+        if (event.type == "STATE_CHANGED" && event.plan_id == "plan-g-test") {
+            received.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    for (int i = 0; i < 25; ++i) {
+        runtime->publishControllerEventForTests(makeTestControllerEvent());
+    }
+
+    std::thread chat_thread([&]() {
+        try {
+            (void)runtime->submitChat("default", "/help").get();
+        } catch (...) {
+        }
+    });
+
+    if (!waitForEventSequence(*runtime, 25, std::chrono::seconds(5))) {
+        std::cerr << "testEngineEventIntegration: event export timeout\n";
+        chat_thread.join();
+        runtime->unsubscribeEvents(sub_id);
+        runtime->shutdown();
+        return false;
+    }
+
+    chat_thread.join();
+
+    if (received.load() < 25) {
+        std::cerr << "testEngineEventIntegration: received=" << received.load() << '\n';
+        runtime->unsubscribeEvents(sub_id);
+        runtime->shutdown();
+        return false;
+    }
+
+    runtime->unsubscribeEvents(sub_id);
+    runtime->shutdown();
+    return true;
+}
+
+// Plan G SSE tests: cpp-httplib cannot reliably consume chunked SSE bodies as a
+// client. Delivery is validated via SseSessionManager; HTTP route via session
+// count smoke test. See docs/plan_g_streaming_observability.md § Plan G testing note.
+static bool testEngineSseSessionDelivery() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineSseSessionDelivery: runtime not ready\n";
+        return false;
+    }
+
+    Thoth::SseSessionManager manager(*runtime);
+    const auto session = manager.createSession();
+    runtime->publishControllerEventForTests(makeTestControllerEvent());
+    if (!waitForEventSequence(*runtime, 1, std::chrono::seconds(3))) {
+        std::cerr << "testEngineSseSessionDelivery: dispatch timeout\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    std::string chunk;
+    bool closed = false;
+    if (!session->waitForChunk(chunk, std::chrono::seconds(2), closed)) {
+        std::cerr << "testEngineSseSessionDelivery: no chunk received\n";
+        runtime->shutdown();
+        return false;
+    }
+    if (chunk.find("event: engine") == std::string::npos) {
+        std::cerr << "testEngineSseSessionDelivery: missing SSE framing\n";
+        runtime->shutdown();
+        return false;
+    }
+    if (chunk.find("STATE_CHANGED") == std::string::npos) {
+        std::cerr << "testEngineSseSessionDelivery: missing payload\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    manager.removeSession(session);
+    runtime->shutdown();
+    return true;
+}
+
+static bool testEngineSseMultiClient() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineSseMultiClient: runtime not ready\n";
+        return false;
+    }
+
+    Thoth::SseSessionManager manager(*runtime);
+    const auto a = manager.createSession();
+    const auto b = manager.createSession();
+    const auto c = manager.createSession();
+
+    runtime->publishControllerEventForTests(makeTestControllerEvent());
+    if (!waitForEventSequence(*runtime, 1, std::chrono::seconds(3))) {
+        std::cerr << "testEngineSseMultiClient: dispatch timeout\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    for (const auto& session : {a, b, c}) {
+        std::string chunk;
+        bool closed = false;
+        if (!session->waitForChunk(chunk, std::chrono::seconds(2), closed)) {
+            std::cerr << "testEngineSseMultiClient: client missing chunk\n";
+            runtime->shutdown();
+            return false;
+        }
+        if (chunk.find("\"sequence\":1") == std::string::npos) {
+            std::cerr << "testEngineSseMultiClient: missing sequence 1\n";
+            runtime->shutdown();
+            return false;
+        }
+    }
+
+    manager.removeSession(a);
+    manager.removeSession(b);
+    manager.removeSession(c);
+    runtime->shutdown();
+    return true;
+}
+
+static bool testEngineSseDisconnect() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineSseDisconnect: runtime not ready\n";
+        return false;
+    }
+
+    Thoth::SseSessionManager manager(*runtime);
+    for (int i = 0; i < 10; ++i) {
+        const auto session = manager.createSession();
+        manager.removeSession(session);
+        if (manager.sessionCountForTests() != 0) {
+            std::cerr << "testEngineSseDisconnect: leaked session on iteration " << i << '\n';
+            runtime->shutdown();
+            return false;
+        }
+    }
+
+    runtime->shutdown();
+    return true;
+}
+
+static bool testEngineHttpSseRouteAndReady() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpSseRouteAndReady: runtime not ready\n";
+        return false;
+    }
+
+    const auto caps = runtime->capabilities();
+    if (std::find(caps.begin(), caps.end(), "events") == caps.end()) {
+        std::cerr << "testEngineHttpSseRouteAndReady: missing events capability\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28095;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    httplib::Client client("127.0.0.1", 28095);
+    client.set_connection_timeout(5, 0);
+    client.set_read_timeout(2, 0);
+
+    const auto ready = client.Get("/ready");
+    if (!ready || ready->status != 200) {
+        std::cerr << "testEngineHttpSseRouteAndReady: /ready failed\n";
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+
+    const auto ready_json = nlohmann::json::parse(ready->body);
+    const auto capabilities = ready_json.value("capabilities", nlohmann::json::array());
+    if (std::find(capabilities.begin(), capabilities.end(), "events") == capabilities.end()) {
+        std::cerr << "testEngineHttpSseRouteAndReady: /ready missing events\n";
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+
+    std::thread events_thread([&]() {
+        httplib::Client events_client("127.0.0.1", 28095);
+        events_client.set_connection_timeout(5, 0);
+        events_client.set_read_timeout(10, 0);
+        (void)events_client.Get("/v1/events");
+    });
+
+    bool session_created = false;
+    for (int i = 0; i < 50; ++i) {
+        if (transport.sseSessionCountForTests() == 1) {
+            session_created = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    transport.requestStop();
+    server_thread.join();
+    events_thread.join();
+    runtime->shutdown();
+
+    if (!session_created) {
+        std::cerr << "testEngineHttpSseRouteAndReady: /v1/events did not accept connection\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testEngineHttpGracefulShutdown() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpGracefulShutdown: runtime not ready\n";
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28094;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    httplib::Client client("127.0.0.1", 28094);
+    client.set_connection_timeout(5, 0);
+    client.set_read_timeout(5, 0);
+
+    const auto healthy = client.Get("/health");
+    if (!healthy || healthy->status != 200) {
+        std::cerr << "testEngineHttpGracefulShutdown: /health failed before stop\n";
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+
+    transport.requestStop();
+    server_thread.join();
+
+    if (runtime->isReady()) {
+        std::cerr << "testEngineHttpGracefulShutdown: runtime still ready after requestStop\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    runtime->shutdown();
+    return true;
 }
 
 static bool testMemoryPersistence() {
@@ -10882,6 +11873,41 @@ int main() {
         }
     }
 
+    if (const char* inferenceIntegration = std::getenv("THOTH_INFERENCE_INTEGRATION_TESTS")) {
+        if (inferenceIntegration[0] != '0' && std::string(inferenceIntegration) != "false") {
+            if (!runInferenceIntegrationTests()) {
+                return 1;
+            }
+            std::cout << "Plan H inference integration tests passed.\n";
+            return 0;
+        }
+    }
+
+    if (const char* engineRuntimeOnly = std::getenv("THOTH_ENGINE_RUNTIME_TESTS")) {
+        if (engineRuntimeOnly[0] != '0' && std::string(engineRuntimeOnly) != "false") {
+            int failures = 0;
+            if (!testEngineErrorSchema()) failures++;
+            if (!testEngineSessionNormalization()) failures++;
+            if (!testEngineRuntimeValidation()) failures++;
+            if (!testEngineEventBus()) failures++;
+            if (!testEngineEventIntegration()) failures++;
+            if (!testEngineHttpChatEndpoint()) failures++;
+            if (!testEngineHttpGoalsAndControl()) failures++;
+            if (!testEngineSseSessionDelivery()) failures++;
+            if (!testEngineSseMultiClient()) failures++;
+            if (!testEngineSseDisconnect()) failures++;
+            if (!testEngineHttpSseRouteAndReady()) failures++;
+            if (!testEngineHttpGracefulShutdown()) failures++;
+            if (!testEngineRuntimeLazySessions()) failures++;
+            if (failures == 0) {
+                std::cout << "Plan G engine runtime tests passed.\n";
+                return 0;
+            }
+            std::cerr << failures << " engine runtime test(s) failed.\n";
+            return 1;
+        }
+    }
+
     if (const char* ep01 = std::getenv("THOTH_E2_EP01")) {
         if (ep01[0] != '0' && std::string(ep01) != "false") {
             if (!runE2Ep01Tests()) {
@@ -11154,8 +12180,27 @@ int main() {
     if (!testRuntimeBootstrapRespectsExistingEnv()) failures++;
     if (!testRuntimeBootstrapIdempotent()) failures++;
     if (!testRuntimeBootstrapDiagnosticsDisabledByDefault()) failures++;
+    if (!testEngineErrorSchema()) failures++;
+    if (!testEngineSessionNormalization()) failures++;
+    if (!testEngineRuntimeValidation()) failures++;
+    if (!testEngineRuntimeLazySessions()) failures++;
+    if (!testEngineEventBus()) failures++;
+    if (!testEngineEventIntegration()) failures++;
+    if (!testEngineHttpChatEndpoint()) failures++;
+    if (!testEngineHttpGoalsAndControl()) failures++;
+    if (!testEngineSseSessionDelivery()) failures++;
+    if (!testEngineSseMultiClient()) failures++;
+    if (!testEngineSseDisconnect()) failures++;
+    if (!testEngineHttpSseRouteAndReady()) failures++;
+    if (!testEngineHttpGracefulShutdown()) failures++;
     if (!testConfigRoundTrip()) failures++;
     if (!testInferenceEndpointResolution()) failures++;
+    if (!testInferenceBackendResolution()) failures++;
+    if (!testMockInferenceClient()) failures++;
+    if (!testOllamaClientParse()) failures++;
+    if (!testLlamaServerClientParse()) failures++;
+    if (!testInferenceFactorySelection()) failures++;
+    if (!testFileHandlerProjectRootWalk()) failures++;
     if (!testFileHandlerWorkspaceOverride()) failures++;
     if (!testFileHandlerLogsOverride()) failures++;
     if (!testLogsPathPrecedence()) failures++;

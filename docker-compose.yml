@@ -1,0 +1,72 @@
+# Thoth Docker Compose v1 (Plan I)
+# Default profile: thoth-engine + llama-server (llama_cpp backend).
+# Optional Ollama sidecar: docker compose -f docker-compose.yml -f docker-compose.ollama.yml --profile ollama up -d
+
+name: thoth
+
+services:
+  llama-server:
+  # Pinned tag — never :latest. Digest (verify when upgrading):
+  # sha256:45db6d98cca4f71817e3fc34844b88a63be7eb9507a1ccb0847560d7c86e61de (server-b4719, illustrative)
+    image: ghcr.io/ggerganov/llama.cpp:server-b4719
+    restart: unless-stopped
+    networks:
+      - thoth-net
+    volumes:
+      - llama-models:/models:ro
+    command:
+      - -m
+      - ${LLAMA_CHAT_MODEL:-/models/chat.gguf}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - -c
+      - "4096"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  thoth-engine:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.engine
+      args:
+        THOTH_ENGINE_VERSION: ${THOTH_ENGINE_VERSION:-0.2}
+    image: thoth-engine:local
+    restart: unless-stopped
+    depends_on:
+      llama-server:
+        condition: service_healthy
+    networks:
+      - thoth-net
+    ports:
+      - "${THOTH_ENGINE_PUBLISH_PORT:-8090}:8090"
+    environment:
+      THOTH_WORKSPACE_PATH: /workspace
+      THOTH_LOGS_PATH: /logs
+      THOTH_PROJECT_ROOT: /workspace
+      THOTH_INFERENCE_BASE_URL: http://llama-server:8080
+      THOTH_INFERENCE_BACKEND: llama_cpp
+      THOTH_ENGINE_BIND: "0.0.0.0"
+      THOTH_ENGINE_PORT: "8090"
+      THOTH_LOG_CONFIG: ${THOTH_LOG_CONFIG:-1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-chat}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+    volumes:
+      - thoth-workspace:/workspace
+      - thoth-logs:/logs
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+networks:
+  thoth-net:
+    driver: bridge
+
+volumes:
+  thoth-workspace:
+  thoth-logs:
+  llama-models:

@@ -12,12 +12,14 @@ set_tests_properties(test-suite-dev PROPERTIES
 )
 
 # Core unit tests — no wxWidgets; always built when tests/ is in the graph.
+find_package(Threads REQUIRED)
 add_executable(thoth-core-tests unit_tests.cpp)
 target_compile_definitions(thoth-core-tests PRIVATE THOTH_HAS_GUI=0)
 target_include_directories(thoth-core-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
 )
-target_link_libraries(thoth-core-tests PRIVATE basic_agent)
+target_link_libraries(thoth-core-tests PRIVATE basic_agent Threads::Threads)
 add_test(NAME thoth-core-tests COMMAND thoth-core-tests)
 set_tests_properties(thoth-core-tests PROPERTIES
     LABELS "pr;unit"

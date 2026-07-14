@@ -1,7 +1,140 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-11 (memory consolidation lockup fix ✅)
+Last updated: 2026-07-14 (R2: ExecutiveController join-outside-lock fix)
+
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+
+### Repair — R2 test-suite-dev mutex UB ✅ (2026-07-14)
+
+**Symptom:** Intermittent SEGV in `ExecutiveController::execute_goal` when assigning `benchmark_attribution_` (destination `std::string` with null `_M_p`).
+
+**Cause:** `mutex_.unlock()` / `mutex_.lock()` while a `std::lock_guard` still owned the mutex (also in `resume_from_plan`) — undefined behavior.
+
+**Fix:** Join prior loop thread outside the lock (same pattern as `~ExecutiveController`): move `loop_thread_` under lock, join outside, then continue under a fresh `lock_guard`.
+
+**Verification:** `ctest -R test-suite-dev`; `ctest -L pr -j1`
+
+---
+
+### Containerization — Plan I complete ✅ (2026-07-13)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 5 · **Spec:** [`plan_i_docker_compose_v1.md`](plan_i_docker_compose_v1.md) 🔒
+
+| Checkpoint | Work |
+|------------|------|
+| **I1** | `docker/Dockerfile.engine` — multi-stage Release headless build; `.dockerignore` |
+| **I2** | `llama-server` — `ghcr.io/ggerganov/llama.cpp:server-b4719` (pinned) |
+| **I3** | `docker-compose.yml` — `thoth-net`, `depends_on: service_healthy`, `unless-stopped` |
+| **I4** | Env table, named volumes, `entrypoint-engine.sh` dir/bootstrap |
+| **I5** | Healthchecks both services; `stop_grace_period: 30s` |
+| **I6** | `docker/smoke.sh`, `docker/README.md`, `GETTING_STARTED.md` |
+
+**Key files:** `docker/Dockerfile.engine`, `docker-compose.yml`, `docker/entrypoint-engine.sh`, `docker/smoke.sh`, `docker/README.md`
+
+**Verification:** `docker build -f docker/Dockerfile.engine -t thoth-engine:local .`; `docker run --rm thoth-engine:local --version`; isolated HTTP smoke (`/health`, `/ready`, SSE); host `ctest -L pr` — `thoth-core-tests` passed, **`test-suite-dev` SEGFAULT** (unrelated packaging; repair pending approval)
+
+**Packaging note:** Image sets `THOTH_PROJECT_ROOT=/workspace` as a deterministic deploy override. Root-cause fix (2026-07-14): `getProjectRoot()` terminates walk at filesystem root (`parent == current`).
+
+---
+
+### Containerization — Plan H complete ✅ (2026-07-13)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 2 · **Spec:** [`plan_h_inference_adapter.md`](plan_h_inference_adapter.md) 🔒
+
+| Checkpoint | Work |
+|------------|------|
+| **H1** | `InferenceClient` interface, provider-neutral types, `MockInferenceClient` |
+| **H2** | `OllamaClient`; `LLMInterface` + `EmbeddingEngine` wired through abstraction |
+| **H3** | `LlamaServerClient` — `/v1/completions`, `/v1/embeddings`, `/health` |
+| **H4** | `createInferenceClient()` factory; `THOTH_INFERENCE_BACKEND=ollama\|llama_cpp` |
+| **H5** | Bootstrap logging; `GETTING_STARTED.md` backend docs |
+| **H6** | Inference unit tests; embedding dimension probe (integration env-gated); PR suite |
+
+**Key files:** `inference_client.{h,cpp}`, `ollama_client.{h,cpp}`, `llama_server_client.{h,cpp}`, `inference_http.{h,cpp}`, `llm_interface.cpp`, `embedding_engine.cpp`
+
+**Verification:** `ctest -L pr -j1`; `THOTH_INFERENCE_INTEGRATION_TESTS=1 ./tests/thoth-core-tests` (when Ollama/llama-server reachable)
+
+---
+
+### Containerization — Plan G complete ✅ (2026-07-13)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 4 · **Spec:** [`plan_g_streaming_observability.md`](plan_g_streaming_observability.md) 🔒
+
+| Checkpoint | Work |
+|------------|------|
+| **G1** | `EngineEvent` envelope, dispatch thread, bounded ingress, subscriber isolation |
+| **G2** | `plugin->onEvent` wiring, `subscribeEvents` / `unsubscribeEvents` |
+| **G3** | `GET /v1/events`, `SseSessionManager`, `"events"` capability |
+| **G4** | Multi-client SSE fan-out |
+| **G5** | Disconnect cleanup, per-client bounded queues (drop on overflow) |
+| **G6** | SSE-aware shutdown, `docs/ENGINE_EVENTS.md`, `GETTING_STARTED.md` |
+
+**Key files:** `engine_event.{h,cpp}`, `engine_sse_session.{h,cpp}`, `engine_runtime.{h,cpp}`, `engine_http_transport.cpp`
+
+**Verification:** `THOTH_ENGINE_RUNTIME_TESTS=1 ./tests/thoth-core-tests`; `ctest -L pr -j1`
+
+---
+
+### Containerization — Plan F complete ✅ (2026-07-13)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 3 · **Spec:** [`plan_f_engine_runtime_http.md`](plan_f_engine_runtime_http.md) 🔒
+
+**Delivered (host-native HTTP transport — no Docker images yet):**
+
+| Checkpoint | Work |
+|------------|------|
+| **F1** | `EngineRuntime` (plugin, worker queue, sessions) + CLI refactor via `submitChat` |
+| **F2** | `EngineError` schema, session normalization, unit tests (`THOTH_ENGINE_RUNTIME_TESTS=1`) |
+| **F3** | `EngineHttpTransport`, cpp-httplib v0.15.3, `--serve` / `--bind` / `--port`, `GET /health`, `/ready`, `/version` |
+| **F4** | `POST /v1/chat` — parity with `submitChat` / `--execute` |
+| **F5** | `POST /v1/goals`, `POST /v1/control/{pause,resume,abort}` |
+| **F6** | Graceful shutdown (`beginShutdown`, bounded queue drain, `503 ENGINE_BUSY`), `sigtimedwait` signal handling in `--serve`, `GETTING_STARTED.md` HTTP section, engine runtime tests |
+
+**Key files:** `engine_runtime.{h,cpp}`, `engine_error.{h,cpp}`, `engine_http_transport.{h,cpp}`, `thoth_engine_main.cpp`, `third_party/httplib.h`
+
+**Locked semantics:** `POST /v1/goals` returns after acceptance + synchronous initial planning (`create_plan`); step execution continues async on the executive loop. **F+1** `submitGoalAsync()` deferred to [`improvements.md`](improvements.md) § Containerization — Future Enhancements (Plan G SSE).
+
+**Verification:** `THOTH_ENGINE_RUNTIME_TESTS=1 ./tests/thoth-core-tests`; `timeout -s TERM` / `SIGINT` on `--serve`; `ctest -L pr -j1`.
+
+---
+
+### Containerization — Plan F checkpoints F1–F5 ✅ (2026-07-13)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 3 · **Spec:** [`plan_f_engine_runtime_http.md`](plan_f_engine_runtime_http.md) 🔒
+
+**Delivered (host-native HTTP transport — no Docker images yet):**
+
+| Checkpoint | Work |
+|------------|------|
+| **F1** | `EngineRuntime` (plugin, worker queue, sessions) + CLI refactor via `submitChat` |
+| **F2** | `EngineError` schema, session normalization, unit tests (`THOTH_ENGINE_RUNTIME_TESTS=1`) |
+| **F3** | `EngineHttpTransport`, cpp-httplib v0.15.3, `--serve` / `--bind` / `--port`, `GET /health`, `/ready`, `/version` |
+| **F4** | `POST /v1/chat` — parity with `submitChat` / `--execute` |
+| **F5** | `POST /v1/goals`, `POST /v1/control/{pause,resume,abort}` |
+
+**Key files:** `engine_runtime.{h,cpp}`, `engine_error.{h,cpp}`, `engine_http_transport.{h,cpp}`, `thoth_engine_main.cpp`, `third_party/httplib.h`
+
+**Locked semantics:** `POST /v1/goals` returns after acceptance + synchronous initial planning (`create_plan`); step execution continues async on the executive loop. **F+1** `submitGoalAsync()` deferred to [`improvements.md`](improvements.md) § Containerization — Future Enhancements (Plan G SSE).
+
+**Superseded by:** Plan F complete entry above (F6 added graceful shutdown + docs).
+
+---
+
+### Containerization — prerequisite Plans A–E ✅ (2026-07-12)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 0
+
+| Plan | Deliverable |
+|------|-------------|
+| **A** | Configurable inference endpoints (`THOTH_INFERENCE_BASE_URL`, etc.) |
+| **B** | Portable workspace/logs paths (`THOTH_WORKSPACE_PATH`, `THOTH_LOGS_PATH`) |
+| **C** | Headless `thoth-engine` + `engine-only` CMake preset |
+| **D** | `thoth-core-tests` / `thoth-gui-tests` split; wxWidgets-free PR CI |
+| **E** | Runtime bootstrap, `.env` loading, `THOTH_LOG_CONFIG` |
+
+**Verification:** `ctest -L pr` on `engine-only`; portable paths and bootstrap unit tests green.
+
+---
 
 ### Bug fix — memory consolidation lockup / control-panel freeze ✅ (2026-07-11)
 

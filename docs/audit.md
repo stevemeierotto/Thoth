@@ -16,7 +16,7 @@
 ### code_modify Write Paths
 
 - **Allowlist Logic:** `CodeModifyTool::isPathSafe()` enforces that read / apply_diff / revert operations stay within the project root. Absolute paths and `..` traversal are rejected.
-- **Project Root:** `FileHandler::getProjectRoot()` — walks up from CWD for `GEMINI.md` or `.git`, else derives from executable path. Override: `THOTH_PROJECT_ROOT` env var.
+- **Project Root:** `FileHandler::getProjectRoot()` — walks up from CWD for `GEMINI.md` or `.git`, terminating when `parent_path() == current` (filesystem root); else derives from executable path. Override: `THOTH_PROJECT_ROOT` env var.
 - **Reality:** `code_modify` can read any file under project root (with confirmation). `apply_diff` is a **stub** returning: `"Unified diff application not fully implemented in v1.0 prototype. Harness is ready."`
 - **Confirmation Required:** ✅ `code_modify` requires confirmation
 
