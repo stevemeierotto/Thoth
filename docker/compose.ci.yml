@@ -1,0 +1,14 @@
+# Plan J — CI packaging override (no GGUF required)
+#
+# Usage (from repo root):
+#   docker compose -f docker-compose.yml -f docker/compose.ci.yml up -d --build thoth-engine
+#   SMOKE_MODE=ci ./docker/smoke.sh
+#
+# Effect:
+# - Clears thoth-engine's depends_on llama-server health gate (!override)
+# - CI smoke starts only thoth-engine (llama-server not started — no GGUF)
+# Default operator compose (docker-compose.yml alone) is unchanged.
+
+services:
+  thoth-engine:
+    depends_on: !override []

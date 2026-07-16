@@ -6,9 +6,9 @@ name: thoth
 
 services:
   llama-server:
-  # Pinned tag — never :latest. Digest (verify when upgrading):
-  # sha256:45db6d98cca4f71817e3fc34844b88a63be7eb9507a1ccb0847560d7c86e61de (server-b4719, illustrative)
-    image: ghcr.io/ggerganov/llama.cpp:server-b4719
+    # Digest-pinned (ggml-org succeeded ggerganov). Never :latest.
+    # Re-pin when upgrading: docker pull …:server && docker image inspect … --format '{{index .RepoDigests 0}}'
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:823b6f019cafbee8878dfdd0d4750eae4f81dfafb60dc1fbefb66794a59903c8
     restart: unless-stopped
     networks:
       - thoth-net
@@ -24,7 +24,7 @@ services:
       - -c
       - "4096"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10

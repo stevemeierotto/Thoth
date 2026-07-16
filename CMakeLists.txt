@@ -64,6 +64,8 @@ if(THOTH_BUILD_GUI)
         src/ChatSessionRenderer.cpp
         src/FileDropTarget.cpp
         src/AgentInterface.cpp
+        src/local_agent_backend.cpp
+        src/remote_agent_backend.cpp
         src/VisualizationFrame.cpp
         src/ChatMessagePanel.cpp
         src/GragDiagnosticsPanel.cpp

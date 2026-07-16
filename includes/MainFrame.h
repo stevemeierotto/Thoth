@@ -159,6 +159,8 @@ private:
     void ActivateSession(std::size_t sessionIndex);
     bool SyncAgentMemoryFromActiveSession(bool includeRagFiles = true);
     void RefreshAllPanels();
+    /** Strip leading "goal:" / "/goal" for executeGoal routing. Empty if not a goal. */
+    static wxString ExtractGoalText(const wxString& input);
 
     // Event handlers
     void OnSend(wxCommandEvent& evt);

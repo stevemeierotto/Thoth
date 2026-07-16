@@ -399,7 +399,15 @@ bool MainFrame::SyncAgentMemoryFromActiveSession(bool includeRagFiles) {
     }
 
     const Thoth::ChatSession& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
-    
+
+    // Remote (Plan K): conversation/RAG/resume sync have no HTTP APIs — skip no-ops.
+    if (agent->isRemote()) {
+        if (!session.activeGoal.empty()) {
+            RefreshGoalBanner();
+        }
+        return false;
+    }
+
     auto sessionCopy = session;
     MigrateFilesToSandbox(sessionCopy.ragFilePaths);
     
@@ -454,7 +462,12 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
     RefreshChatList();
     RefreshRagPanel(); // New: Update the RAG file panel
     const bool memoryLoaded = SyncAgentMemoryFromActiveSession();
-    SetStatusText(memoryLoaded ? "Loaded selected chat into memory" : "Selected chat (memory sync unavailable)");
+    if (agent && agent->isRemote()) {
+        SetStatusText("Remote engine mode — host memory/RAG not synced");
+    } else {
+        SetStatusText(memoryLoaded ? "Loaded selected chat into memory"
+                                   : "Selected chat (memory sync unavailable)");
+    }
     RefreshGoalBanner();
     RefreshAllPanels();
 }
@@ -660,12 +673,18 @@ MainFrame::MainFrame()
                     if (isActiveSession) {
                         m_goalPlanningPending = false;
                         RefreshExecutiveStripActivity();
+                        if (this->m_typingIndicator) {
+                            this->m_typingIndicator->Hide();
+                        }
                         if (this->m_planPanel) this->m_planPanel->SetExecutionState("Failed");
                     }
                 } else if (type == EventType::PLAN_ABORTED) {
                     if (isActiveSession) {
                         m_goalPlanningPending = false;
                         RefreshExecutiveStripActivity();
+                        if (this->m_typingIndicator) {
+                            this->m_typingIndicator->Hide();
+                        }
                         if (this->m_planPanel) this->m_planPanel->SetExecutionState("Aborted");
                     }
                 } else if (type == EventType::PLAN_REUSE_INJECTION) {
@@ -1054,28 +1073,31 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
     SaveChatSessions();
 
     const bool isGoal = InputStartsGoal(input);
+    const wxString goalText = isGoal ? ExtractGoalText(input) : wxString();
 
     // Sync conversation memory after the new message is stored. Skip RAG re-index for
     // goals so /goal is not blocked behind bulk indexing on the worker thread.
+    // Remote mode skips entirely (no sync APIs — Plan K).
     SyncAgentMemoryFromActiveSession(!isGoal);
     
     // Refresh UI
     RefreshChatList(); // Re-sorts, updates m_activeSessionIndex to match m_sessionId
     RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
 
-    m_typingIndicator->Show();
     if (m_graphPanel) {
         m_graphPanel->ResetNodes();
-        m_graphPanel->UpdateControllerState("CONVERSATIONAL");
+        m_graphPanel->UpdateControllerState(isGoal ? "PLANNING" : "CONVERSATIONAL");
     }
     m_auiManager.Update();
 
-    if (InputStartsGoal(input)) {
+    if (isGoal) {
         m_goalPlanningPending = true;
     }
     RefreshExecutiveStripActivity();
     if (m_goalPlanningPending && m_ragIndexingCount == 0) {
         SetStatusText("Planning goal…");
+    } else if (!isGoal && agent && agent->isRemote()) {
+        SetStatusText("Message sent to remote engine…");
     } else if (!isGoal && !session.ragFilePaths.empty()) {
         SetStatusText("Syncing RAG context…");
     } else if (!isGoal) {
@@ -1085,17 +1107,33 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
     }
 
     if (agent) {
-        ++m_requestCounter;
-        const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
-        
-        m_requestToSession[requestId] = activeId;
-        
-        std::cerr << "[MainFrame] Sending request " << requestId << " for session " << activeId << "\n";
-        agent->processUserInput(input.ToStdString(), requestId);
-        if (isGoal && !session.ragFilePaths.empty()) {
-            auto sessionCopy = session;
-            MigrateFilesToSandbox(sessionCopy.ragFilePaths);
-            agent->setRagFiles(sessionCopy.ragFilePaths);
+        if (isGoal) {
+            // Explicit goal: → /v1/goals (remote) or plugin executeGoal (local).
+            // Do not block /v1/chat on create_plan; progress via SSE.
+            if (m_typingIndicator) {
+                m_typingIndicator->Hide();
+            }
+            const std::string goalStd = goalText.ToStdString();
+            if (goalStd.empty()) {
+                SetStatusText("Goal text empty — use \"goal: …\" or \"/goal …\"");
+            } else {
+                std::cerr << "[MainFrame] executeGoal for session " << activeId << "\n";
+                SetSessionGoal(activeId, goalStd);
+                agent->executeGoal(goalStd);
+                if (!agent->isRemote() && !session.ragFilePaths.empty()) {
+                    auto sessionCopy = session;
+                    MigrateFilesToSandbox(sessionCopy.ragFilePaths);
+                    agent->setRagFiles(sessionCopy.ragFilePaths);
+                }
+            }
+        } else {
+            m_typingIndicator->Show();
+            ++m_requestCounter;
+            const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
+            m_requestToSession[requestId] = activeId;
+            std::cerr << "[MainFrame] Sending request " << requestId << " for session "
+                      << activeId << "\n";
+            agent->processUserInput(input.ToStdString(), requestId);
         }
     } else {
         wxMessageBox("Agent not initialized.", "Error", wxOK | wxICON_ERROR, this);
@@ -1815,6 +1853,23 @@ bool MainFrame::InputStartsGoal(const wxString& input) {
     trimmed.Trim(true).Trim(false);
     const wxString lower = trimmed.Lower();
     return lower.StartsWith("/goal") || lower.StartsWith("goal:");
+}
+
+wxString MainFrame::ExtractGoalText(const wxString& input) {
+    wxString trimmed = input;
+    trimmed.Trim(true).Trim(false);
+    const wxString lower = trimmed.Lower();
+    if (lower.StartsWith("goal:")) {
+        wxString rest = trimmed.Mid(5);
+        rest.Trim(true).Trim(false);
+        return rest;
+    }
+    if (lower.StartsWith("/goal")) {
+        wxString rest = trimmed.Mid(5);
+        rest.Trim(true).Trim(false);
+        return rest;
+    }
+    return wxString();
 }
 
 void MainFrame::RefreshExecutiveStripActivity() {

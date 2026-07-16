@@ -16,6 +16,7 @@ find_package(Threads REQUIRED)
 add_executable(thoth-core-tests unit_tests.cpp)
 target_compile_definitions(thoth-core-tests PRIVATE THOTH_HAS_GUI=0)
 target_include_directories(thoth-core-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/includes
     ${CMAKE_SOURCE_DIR}/external/basic_agent/include
     ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
 )
@@ -30,6 +31,8 @@ if(THOTH_BUILD_GUI)
     add_executable(thoth-gui-tests
         unit_tests.cpp
         ${CMAKE_SOURCE_DIR}/src/AgentInterface.cpp
+        ${CMAKE_SOURCE_DIR}/src/local_agent_backend.cpp
+        ${CMAKE_SOURCE_DIR}/src/remote_agent_backend.cpp
     )
     target_compile_definitions(thoth-gui-tests PRIVATE
         THOTH_HAS_GUI=1
@@ -38,11 +41,13 @@ if(THOTH_BUILD_GUI)
     target_include_directories(thoth-gui-tests PRIVATE
         ${CMAKE_SOURCE_DIR}/includes
         ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+        ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
         ${wxWidgets_INCLUDE_DIRS}
     )
     target_link_libraries(thoth-gui-tests PRIVATE
         basic_agent
         ${wxWidgets_LIBRARIES}
+        ${CURL_LIBRARIES}
     )
     add_test(NAME thoth-gui-tests COMMAND thoth-gui-tests)
     set_tests_properties(thoth-gui-tests PROPERTIES

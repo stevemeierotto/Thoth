@@ -1,8 +1,8 @@
 # Docker Containerization Roadmap
 
-**Last Updated:** 2026-07-13  
+**Last Updated:** 2026-07-16  
 **Purpose:** Track containerization work after portable-runtime prerequisites  
-**Status:** Plan F ✅ · Plan G ✅ · Plan H ✅ · Plan I ✅ (I1–I6)
+**Status:** Plan F ✅ · Plan G ✅ · Plan H ✅ · Plan I ✅ · Step 6 ✅ · Plan J ✅ · Plan K ✅ · Plan L ✅ Complete (L3 deferred)
 
 ---
 
@@ -16,6 +16,7 @@
 | GUI in v1 | Host-native `thoth-control-panel` preferred; containerized wxWidgets deferred |
 | Default dev workflow | Host-native build remains primary; Docker is additive |
 | Transport split | Plan F = request/response HTTP; Plan G = SSE & observability |
+| Compose RAG ownership | **Plan L** — engine-owned corpus on `thoth-workspace`; seed from `docker/seed_rag/` (not host mirror) |
 
 ---
 
@@ -28,8 +29,10 @@
 | **G** | [Streaming & Observability](plan_g_streaming_observability.md) 🔒 ✅ | 4 |
 | **H** | [Inference adapter](plan_h_inference_adapter.md) 🔒 | 2 |
 | **I** | [Docker Compose v1](plan_i_docker_compose_v1.md) ✅ | 5 |
-| **J** | CI compose job (optional) | 7 |
-| **K** | GUI API client (optional) | 9 |
+| **J** | [CI compose job](plan_j_ci_compose.md) ✅ | 7 |
+| **K** | [GUI API client (optional)](plan_k_gui_api_client.md) 🔒 | 9 |
+| **L** | [Engine workspace corpus](plan_l_workspace_corpus.md) ✅ Complete (L3 deferred) | 10 |
+| **M** | [Grounded retrieval gate](plan_m_grounded_retrieval_gate.md) ✅ Complete | (chat RAG) |
 
 *(Former single “Plan F” HTTP work is split into F + G. Former G/H/I shifted down one letter.)*
 
@@ -75,10 +78,11 @@ Keep `memory.db` on a **local Docker volume** (not NFS) because of SQLite WAL.
 | **3** | Engine Runtime + HTTP (`/health`, `/v1/chat`, goals, control) | ✅ Done (F1–F6) | **F** 🔒 |
 | **4** | SSE streaming + event observability | ✅ Done (G1–G6) | **G** 🔒 |
 | **5** | `docker-compose.yml` v1 (Docker packaging) | ✅ Done (I1–I6) | **I** |
-| **6** | Hybrid dev docs | Not started | — |
-| **7** | CI compose job (optional) | Partial | **J** |
+| **6** | Hybrid dev docs | ✅ Done | — |
+| **7** | CI compose job (optional) | ✅ Done (J1–J4) | **J** |
 | **8** | Nightly full suite vs containerized inference | Not started | — |
-| **9** | GUI API client (optional) | Not started | **K** |
+| **9** | GUI API client (optional) | ✅ Plan K complete (K0–K5) | **K** |
+| **10** | Engine workspace corpus (Compose RAG) | ✅ Complete (L3 deferred) | **L** |
 
 ---
 
@@ -156,13 +160,20 @@ volumes:
 
 **Checkpoints:** I1–I6 (headless Dockerfile, version-pinned llama-server, compose wiring, volumes/env precedence, healthchecks + `unless-stopped`, docs/smoke)
 
-### Step 6 — Hybrid dev docs
+### Step 6 — Hybrid dev docs ✅
 
-Host GUI → container engine (after Plans F–I).
+Completed 2026-07-14. Docs only — host clients (`curl` / scripts) against compose `thoth-engine` on `:8090`.
 
-### Step 7 — CI compose (Plan J)
+**Delivered in:** [`docker/README.md`](../docker/README.md) § Hybrid development · [`GETTING_STARTED.md`](GETTING_STARTED.md) § Hybrid development
 
-Optional parallel job: build image + `curl /health`. Native `engine-only` CI already exists.
+**Notes:** Host GUI remains in-process until **Plan K**. Container volumes ≠ host `agent_workspace/`.
+
+### Step 7 — CI compose (Plan J) ✅
+
+Completed 2026-07-14. Parallel packaging job: build engine image + CI compose (engine-only, no GGUF) + `/health` / `/ready`. Native `engine-only` + `ctest -L pr` unchanged.
+
+Spec: [plan_j_ci_compose.md](plan_j_ci_compose.md) ✅  
+Workflow: `.github/workflows/ci-compose.yml` · Override: `docker/compose.ci.yml` · Smoke: `SMOKE_MODE=ci ./docker/smoke.sh`
 
 ### Step 8 — Nightly containerized inference
 
@@ -170,17 +181,33 @@ Optional parallel job: build image + `curl /health`. Native `engine-only` CI alr
 
 ### Step 9 — GUI API client (Plan K)
 
-`AgentInterface` → HTTP client when engine is remote.
+`AgentInterface` → HTTP client when engine is remote. Local default; remote via `THOTH_ENGINE_URL`.
+
+**Status:** ✅ Plan K complete (K0–K5, 2026-07-15).
+
+Spec: [plan_k_gui_api_client.md](plan_k_gui_api_client.md) 🔒
+
+**GUI remote:** `THOTH_ENGINE_URL=http://127.0.0.1:8090` then restart `thoth-control-panel` (unset → Local). Smoke checklist: [docker/README.md](../docker/README.md#gui-remote-smoke-checklist-plan-k5).
+
+### Step 10 — Engine workspace corpus (Plan L)
+
+Completes the **engine-owned** Compose workspace corpus model and supported seeding workflow (not host `agent_workspace` mirroring; not GUI sync).
+
+**Status:** ✅ **Complete (L3 deferred)** — 2026-07-16 (L4 closeout).
+
+Spec: [plan_l_workspace_corpus.md](plan_l_workspace_corpus.md) ✅
+
+**Final architecture (remote):** GUI ↔ engine over HTTP/SSE (Plan K); engine owns `/workspace` (RAG corpus, index, `memory.db`, traces) and `/logs`. Supported corpus path: `docker/seed_rag/` → `./docker/seed-workspace.sh` → engine workspace → L2 verification. Empty-workspace retrieval issues after remote migration were addressed jointly by Phase 1/Plan K (timeouts/routing) and Plan L (ownership/seed/verify).
 
 ---
 
 ## Gate rule
 
 ```
-0 ✅ → 1 → 2 → 3 ✅ → 4 ✅ → 5 → 6 → 7 🔶 → 8 → 9 (optional)
+0 ✅ → 1 → 2 ✅ → 3 ✅ → 4 ✅ → 5 ✅ → 6 ✅ → 7 ✅ → 8 → 9 ✅ → 10 ✅
 ```
 
-Steps 2–4 (H, F, G) and Step 5 (I) are complete. Optional: Plan J (CI compose), Step 6 hybrid dev docs.
+Steps 2–7, 9, and 10 complete. **Plan L ✅ Complete (L3 deferred).** Optional: Step 8 nightly.
 
 ---
 
@@ -196,6 +223,10 @@ Steps 2–4 (H, F, G) and Step 5 (I) are complete. Optional: Plan J (CI compose)
 ## Related docs
 
 - [plan_i_docker_compose_v1.md](plan_i_docker_compose_v1.md) ✅
+- [plan_j_ci_compose.md](plan_j_ci_compose.md) ✅
+- [plan_k_gui_api_client.md](plan_k_gui_api_client.md) 🔒
+- [plan_l_workspace_corpus.md](plan_l_workspace_corpus.md) ✅ Complete (L3 deferred)
+- [plan_m_grounded_retrieval_gate.md](plan_m_grounded_retrieval_gate.md) ✅ Complete
 - [plan_h_inference_adapter.md](plan_h_inference_adapter.md) 🔒
 - [plan_f_engine_runtime_http.md](plan_f_engine_runtime_http.md)
 - [plan_g_streaming_observability.md](plan_g_streaming_observability.md) 🔒

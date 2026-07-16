@@ -2,6 +2,9 @@
 #include <wx/filename.h>
 #include <wx/dir.h>
 #include "AgentInterface.h"
+#include "local_agent_backend.h"
+#include "remote_agent_backend.h"
+#include "remote_agent_http_utils.h"
 #include <chrono>
 #include <iostream>
 #include <filesystem>
@@ -16,9 +19,18 @@ using json = nlohmann::json;
 
 AgentInterface::AgentInterface() {
     try {
-        plugin = std::make_unique<BasicAgentPlugin>();
-        
-        plugin->onEvent = [this](const ControllerEvent& ev) {
+        // K4: only AgentInterface reads THOTH_ENGINE_URL. Backends never read env.
+        const auto remote_url = ThothRemoteHttp::resolveThothEngineUrlFromEnv();
+        if (remote_url.has_value()) {
+            backend = std::make_unique<RemoteAgentBackend>(*remote_url);
+            std::cerr << "[AgentInterface] backend=remote url=" << *remote_url << "\n";
+        } else {
+            backend = std::make_unique<LocalAgentBackend>();
+            std::cerr << "[AgentInterface] backend=local\n";
+        }
+
+        // AgentInterface owns the event bridge; backend invokes the callback only.
+        backend->setEventHandler([this](const ControllerEvent& ev) {
             if (ev.type == EventType::PLAN_REUSE_INJECTION
                 || ev.type == EventType::REFLECTION_REPLAN
                 || ev.type == EventType::PLAN_HISTORY_STORED) {
@@ -27,15 +39,13 @@ AgentInterface::AgentInterface() {
                           << " type=" << static_cast<int>(ev.type) << "\n";
             }
             if (this->onEvent) this->onEvent(ev);
-        };
+        });
 
-        std::cerr << "[AgentInterface] BasicAgentPlugin initialized successfully.\n";
-        
         // Start worker thread
         workerThread = std::thread(&AgentInterface::workerLoop, this);
 
     } catch (const std::exception& ex) {
-        std::cerr << "[AgentInterface][Error] Failed to initialize agent: " 
+        std::cerr << "[AgentInterface][Error] Failed to initialize agent: "
                   << ex.what() << "\n";
     } catch (...) {
         std::cerr << "[AgentInterface][Error] Unknown error during agent init.\n";
@@ -52,13 +62,13 @@ void AgentInterface::workerLoop() {
         {
             std::unique_lock<std::mutex> lock(workersMutex);
             workersCv.wait(lock, [this] { return shuttingDown || !taskQueue.empty(); });
-            
+
             if (shuttingDown && taskQueue.empty()) return;
-            
+
             task = std::move(taskQueue.front());
             taskQueue.pop();
         }
-        
+
         if (task) {
             try {
                 task();
@@ -85,22 +95,30 @@ void AgentInterface::shutdownWorkers() {
 void AgentInterface::setSessionId(const std::string& sessionId) {
     std::lock_guard<std::mutex> lock(workersMutex);
     activeSessionId = sessionId;
-    
+
     taskQueue.push([this, sessionId]() {
-        if (plugin) plugin->setSessionId(sessionId);
+        if (backend) backend->setSessionId(sessionId);
     });
     workersCv.notify_one();
+}
+
+bool AgentInterface::isRemote() const {
+    return backend && backend->isRemote();
 }
 
 bool AgentInterface::loadConversationMemory(
     const std::vector<std::pair<std::string, std::string>>& messages,
     const std::string& summary) {
-    if (!plugin) return false;
+    if (!backend) return false;
+    // Plan K: no conversation-sync HTTP — do not claim success in remote mode.
+    if (backend->isRemote()) {
+        return false;
+    }
 
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this, messages, summary]() {
-            if (plugin) plugin->setConversationMemory(messages, summary);
+            if (backend) backend->setConversationMemory(messages, summary);
         });
     }
     workersCv.notify_one();
@@ -110,7 +128,11 @@ bool AgentInterface::loadConversationMemory(
 bool AgentInterface::loadConversationMemorySync(
     const std::vector<Memory::TimedMessage>& messages,
     const std::string& summary) {
-    if (!plugin) {
+    if (!backend) {
+        return false;
+    }
+    // Plan K: no conversation-sync HTTP — do not claim success in remote mode.
+    if (backend->isRemote()) {
         return false;
     }
 
@@ -119,8 +141,8 @@ bool AgentInterface::loadConversationMemorySync(
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this, messages, summary, done]() {
-            if (plugin) {
-                plugin->setConversationMemory(messages, summary);
+            if (backend) {
+                backend->setConversationMemory(messages, summary);
             }
             done->set_value();
         });
@@ -142,75 +164,75 @@ bool AgentInterface::loadConversationMemorySync(
 }
 
 void AgentInterface::setRagFiles(const std::vector<std::string>& filePaths) {
-    if (!plugin) return;
+    if (!backend) return;
 
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this, filePaths]() {
-            if (plugin) plugin->setRagFiles(filePaths);
+            if (backend) backend->setRagFiles(filePaths);
         });
     }
     workersCv.notify_one();
 }
 
 void AgentInterface::checkResumablePlan() {
-    if (!plugin) return;
+    if (!backend) return;
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this]() {
-            if (plugin) plugin->checkResumablePlan();
+            if (backend) backend->checkResumablePlan();
         });
     }
     workersCv.notify_one();
 }
 
 void AgentInterface::pause() {
-    if (!plugin) return;
+    if (!backend) return;
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this]() {
-            if (plugin) plugin->pause();
+            if (backend) backend->pause();
         });
     }
     workersCv.notify_one();
 }
 
 void AgentInterface::resume() {
-    if (!plugin) return;
+    if (!backend) return;
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this]() {
-            if (plugin) plugin->resume();
+            if (backend) backend->resume();
         });
     }
     workersCv.notify_one();
 }
 
 void AgentInterface::abort() {
-    if (!plugin) return;
+    if (!backend) return;
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this]() {
-            if (plugin) plugin->abort();
+            if (backend) backend->abort();
         });
     }
     workersCv.notify_one();
 }
 
 void AgentInterface::executeGoal(const std::string& goal) {
-    if (!plugin) return;
+    if (!backend) return;
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this, goal]() {
-            if (plugin) plugin->executeGoal(goal);
+            if (backend) backend->executeGoal(goal);
         });
     }
     workersCv.notify_one();
 }
 
 void AgentInterface::processUserInput(const std::string& input, const std::string& requestId) {
-    if (!plugin) return;
-    
+    if (!backend) return;
+
     std::string resolvedRequestId = requestId;
     if (resolvedRequestId.empty()) {
         resolvedRequestId = "req-" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -220,10 +242,10 @@ void AgentInterface::processUserInput(const std::string& input, const std::strin
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this, input, resolvedRequestId]() {
-            if (plugin) {
-                std::string reply = plugin->processInput(input);
-                if (onResponse) onResponse(reply, resolvedRequestId);
-            }
+            if (!backend) return;
+            auto reply = backend->processInput(input);
+            if (!reply.has_value()) return;
+            if (onResponse) onResponse(*reply, resolvedRequestId);
         });
     }
     workersCv.notify_one();
@@ -248,7 +270,7 @@ std::string AgentInterface::getLatestDecisionTraceSummary() const {
         out << "Latest Event: " << j.value("trace_type", "unknown") << "\n";
         if (j.contains("stages") && j["stages"].is_array() && !j["stages"].empty()) {
             auto lastStage = j["stages"].back();
-            out << "Status: " << lastStage.value("name", "none") 
+            out << "Status: " << lastStage.value("name", "none")
                 << " (" << (lastStage.value("success", false) ? "OK" : "Failed") << ")\n";
             out << "Summary: " << lastStage.value("summary", "none");
         }
@@ -259,125 +281,33 @@ std::string AgentInterface::getLatestDecisionTraceSummary() const {
 }
 
 nlohmann::json AgentInterface::getStrategies() const {
-    if (!plugin) return json::array();
-    try {
-        auto strats = plugin->getAllStrategies();
-        json result = json::array();
-        for (const auto& s : strats) {
-            json stepPattern = json::array();
-            try { stepPattern = json::parse(s.step_pattern_json); } catch(...) {}
-            result.push_back({
-                {"strategy_id", s.strategy_id},
-                {"description", s.description},
-                {"step_pattern", stepPattern},
-                {"success_rate", s.success_rate},
-                {"created_at", s.created_at}
-            });
-        }
-        return result;
-    } catch (...) { return json::array(); }
+    if (!backend) return json::array();
+    return backend->getStrategies();
 }
 
 nlohmann::json AgentInterface::getTrajectories() const {
-    if (!plugin) return json::array();
-    try {
-        auto trajs = plugin->getAllTrajectories();
-        std::sort(trajs.begin(), trajs.end(), [](const auto& a, const auto& b) {
-            return a.created_at > b.created_at;
-        });
-        if (trajs.size() > 20) trajs.resize(20);
-
-        json result = json::array();
-        for (const auto& t : trajs) {
-            json trajectory = json::object();
-            try { trajectory = json::parse(t.trajectory_json); } catch(...) {}
-            result.push_back({
-                {"trajectory_id", t.trajectory_id},
-                {"goal", t.goal},
-                {"trajectory", trajectory},
-                {"success_score", t.success_score},
-                {"created_at", t.created_at},
-                {"usage_count", t.usage_count},
-                {"tier", t.tier}
-            });
-        }
-        return result;
-    } catch (...) { return json::array(); }
+    if (!backend) return json::array();
+    return backend->getTrajectories();
 }
 
 nlohmann::json AgentInterface::getEpisodeSteps() const {
-    if (!plugin) return json::array();
-    try {
-        auto steps = plugin->getAllEpisodeSteps();
-        json result = json::array();
-        for (const auto& s : steps) {
-            result.push_back({
-                {"episode_id", s.episode_id},
-                {"goal_id", s.goal_id},
-                {"step_index", s.step_index},
-                {"state_summary", s.state_summary},
-                {"action_taken", s.action_taken},
-                {"result_status", s.result_status},
-                {"timestamp_ms", s.timestamp_ms}
-            });
-        }
-        return result;
-    } catch (...) { return json::array(); }
+    if (!backend) return json::array();
+    return backend->getEpisodeSteps();
 }
 
 nlohmann::json AgentInterface::getExperiments() const {
-    if (!plugin) return json::array();
-    try {
-        auto exprs = plugin->getAllExperiments();
-        json result = json::array();
-        for (const auto& e : exprs) {
-            json config = json::object();
-            json results = json::object();
-            try { config = json::parse(e.configuration_json); } catch(...) {}
-            try { results = json::parse(e.results_json); } catch(...) {}
-            result.push_back({
-                {"experiment_id", e.experiment_id},
-                {"name", e.name},
-                {"hypothesis", e.hypothesis},
-                {"configuration", config},
-                {"results", results},
-                {"created_at", e.created_at},
-                {"status", e.status}
-            });
-        }
-        return result;
-    } catch (...) { return json::array(); }
+    if (!backend) return json::array();
+    return backend->getExperiments();
 }
 
 bool AgentInterface::saveExperiment(const nlohmann::json& experimentJson) {
-    if (!plugin) return false;
-    try {
-        Memory::CognateExperimentRecord rec;
-        rec.experiment_id = experimentJson.value("experiment_id", "");
-        rec.name = experimentJson.value("name", "Unnamed Experiment");
-        rec.hypothesis = experimentJson.value("hypothesis", "");
-        rec.configuration_json = experimentJson.value("configuration", json::object()).dump();
-        rec.results_json = experimentJson.value("results", json::object()).dump();
-        rec.created_at = experimentJson.value("created_at", 0LL);
-        rec.status = experimentJson.value("status", "pending");
-        return plugin->saveExperiment(rec);
-    } catch (...) { return false; }
+    if (!backend) return false;
+    return backend->saveExperiment(experimentJson);
 }
 
 nlohmann::json AgentInterface::getGraphStats() const {
-    if (!plugin) return json::object();
-    try {
-        auto stats = plugin->getGraphStatistics();
-        return {
-            {"total_nodes", stats.total_nodes},
-            {"total_edges", stats.total_edges},
-            {"avg_edge_weight", stats.avg_edge_weight},
-            {"max_edge_weight", stats.max_edge_weight},
-            {"min_edge_weight", stats.min_edge_weight},
-            {"total_success_count", stats.total_success_count},
-            {"total_failure_count", stats.total_failure_count}
-        };
-    } catch (...) { return json::object(); }
+    if (!backend) return json::object();
+    return backend->getGraphStats();
 }
 
 wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
@@ -385,7 +315,7 @@ wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
     wxString exePath = wxStandardPaths::Get().GetExecutablePath();
     wxFileName exeFileName(exePath);
     wxString exeDir = exeFileName.GetPath();
-    
+
     std::cerr << "[AgentInterface] exeDir: " << exeDir.ToStdString() << "\n";
 
     // 2. Check the same directory as the executable
@@ -401,7 +331,7 @@ wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
         // Option A: current contains agent_workspace (the project root)
         wxFileName rootCheck(current, "");
         rootCheck.AppendDir("agent_workspace");
-        
+
         // Option B: current IS "build"
         wxFileName buildCheck(current, "");
         bool isBuildDir = (buildCheck.GetDirs().Last() == "build");
@@ -409,7 +339,7 @@ wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
         if (rootCheck.DirExists() || isBuildDir) {
             wxString buildRoot = isBuildDir ? current : (current + "/build");
             std::cerr << "[AgentInterface] Searching build root: " << buildRoot.ToStdString() << "\n";
-            
+
             wxArrayString subPaths;
             subPaths.Add("debug/external/basic_agent");
             subPaths.Add("release/external/basic_agent");
@@ -419,7 +349,7 @@ wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
                 wxFileName candidate(buildRoot, "");
                 candidate.AppendDir(sub);
                 wxFileName finalPath(candidate.GetPath(), binaryName);
-                
+
                 std::cerr << "[AgentInterface] Checking: " << finalPath.GetFullPath().ToStdString() << "\n";
                 if (finalPath.FileExists() && finalPath.IsFileExecutable()) {
                     std::cerr << "[AgentInterface] Found binary: " << finalPath.GetFullPath().ToStdString() << "\n";
@@ -427,7 +357,7 @@ wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
                 }
             }
         }
-        
+
         // Go up one level
         wxString parent = wxFileName(current, "").GetPath();
         if (parent == current || parent.IsEmpty()) break;
@@ -440,7 +370,7 @@ wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
         wxArrayString hardcoded;
         hardcoded.Add("/home/steve/Thoth/build/debug/external/basic_agent");
         hardcoded.Add("/home/steve/Thoth/build/external/basic_agent");
-        
+
         for (const auto& p : hardcoded) {
             wxFileName finalPath(p, binaryName);
             if (finalPath.FileExists() && finalPath.IsFileExecutable()) {

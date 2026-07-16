@@ -2,7 +2,7 @@
 
 **Status:** 🔒 Locked — 2026-07-13 · **Implemented** 2026-07-13 (I1–I6)  
 **Prerequisites:** Plans A–E ✅ · [Plan F](plan_f_engine_runtime_http.md) ✅ · [Plan G](plan_g_streaming_observability.md) ✅ · [Plan H](plan_h_inference_adapter.md) ✅  
-**Next:** [Plan J — CI compose job](docker_roadmap.md) (roadmap Step 7, optional) · Step 6 hybrid dev docs  
+**Next:** [Plan J — CI Compose Packaging Job](plan_j_ci_compose.md) ✅ · Step 8 nightly · Plan K (optional)  
 **Roadmap:** [docker_roadmap.md](docker_roadmap.md) Step 5 — Docker packaging phase
 
 ---
@@ -311,7 +311,7 @@ container `environment:` block in docker-compose.yml
 1. Empty `thoth-workspace` → engine creates SQLite DB on first use (existing behavior).
 2. Empty `rag/` → RAG bootstrap may index sandbox on first start (**slow**; document in operator guide).
 3. **Do not** bake `agent_workspace/` from git into the image — runtime state belongs on the volume.
-4. Optional `docker/seed-workspace.sh` for **dev only** (copy minimal `rag/` test corpus) — **not** run automatically in v1.
+4. Optional `docker/seed-workspace.sh` for **dev only** (copy minimal `rag/` test corpus) — **not** run automatically in v1. **Ownership/seed source locked in [Plan L](plan_l_workspace_corpus.md)** (`docker/seed_rag/`; no host `agent_workspace` mirror).
 
 ### Permissions
 

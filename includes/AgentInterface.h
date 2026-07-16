@@ -7,11 +7,17 @@
 #include <mutex>
 #include <vector>
 #include <utility>
+#include <queue>
 #include <condition_variable>
 #include <future>
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
-#include "basic_agent_plugin.h"
+
+#include "controller_event.h"
+#include "memory.h"
+#include "json.hpp"
+
+class IAgentBackend;
 
 class AgentInterface {
 public:
@@ -45,6 +51,9 @@ public:
     void abort();
     void executeGoal(const std::string& goal);
 
+    /** True when THOTH_ENGINE_URL selected RemoteAgentBackend at construction. */
+    bool isRemote() const;
+
     // Cognate Memory Access (for UI panels)
     nlohmann::json getStrategies() const;
     nlohmann::json getTrajectories() const;
@@ -60,13 +69,12 @@ private:
     void workerLoop();
     void shutdownWorkers();
 
-    std::unique_ptr<BasicAgentPlugin> plugin;
+    std::unique_ptr<IAgentBackend> backend;
     std::mutex workersMutex;
     std::condition_variable workersCv;
     std::queue<std::function<void()>> taskQueue;
     std::thread workerThread;
-    
+
     std::atomic<bool> shuttingDown{false};
     std::string activeSessionId;
 };
-

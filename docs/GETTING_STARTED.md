@@ -257,6 +257,29 @@ Operator guide: [`docker/README.md`](../docker/README.md) · Spec: [`plan_i_dock
 
 Host-native `cmake --preset engine-only` remains the primary developer workflow; Docker is additive.
 
+### Hybrid development (roadmap Step 6 + Plan K)
+
+Run the engine in Compose; drive it from the host with `curl` (or scripts) on `http://127.0.0.1:8090`. Optionally point the host GUI at that engine with **`THOTH_ENGINE_URL`**.
+
+```bash
+docker compose up -d --build
+curl -sf http://127.0.0.1:8090/ready | jq .
+curl -s -X POST http://127.0.0.1:8090/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"/help","session_id":"hybrid"}'
+curl -N -H 'Accept: text/event-stream' http://127.0.0.1:8090/v1/events
+
+# Optional — remote GUI (restart to switch; unset → in-process Local)
+export THOTH_ENGINE_URL=http://127.0.0.1:8090
+./build/debug/thoth-control-panel
+```
+
+**Limitations:** cognate side panels stay empty in remote mode (no cognate HTTP APIs yet). The remote GUI does **not** own or synchronize the engine workspace — Compose volumes are separate from host `agent_workspace/`. Engine may be offline at GUI launch; failures appear when chat/goals/SSE are used. For a usable Compose RAG corpus, use the engine-owned workflow: `./docker/seed-workspace.sh` then the Plan L L2 checklist in [`docker/README.md`](../docker/README.md#plan-l-l2--seed--restart--retrieval-evidence-docs-checklist) ([Plan L](plan_l_workspace_corpus.md) ✅ Complete (L3 deferred)). Chat grounding semantics (`grounded`, greeting skip, attempt vs success telemetry) are defined in [Plan M](plan_m_grounded_retrieval_gate.md) ✅ Complete — read `retrieval_ran` / `retrieval_skip_reason` alongside `grounding_mode`.
+
+**Local regression:** unset `THOTH_ENGINE_URL` → `[AgentInterface] backend=local` at startup; in-process chat/goals unchanged from pre–Plan K. Remote is additive only.
+
+Full hybrid notes: [`docker/README.md` § Hybrid development](../docker/README.md#hybrid-development) · smoke checklist: [`docker/README.md` § GUI remote smoke checklist](../docker/README.md#gui-remote-smoke-checklist-plan-k5) · Plan K: [`plan_k_gui_api_client.md`](plan_k_gui_api_client.md)
+
 **Portable paths** (see Environment Variables):
 - `THOTH_WORKSPACE_PATH` — workspace (`memory.db`, `rag/`, config)
 - `THOTH_LOGS_PATH` — benchmark and metrics JSONL logs

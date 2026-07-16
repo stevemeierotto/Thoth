@@ -14,7 +14,10 @@
 
 #if THOTH_HAS_GUI
 #include "AgentInterface.h"
+#include "remote_agent_backend.h"
 #endif
+#include "remote_agent_http_utils.h"
+#include "remote_agent_sse_utils.h"
 #include "command_processor.h"
 #include "config.h"
 #include "embedding_engine.h"
@@ -58,6 +61,15 @@
 #include "fact_store.h"
 #include "store_fact_tool.h"
 #include "flat_vector_store.h"
+#include "chat_retrieval_boost.h"
+#include "chat_retrieval_config.h"
+#include "chat_rag_observability.h"
+#include "chat_query_utils.h"
+#include "chat_prompt_config.h"
+#include "prompt_factory.h"
+#include "llama_server_client.h"
+#include "ollama_client.h"
+#include "json.hpp"
 #include "web_scrape_tool.h"
 #include "self_correct_tool.h"
 #include "constraint_checker.h"
@@ -866,6 +878,317 @@ static bool testEngineSessionNormalization() {
     }
     return true;
 }
+
+/** Plan K2 — offline only (no Docker / network). */
+static bool testRemoteHttpUtilsOffline() {
+    using namespace ThothRemoteHttp;
+
+    if (normalizeBaseUrl("http://127.0.0.1:8090/") != "http://127.0.0.1:8090") {
+        std::cerr << "testRemoteHttpUtilsOffline: trailing slash not stripped\n";
+        return false;
+    }
+    if (normalizeBaseUrl("http://127.0.0.1:8090") != "http://127.0.0.1:8090") {
+        std::cerr << "testRemoteHttpUtilsOffline: bare URL mutated\n";
+        return false;
+    }
+    if (normalizeBaseUrl("https://engine.example:9443/v1/") != "https://engine.example:9443/v1") {
+        std::cerr << "testRemoteHttpUtilsOffline: path + slash normalize failed\n";
+        return false;
+    }
+
+    nlohmann::json no_caps = {{"status", "ready"}};
+    if (!validateReadyCapabilities(no_caps).empty()) {
+        std::cerr << "testRemoteHttpUtilsOffline: missing capabilities should be OK\n";
+        return false;
+    }
+
+    nlohmann::json good_caps = {
+        {"status", "ready"},
+        {"capabilities", nlohmann::json::array({"chat", "goals", "control", "events"})}};
+    if (!validateReadyCapabilities(good_caps).empty()) {
+        std::cerr << "testRemoteHttpUtilsOffline: full capabilities rejected\n";
+        return false;
+    }
+
+    nlohmann::json missing_control = {
+        {"capabilities", nlohmann::json::array({"chat", "goals"})}};
+    if (validateReadyCapabilities(missing_control).empty()) {
+        std::cerr << "testRemoteHttpUtilsOffline: missing control should fail\n";
+        return false;
+    }
+
+    const std::string engine_err =
+        R"({"error":{"code":"ENGINE_BUSY","message":"shutting down"}})";
+    const std::string formatted = formatHttpErrorMessage(503, engine_err);
+    if (formatted.find("ENGINE_BUSY") == std::string::npos
+        || formatted.find("shutting down") == std::string::npos) {
+        std::cerr << "testRemoteHttpUtilsOffline: EngineError formatting failed: " << formatted
+                  << "\n";
+        return false;
+    }
+
+    const std::string bad_json = formatHttpErrorMessage(500, "not-json{{{{");
+    if (bad_json.find("500") == std::string::npos) {
+        std::cerr << "testRemoteHttpUtilsOffline: non-JSON body formatting failed\n";
+        return false;
+    }
+
+    if (kConnectTimeoutSec <= 0 || kChatTimeoutSec <= 0 || kControlTimeoutSec <= 0
+        || kGoalsTimeoutSec <= 0) {
+        std::cerr << "testRemoteHttpUtilsOffline: timeout constants invalid\n";
+        return false;
+    }
+    // Chat/goals must cover a full engine LLM wait (default 600s), not the old 120s trap.
+    if (kChatTimeoutSec < 600 || kGoalsTimeoutSec < kChatTimeoutSec) {
+        std::cerr << "testRemoteHttpUtilsOffline: chat/goals timeouts misaligned with LLM budget\n";
+        return false;
+    }
+    if (resolveRemoteRequestTimeoutSec(kChatTimeoutSec) != kChatTimeoutSec) {
+        std::cerr << "testRemoteHttpUtilsOffline: resolve without env should return fallback\n";
+        return false;
+    }
+
+    return true;
+}
+
+/** Plan K5 — offline chat/goal request+response mapping (pure). */
+static bool testRemoteChatGoalMappingOffline() {
+    using namespace ThothRemoteHttp;
+
+    const auto chat_req = buildChatRequestJson("hello", "sess-a");
+    if (chat_req.value("text", "") != "hello"
+        || chat_req.value("session_id", "") != "sess-a") {
+        std::cerr << "testRemoteChatGoalMappingOffline: buildChatRequestJson failed\n";
+        return false;
+    }
+
+    const auto goal_req = buildGoalRequestJson("Summarize GRAG", "sess-b");
+    if (goal_req.value("goal", "") != "Summarize GRAG"
+        || goal_req.value("session_id", "") != "sess-b") {
+        std::cerr << "testRemoteChatGoalMappingOffline: buildGoalRequestJson failed\n";
+        return false;
+    }
+
+    nlohmann::json good_chat = {{"response", "Hi there"}};
+    auto chat_ok = extractChatResponseText(good_chat);
+    if (!chat_ok.ok || chat_ok.text != "Hi there" || !chat_ok.error.empty()) {
+        std::cerr << "testRemoteChatGoalMappingOffline: extractChatResponseText good failed\n";
+        return false;
+    }
+
+    nlohmann::json missing_chat = {{"status", "ok"}};
+    auto chat_missing = extractChatResponseText(missing_chat);
+    if (!chat_missing.ok || !chat_missing.text.empty() || !chat_missing.error.empty()) {
+        std::cerr << "testRemoteChatGoalMappingOffline: missing response handling failed\n";
+        return false;
+    }
+
+    nlohmann::json bad_chat = {{"response", 42}};
+    auto chat_bad = extractChatResponseText(bad_chat);
+    if (chat_bad.ok || chat_bad.error.find("not a string") == std::string::npos) {
+        std::cerr << "testRemoteChatGoalMappingOffline: non-string response failed\n";
+        return false;
+    }
+
+    nlohmann::json good_goal = {{"status", "accepted"}, {"message", "queued"}};
+    auto goal_ok = checkGoalResponseBody(good_goal);
+    if (!goal_ok.ok || !goal_ok.warning.empty() || !goal_ok.error.empty()) {
+        std::cerr << "testRemoteChatGoalMappingOffline: checkGoalResponseBody good failed\n";
+        return false;
+    }
+
+    nlohmann::json sparse_goal = {{"plan_id", "p1"}};
+    auto goal_sparse = checkGoalResponseBody(sparse_goal);
+    if (!goal_sparse.ok || goal_sparse.warning.empty()) {
+        std::cerr << "testRemoteChatGoalMappingOffline: sparse goal warning failed\n";
+        return false;
+    }
+
+    return true;
+}
+
+/** Plan K4 — pure env selection only (no wx / Docker / engine / plugin). */
+static bool testThothEngineUrlSelectionOffline() {
+    using namespace ThothRemoteHttp;
+
+    if (resolveEngineBaseUrlFromRawEnvValue(nullptr).has_value()) {
+        std::cerr << "testThothEngineUrlSelectionOffline: null should be Local\n";
+        return false;
+    }
+    if (resolveEngineBaseUrlFromRawEnvValue("").has_value()) {
+        std::cerr << "testThothEngineUrlSelectionOffline: empty should be Local\n";
+        return false;
+    }
+    if (resolveEngineBaseUrlFromRawEnvValue("   \t\n").has_value()) {
+        std::cerr << "testThothEngineUrlSelectionOffline: whitespace should be Local\n";
+        return false;
+    }
+
+    auto url = resolveEngineBaseUrlFromRawEnvValue("  http://127.0.0.1:8090/  ");
+    if (!url.has_value() || *url != "http://127.0.0.1:8090") {
+        std::cerr << "testThothEngineUrlSelectionOffline: trim+normalize failed\n";
+        return false;
+    }
+    url = resolveEngineBaseUrlFromRawEnvValue("https://engine.example:9443");
+    if (!url.has_value() || *url != "https://engine.example:9443") {
+        std::cerr << "testThothEngineUrlSelectionOffline: bare remote URL mutated\n";
+        return false;
+    }
+
+    return true;
+}
+
+/** Plan K3 — offline SSE framing / mapping (no Docker / network). */
+static bool testRemoteSseUtilsOffline() {
+    using namespace ThothRemoteHttp;
+
+    if (!parseEventType("PLAN_CREATED").has_value()
+        || parseEventType("NOT_A_REAL_EVENT").has_value()) {
+        std::cerr << "testRemoteSseUtilsOffline: parseEventType failed\n";
+        return false;
+    }
+
+    nlohmann::json good = {
+        {"type", "STATE_CHANGED"},
+        {"session_id", "s1"},
+        {"plan_id", "p1"},
+        {"step_id", ""},
+        {"controller_state_name", "PLANNING"},
+        {"metadata", {{"k", 1}}},
+        {"extra_ignored", true}};
+    auto ev = engineEventJsonToControllerEvent(good);
+    if (!ev.has_value() || ev->type != EventType::STATE_CHANGED || ev->session_id != "s1"
+        || ev->controller_state_name != "PLANNING") {
+        std::cerr << "testRemoteSseUtilsOffline: engineEventJsonToControllerEvent failed\n";
+        return false;
+    }
+
+    nlohmann::json unknown = {{"type", "FUTURE_EVENT"}};
+    if (engineEventJsonToControllerEvent(unknown).has_value()) {
+        std::cerr << "testRemoteSseUtilsOffline: unknown type should be nullopt\n";
+        return false;
+    }
+
+    std::string buf = "event: engine\ndata: {\"type\":\"PLAN_CREATED\"}\n\n";
+    buf += "data: {\"type\":\"STEP_STARTED\""; // incomplete — must stay in buffer
+    auto frames = extractCompleteSseFrames(buf);
+    if (frames.size() != 1) {
+        std::cerr << "testRemoteSseUtilsOffline: expected 1 complete frame, got " << frames.size()
+                  << "\n";
+        return false;
+    }
+    if (buf.find("STEP_STARTED") == std::string::npos) {
+        std::cerr << "testRemoteSseUtilsOffline: incomplete frame was consumed\n";
+        return false;
+    }
+
+    auto payload = sseFrameDataPayload(frames[0]);
+    if (!payload.has_value() || payload->find("PLAN_CREATED") == std::string::npos) {
+        std::cerr << "testRemoteSseUtilsOffline: sseFrameDataPayload failed\n";
+        return false;
+    }
+
+    nlohmann::json caps_events = {
+        {"capabilities", nlohmann::json::array({"chat", "goals", "control", "events"})}};
+    nlohmann::json caps_no_events = {
+        {"capabilities", nlohmann::json::array({"chat", "goals", "control"})}};
+    if (!eventsCapabilityAllowsSse(nlohmann::json{{"status", "ready"}})
+        || !eventsCapabilityAllowsSse(caps_events)
+        || eventsCapabilityAllowsSse(caps_no_events)) {
+        std::cerr << "testRemoteSseUtilsOffline: eventsCapabilityAllowsSse failed\n";
+        return false;
+    }
+
+    if (kSseConnectTimeoutSec <= 0) {
+        std::cerr << "testRemoteSseUtilsOffline: kSseConnectTimeoutSec invalid\n";
+        return false;
+    }
+
+    return true;
+}
+
+#if THOTH_HAS_GUI
+/**
+ * Offline: empty URL → clear failure string, no throw, no network needed.
+ */
+static bool testRemoteAgentBackendEmptyUrlOffline() {
+    try {
+        RemoteAgentBackend remote("");
+        remote.setEventHandler([](const ControllerEvent&) {});
+        auto reply = remote.processInput("hello");
+        if (!reply.has_value()) {
+            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: expected engaged error string\n";
+            return false;
+        }
+        if (reply->find("[RemoteEngine]") == std::string::npos) {
+            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: unexpected reply: " << *reply
+                      << "\n";
+            return false;
+        }
+        // Cognate empties match MainFrame shapes.
+        if (!remote.getStrategies().is_array() || !remote.getGraphStats().is_object()) {
+            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: cognate shape mismatch\n";
+            return false;
+        }
+        if (remote.saveExperiment(nlohmann::json::object())) {
+            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: saveExperiment should be false\n";
+            return false;
+        }
+        // Dtor must stopSse (cancel→join) without hang.
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testRemoteAgentBackendEmptyUrlOffline: exception " << e.what() << "\n";
+        return false;
+    } catch (...) {
+        std::cerr << "testRemoteAgentBackendEmptyUrlOffline: unknown exception\n";
+        return false;
+    }
+}
+
+/**
+ * Opt-in live check: set THOTH_REMOTE_LIVE_URL=http://127.0.0.1:8090
+ * Skips (passes) when unset — not required for default suites / ctest -L pr.
+ */
+static bool testRemoteAgentBackendLiveOptIn() {
+    const char* url = std::getenv("THOTH_REMOTE_LIVE_URL");
+    if (!url || url[0] == '\0') {
+        return true;
+    }
+
+    try {
+        std::atomic<int> event_count{0};
+        RemoteAgentBackend remote(url);
+        remote.setEventHandler([&](const ControllerEvent&) { event_count.fetch_add(1); });
+        if (remote.baseUrl().empty()) {
+            std::cerr << "testRemoteAgentBackendLiveOptIn: empty normalized URL\n";
+            return false;
+        }
+        remote.setSessionId("k3-live-test");
+        auto reply = remote.processInput("/help");
+        if (!reply.has_value()) {
+            std::cerr << "testRemoteAgentBackendLiveOptIn: nullopt from processInput\n";
+            return false;
+        }
+        if (reply->find("[RemoteEngine]") == 0) {
+            std::cerr << "testRemoteAgentBackendLiveOptIn: engine error: " << *reply << "\n";
+            return false;
+        }
+        // Allow SSE connect; lifecycle events come mainly from goals.
+        remote.executeGoal("K3 live smoke: no-op goal for events");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        std::cout << "testRemoteAgentBackendLiveOptIn: chat OK (" << reply->size()
+                  << " bytes), sse_events=" << event_count.load() << "\n";
+        // Do not require events>0 (engine/LLM dependent); shutdown must not hang (dtor).
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testRemoteAgentBackendLiveOptIn: exception " << e.what() << "\n";
+        return false;
+    } catch (...) {
+        std::cerr << "testRemoteAgentBackendLiveOptIn: unknown exception\n";
+        return false;
+    }
+}
+#endif
 
 static bool expectEngineFutureError(std::future<std::string> future,
                                     Thoth::EngineErrorCode expected) {
@@ -4629,6 +4952,380 @@ static bool testE1RobustnessBenchmarkSmoke() {
 }
 
 /** E1-15: chat-RAG harness path — probe stack → retrieveRelevant → sidecar (no Ollama). */
+// Plan M G1 (R1) — helpers for grounding-floor tests.
+static CodeChunk makePlanMChunk(const std::string& file, const std::string& code) {
+    CodeChunk chunk;
+    chunk.fileName = file;
+    chunk.symbolName = "";
+    chunk.startLine = 1;
+    chunk.endLine = 1;
+    chunk.code = code;
+    return chunk;
+}
+
+static ScoreBreakdown makePlanMBreakdown(const CodeChunk& chunk, float finalScore) {
+    ScoreBreakdown sb;
+    sb.file_name = chunk.fileName;
+    sb.code_text = chunk.code;
+    sb.final_score = finalScore;
+    return sb;
+}
+
+// Plan M G1 / T3 — below-floor and missing/NaN scores must not ground (fail closed).
+static bool testPlanMGroundingFloorRejectsBelowThreshold() {
+    std::vector<CodeChunk> chunks = {
+        makePlanMChunk("SEED.md", "zero score candidate"),
+        makePlanMChunk("SEED.md", "tiny score candidate"),
+        makePlanMChunk("SEED.md", "candidate without breakdown"),
+    };
+    GragDiagnostics diagnostics;
+    diagnostics.breakdowns.push_back(makePlanMBreakdown(chunks[0], 0.0f));
+    diagnostics.breakdowns.push_back(makePlanMBreakdown(chunks[1], 0.005f));
+    // Intentionally no breakdown for chunks[2] → fail-closed reject.
+
+    const auto result = Thoth::ChatRetrieval::applyGroundingFloor(
+        chunks, diagnostics, Thoth::ChatRetrieval::kMinGroundingFinalScore);
+
+    if (result.stats.candidates_found != 3) {
+        std::cerr << "testPlanMGroundingFloorRejectsBelowThreshold: candidates_found "
+                  << result.stats.candidates_found << " != 3\n";
+        return false;
+    }
+    if (result.stats.candidates_passed_gate != 0 || !result.injectable.empty()) {
+        std::cerr << "testPlanMGroundingFloorRejectsBelowThreshold: expected 0 passed, got "
+                  << result.stats.candidates_passed_gate << "\n";
+        return false;
+    }
+    if (result.diagnostics.breakdowns.size() != 0) {
+        std::cerr << "testPlanMGroundingFloorRejectsBelowThreshold: filtered breakdowns not empty\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan M G1 — a candidate at/above the floor grounds; stats stay consistent.
+static bool testPlanMGroundingFloorPassesAboveThreshold() {
+    std::vector<CodeChunk> chunks = {
+        makePlanMChunk("GRAG.md", "meaningful grounded chunk"),
+        makePlanMChunk("SEED.md", "below floor chunk"),
+    };
+    GragDiagnostics diagnostics;
+    diagnostics.breakdowns.push_back(makePlanMBreakdown(chunks[0], 0.9f));
+    diagnostics.breakdowns.push_back(makePlanMBreakdown(chunks[1], 0.0f));
+
+    const auto result = Thoth::ChatRetrieval::applyGroundingFloor(
+        chunks, diagnostics, Thoth::ChatRetrieval::kMinGroundingFinalScore);
+
+    if (result.stats.candidates_found != 2 || result.stats.candidates_passed_gate != 1) {
+        std::cerr << "testPlanMGroundingFloorPassesAboveThreshold: found/passed "
+                  << result.stats.candidates_found << "/" << result.stats.candidates_passed_gate
+                  << " expected 2/1\n";
+        return false;
+    }
+    if (result.injectable.size() != 1 || result.injectable[0].code != "meaningful grounded chunk") {
+        std::cerr << "testPlanMGroundingFloorPassesAboveThreshold: wrong injectable chunk\n";
+        return false;
+    }
+    if (result.diagnostics.breakdowns.size() != 1 || result.diagnostics.final_scores.size() != 1) {
+        std::cerr << "testPlanMGroundingFloorPassesAboveThreshold: filtered diagnostics misaligned\n";
+        return false;
+    }
+    if (!result.stats.has_candidates || result.stats.max_score < 0.89f ||
+        result.stats.min_injected_score < 0.89f) {
+        std::cerr << "testPlanMGroundingFloorPassesAboveThreshold: score stats wrong (max "
+                  << result.stats.max_score << ", min_injected " << result.stats.min_injected_score
+                  << ")\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan M G1 / T5 (partial) — one CHAT_RAG_CONTEXT answers the four operator questions.
+static bool testPlanMGroundingTelemetryShape() {
+    auto assertBelowThreshold = [](const Thoth::ChatRagContextRecord& rec, const char* label) -> bool {
+        const auto json = Thoth::ChatRagLogger::contextToJson(rec);
+        for (const char* key : {"retrieval_ran", "retrieval_skip_reason", "candidates_found",
+                                "candidates_passed_gate", "grounding_decision_reason",
+                                "grounded", "grounding_mode", "max_score", "min_injected_score"}) {
+            if (!json.contains(key)) {
+                std::cerr << label << ": telemetry missing key " << key << "\n";
+                return false;
+            }
+        }
+        // grounded must agree with grounding_mode.
+        const bool grounded = json.value("grounded", false);
+        const std::string mode = json.value("grounding_mode", "");
+        const bool modeGrounded = (mode == "retrieved_context");
+        if (grounded != modeGrounded) {
+            std::cerr << label << ": grounded/grounding_mode inconsistent\n";
+            return false;
+        }
+        return true;
+    };
+
+    // Attempt without success (ran, candidates found, none passed).
+    Thoth::ChatRagContextRecord below;
+    below.grounding_mode = "no_retrieval_hits";
+    below.retrieval_ran = true;
+    below.retrieval_skip_reason = "none";
+    below.candidates_found = 3;
+    below.candidates_passed_gate = 0;
+    below.grounding_decision_reason = "below_threshold";
+    below.grounded = false;
+    below.has_candidate_scores = true;
+    below.max_score = 0.004f;
+    below.has_injected_scores = false;
+    if (!assertBelowThreshold(below, "testPlanMGroundingTelemetryShape[below]")) {
+        return false;
+    }
+    {
+        const auto json = Thoth::ChatRagLogger::contextToJson(below);
+        if (!json["min_injected_score"].is_null()) {
+            std::cerr << "testPlanMGroundingTelemetryShape[below]: min_injected_score should be null\n";
+            return false;
+        }
+        if (json["max_score"].is_null()) {
+            std::cerr << "testPlanMGroundingTelemetryShape[below]: max_score should be present\n";
+            return false;
+        }
+    }
+
+    // Success (ran, candidates passed gate).
+    Thoth::ChatRagContextRecord success;
+    success.grounding_mode = "retrieved_context";
+    success.retrieval_ran = true;
+    success.retrieval_skip_reason = "none";
+    success.candidates_found = 5;
+    success.candidates_passed_gate = 2;
+    success.grounding_decision_reason = "injected_meaningful_hits";
+    success.grounded = true;
+    success.has_candidate_scores = true;
+    success.max_score = 1.2f;
+    success.has_injected_scores = true;
+    success.min_injected_score = 0.6f;
+    if (!assertBelowThreshold(success, "testPlanMGroundingTelemetryShape[success]")) {
+        return false;
+    }
+    {
+        const auto json = Thoth::ChatRagLogger::contextToJson(success);
+        if (json["candidates_passed_gate"].get<int>() < 1) {
+            std::cerr << "testPlanMGroundingTelemetryShape[success]: passed gate < 1\n";
+            return false;
+        }
+        if (json["min_injected_score"].is_null()) {
+            std::cerr << "testPlanMGroundingTelemetryShape[success]: min_injected_score should be present\n";
+            return false;
+        }
+    }
+
+    // no_index path shape.
+    Thoth::ChatRagContextRecord noIndex;
+    noIndex.grounding_mode = "no_index";
+    noIndex.retrieval_ran = false;
+    noIndex.retrieval_skip_reason = "no_index";
+    noIndex.candidates_found = 0;
+    noIndex.candidates_passed_gate = 0;
+    noIndex.grounding_decision_reason = "empty_index";
+    noIndex.grounded = false;
+    {
+        const auto json = Thoth::ChatRagLogger::contextToJson(noIndex);
+        if (json.value("retrieval_ran", true) != false ||
+            json.value("retrieval_skip_reason", "") != "no_index" ||
+            json.value("grounding_decision_reason", "") != "empty_index") {
+            std::cerr << "testPlanMGroundingTelemetryShape[no_index]: wrong fields\n";
+            return false;
+        }
+        if (!json["max_score"].is_null() || !json["min_injected_score"].is_null()) {
+            std::cerr << "testPlanMGroundingTelemetryShape[no_index]: scores should be null\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Plan M G2 / T1 — exact-match greeting skip classifier.
+static bool testPlanMGreetingSkipClassifier() {
+    const std::vector<std::string> mustSkip = {
+        "hello",
+        "hello!",
+        "Hi.",
+        "thanks",
+        "good morning",
+    };
+    for (const auto& query : mustSkip) {
+        if (!Thoth::isGreetingSkipQuery(query)) {
+            std::cerr << "testPlanMGreetingSkipClassifier: expected skip for '" << query << "'\n";
+            return false;
+        }
+    }
+
+    const std::vector<std::string> mustNotSkip = {
+        "hello there",
+        "explain GRAG",
+        "what is GRAG",
+        "how does GRAG work",
+        "thanks why?",
+    };
+    for (const auto& query : mustNotSkip) {
+        if (Thoth::isGreetingSkipQuery(query)) {
+            std::cerr << "testPlanMGreetingSkipClassifier: unexpected skip for '" << query << "'\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Plan M G2 / T5 — greeting skips are ungrounded and disambiguated by skip reason.
+static bool testPlanMGreetingSkipTelemetryShape() {
+    Thoth::ChatRagContextRecord greeting;
+    greeting.grounding_mode = "no_retrieval_hits";
+    greeting.retrieval_ran = false;
+    greeting.retrieval_skip_reason = "greeting";
+    greeting.candidates_found = 0;
+    greeting.candidates_passed_gate = 0;
+    greeting.grounding_decision_reason = "greeting_skip";
+    greeting.grounded = false;
+
+    const auto json = Thoth::ChatRagLogger::contextToJson(greeting);
+    if (json.value("retrieval_ran", true) != false) {
+        std::cerr << "testPlanMGreetingSkipTelemetryShape: retrieval_ran should be false\n";
+        return false;
+    }
+    if (json.value("retrieval_skip_reason", "") != "greeting") {
+        std::cerr << "testPlanMGreetingSkipTelemetryShape: skip reason should be greeting\n";
+        return false;
+    }
+    if (json.value("grounding_decision_reason", "") != "greeting_skip") {
+        std::cerr << "testPlanMGreetingSkipTelemetryShape: decision reason should be greeting_skip\n";
+        return false;
+    }
+    if (json.value("grounding_mode", "") != "no_retrieval_hits") {
+        std::cerr << "testPlanMGreetingSkipTelemetryShape: mode should remain no_retrieval_hits\n";
+        return false;
+    }
+    if (json.value("grounded", true) != false) {
+        std::cerr << "testPlanMGreetingSkipTelemetryShape: grounded should be false\n";
+        return false;
+    }
+    if (json.value("candidates_found", -1) != 0 ||
+        json.value("candidates_passed_gate", -1) != 0) {
+        std::cerr << "testPlanMGreetingSkipTelemetryShape: candidate counts should be zero\n";
+        return false;
+    }
+    if (!json["max_score"].is_null() || !json["min_injected_score"].is_null()) {
+        std::cerr << "testPlanMGreetingSkipTelemetryShape: scores should be null\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan M G3 / T4 — cue B + anti-transcript; no open [Agent] slot.
+static bool testPlanMChatPromptCueAndAntiTranscript() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_plan_m_g3_prompt.db").string();
+    Memory memory(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto* idx = new IndexManager(engine.get());
+    RAGPipeline rag(std::move(engine), idx, &cfg, &memory);
+    PromptFactory factory(memory, rag);
+
+    const std::string input = "Explain GRAG.";
+    PromptFactory::ConversationBuildOptions ungrounded;
+    ungrounded.grounded = false;
+    const std::string plain = factory.buildChatPrompt(input, "", false, ungrounded, nullptr);
+
+    const std::string expectedEnding = Thoth::ChatPrompt::formatUserBlock(input);
+    if (plain.size() < expectedEnding.size() ||
+        plain.compare(plain.size() - expectedEnding.size(), expectedEnding.size(), expectedEnding) != 0) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: ungrounded prompt must end with cue B user block\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (plain.find("\n[Agent] ") != std::string::npos ||
+        (plain.size() >= 8 && plain.compare(plain.size() - 8, 8, "\n[Agent]") == 0)) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: open [Agent] cue must not appear\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (plain.find(Thoth::ChatPrompt::kAntiTranscriptRules) == std::string::npos) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: anti-transcript rules missing\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    // T2 offline — grounded assembly still injects RAG + grounding rules with cue B.
+    const std::string ragContextText =
+        "Document: GRAG.md\nLines: 1-3\nGRAG means Goal-Relative Adaptive Graph Retrieval.\n---\n";
+    PromptFactory::ConversationBuildOptions grounded;
+    grounded.grounded = true;
+    const std::string withRag =
+        factory.buildChatPrompt(input, ragContextText, false, grounded, nullptr);
+    if (withRag.find(Thoth::ChatPrompt::kRagContextHeader) == std::string::npos ||
+        withRag.find(Thoth::ChatPrompt::kGroundingRules) == std::string::npos ||
+        withRag.find(Thoth::ChatPrompt::kAntiTranscriptRules) == std::string::npos) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded path missing RAG/rules\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (withRag.size() < expectedEnding.size() ||
+        withRag.compare(withRag.size() - expectedEnding.size(), expectedEnding.size(), expectedEnding) !=
+            0) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded prompt must end with cue B\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (withRag.find("\n[Agent] ") != std::string::npos ||
+        (withRag.size() >= 8 && withRag.compare(withRag.size() - 8, 8, "\n[Agent]") == 0)) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded path still has [Agent] cue\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+// Plan M G3 — stop payload serialization (omit when empty; exact two stops when set).
+static bool testPlanMChatStopPayloadSerialization() {
+    Thoth::InferenceGenerateRequest emptyStops;
+    emptyStops.model = "test-model";
+    emptyStops.prompt = "hi";
+    emptyStops.max_tokens = 512;
+
+    const auto llamaEmpty = nlohmann::json::parse(Thoth::LlamaServerClient::serializeGeneratePayload(emptyStops));
+    const auto ollamaEmpty = nlohmann::json::parse(Thoth::OllamaClient::serializeGeneratePayload(emptyStops));
+    if (llamaEmpty.contains("stop") || ollamaEmpty.contains("stop")) {
+        std::cerr << "testPlanMChatStopPayloadSerialization: empty stops must omit stop key\n";
+        return false;
+    }
+
+    Thoth::InferenceGenerateRequest withStops = emptyStops;
+    withStops.stop_sequences = Thoth::ChatPrompt::chatStopSequences();
+    const auto llama = nlohmann::json::parse(Thoth::LlamaServerClient::serializeGeneratePayload(withStops));
+    const auto ollama = nlohmann::json::parse(Thoth::OllamaClient::serializeGeneratePayload(withStops));
+    if (!llama.contains("stop") || !ollama.contains("stop")) {
+        std::cerr << "testPlanMChatStopPayloadSerialization: stop key missing when sequences set\n";
+        return false;
+    }
+    if (!llama["stop"].is_array() || llama["stop"].size() != 2 ||
+        llama["stop"][0] != "\n[User]" || llama["stop"][1] != "\n[Agent]") {
+        std::cerr << "testPlanMChatStopPayloadSerialization: llama stop list wrong\n";
+        return false;
+    }
+    if (!ollama["stop"].is_array() || ollama["stop"].size() != 2 ||
+        ollama["stop"][0] != "\n[User]" || ollama["stop"][1] != "\n[Agent]") {
+        std::cerr << "testPlanMChatStopPayloadSerialization: ollama stop list wrong\n";
+        return false;
+    }
+    if (Thoth::ChatPrompt::kChatMaxTokens != 512) {
+        std::cerr << "testPlanMChatStopPayloadSerialization: kChatMaxTokens must be 512\n";
+        return false;
+    }
+    return true;
+}
+
 static bool testE1ChatRagBenchmarkSmoke() {
     const fs::path logsDir = makeTempPath("thoth_e1_chat_rag_logs");
     fs::create_directories(logsDir);
@@ -11888,6 +12585,10 @@ int main() {
             int failures = 0;
             if (!testEngineErrorSchema()) failures++;
             if (!testEngineSessionNormalization()) failures++;
+            if (!testRemoteHttpUtilsOffline()) failures++;
+            if (!testRemoteChatGoalMappingOffline()) failures++;
+            if (!testThothEngineUrlSelectionOffline()) failures++;
+            if (!testRemoteSseUtilsOffline()) failures++;
             if (!testEngineRuntimeValidation()) failures++;
             if (!testEngineEventBus()) failures++;
             if (!testEngineEventIntegration()) failures++;
@@ -12168,6 +12869,8 @@ int main() {
 #if defined(THOTH_GUI_TESTS_ONLY)
     int failures = 0;
     if (!testAgentInterfaceLifecycle()) failures++;
+    if (!testRemoteAgentBackendEmptyUrlOffline()) failures++;
+    if (!testRemoteAgentBackendLiveOptIn()) failures++;
     if (failures == 0) {
         std::cout << "All GUI tests passed.\n";
         return 0;
@@ -12182,6 +12885,10 @@ int main() {
     if (!testRuntimeBootstrapDiagnosticsDisabledByDefault()) failures++;
     if (!testEngineErrorSchema()) failures++;
     if (!testEngineSessionNormalization()) failures++;
+    if (!testRemoteHttpUtilsOffline()) failures++;
+    if (!testRemoteChatGoalMappingOffline()) failures++;
+    if (!testThothEngineUrlSelectionOffline()) failures++;
+    if (!testRemoteSseUtilsOffline()) failures++;
     if (!testEngineRuntimeValidation()) failures++;
     if (!testEngineRuntimeLazySessions()) failures++;
     if (!testEngineEventBus()) failures++;
@@ -12281,6 +12988,13 @@ int main() {
     if (!testE1ReflectionAbBenchmarkSmoke()) failures++;
     if (!testE1RobustnessBenchmarkSmoke()) failures++;
     if (!testE1ChatRagBenchmarkSmoke()) failures++;
+    if (!testPlanMGroundingFloorRejectsBelowThreshold()) failures++;
+    if (!testPlanMGroundingFloorPassesAboveThreshold()) failures++;
+    if (!testPlanMGroundingTelemetryShape()) failures++;
+    if (!testPlanMGreetingSkipClassifier()) failures++;
+    if (!testPlanMGreetingSkipTelemetryShape()) failures++;
+    if (!testPlanMChatPromptCueAndAntiTranscript()) failures++;
+    if (!testPlanMChatStopPayloadSerialization()) failures++;
     if (!testE1GragBenchmarkSmoke()) failures++;
     if (!testG1dFilterTrajectoryCases()) failures++;
     if (!testG1dArmConfigs()) failures++;

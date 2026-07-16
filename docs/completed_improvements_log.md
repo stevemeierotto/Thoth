@@ -1,8 +1,233 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-14 (R2: ExecutiveController join-outside-lock fix)
+Last updated: 2026-07-16 (Plan M ✅ Complete — G4 closeout)
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+
+### Chat RAG — Plan M ✅ Complete (G4 docs closeout) (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+**G4 is documentation/status only** — no runtime feature changes. Plan M marked **✅ Complete**.
+
+| Shipped (G0–G3) | Deferred (new plan required) |
+|-----------------|------------------------------|
+| G1: fail-closed floor `0.01f` on post-boost `final_score`; `grounded` ↔ post-floor injection; attempt/success telemetry | Stronger meaningful-retrieval threshold beyond R1 |
+| G2: exact-match greeting skip + `greeting_skip` telemetry | **Embedding / retrieval score analysis** (distributions, embed alignment, zero-score clusters) |
+| G3: cue B (no open `[Agent]`); anti-transcript; stops `\n[User]`/`\n[Agent]`; chat max tokens 512 | Optional live Compose/GGUF smoke (not a Plan M PR gate) |
+
+**Operator reading rule:** `grounding_mode=no_retrieval_hits` is ambiguous alone — pair with `retrieval_ran` + `retrieval_skip_reason` (see Plan M telemetry state table). Preserve Plan K/L.
+
+---
+
+### Chat RAG — Plan M G4 plan lock (docs closeout) 🔒 (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+G4 plan **locked** (not implemented). Docs/status closeout only: mark Plan M Complete; operator telemetry state table; name deferred stronger threshold + embedding/retrieval score analysis. No code, Compose, retrieval, greeting, or prompt changes. Awaits explicit Implement approval per AGENTS.md.
+
+---
+
+### Chat RAG — Plan M G3 (prompt cue B + stops) ✅ (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+Implemented and verified (`thoth-core-tests` green). Cue **B**: chat prompts end with `"[User] " + input + "\n"` (no open `[Agent]` slot). Never-truncated `kAntiTranscriptRules`. Chat generate uses stops `\n[User]` / `\n[Agent]` only and `kChatMaxTokens = 512`. Additive `stop_sequences` on Plan H request type (omit when empty) for Ollama + llama-server. Offline T4/T2 prompt + stop-payload tests. No retrieval/greeting/K/L/Docker changes. G4 not started.
+
+---
+
+### Chat RAG — Plan M G3 plan lock (prompt cue + stops) 🔒 (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+G3 plan **locked** (not implemented). Cue **B**: exact user block `"[User] " + user_input + "\n"` (no open `[Agent]` slot). Anti-transcript never-truncated rules. Stops: `\n[User]`, `\n[Agent]` only. Chat max tokens **512**. Additive optional `stop_sequences` on Plan H request type. No retrieval/greeting/K/L/Docker. Awaits explicit Implement approval per AGENTS.md.
+
+---
+
+### Chat RAG — Plan M G2 (greeting skip) ✅ (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+Implemented and verified (`thoth-core-tests` green). Exact-match `isGreetingSkipQuery` skips retrieve for locked greetings (`hello`, `hi`, `thanks`, …) after normalize; empty-index still reports `no_index` first. Skip telemetry: `retrieval_ran=false`, `retrieval_skip_reason=greeting`, `grounding_decision_reason=greeting_skip`, `grounding_mode=no_retrieval_hits` (skip reason disambiguates). Tests: must-skip / must-not-skip (T1) + skip telemetry shape (T5). G3 prompt/stops not started.
+
+---
+
+### Chat RAG — Plan M G2 plan lock (greeting skip) 🔒 (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+G2 plan was locked before implementation (exact-match primary; defensive interrogative wording; no new `grounding_mode`).
+
+---
+
+### Chat RAG — Plan M G1 (grounding floor + contract + telemetry) ✅ (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+Implemented R1 and verified (`thoth-core-tests` green). Chat `grounded=true` / `grounding_mode=retrieved_context` now require chunks that survive a **fail-closed floor** on post-boost `final_score` (`kMinGroundingFinalScore = 0.01f`, rejecting `0.0` / NaN / missing), not merely a non-empty nearest-neighbor string. `CHAT_RAG_CONTEXT` gains attempt-vs-success telemetry (`retrieval_ran`, `retrieval_skip_reason`, `candidates_found`, `candidates_passed_gate`, `grounding_decision_reason`, `grounded`, `max_score`/`min_injected_score`). New helper `applyGroundingFloor` returns injectable chunks + aligned diagnostics + stats. `no_index` path emits `empty_index`. Tests: T3 + pass + telemetry-shape. Greeting skip (G2), prompt/stops (G3), and any stronger threshold deferred as planned.
+
+---
+
+### Chat RAG — Plan M G0 (grounded retrieval gate lock) ✅ (2026-07-16)
+
+**Spec:** [`plan_m_grounded_retrieval_gate.md`](plan_m_grounded_retrieval_gate.md)
+
+Docs-only G0 complete: semantic contract (`grounded` ⇔ meaningful post-gate injection); operator telemetry field list (attempt vs success); locked score-gate default `kMinGroundingFinalScore = 0.01f`; locked Hello exact-phrase skip set + skip telemetry; tests T1–T5 reserved for G1+. Preserve Plan K/L. **No core/GUI code in G0.** Next: Implement G1.
+
+---
+
+### Containerization — Plan L complete ✅ Complete (L3 deferred) (2026-07-16)
+
+**Spec:** [`plan_l_workspace_corpus.md`](plan_l_workspace_corpus.md) · **Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 10 ✅
+
+Plan L completes the **engine workspace ownership model** and the **supported workflow** for an engine-owned RAG corpus. It does **not** alone claim to have fixed the post-migration remote GUI failure mode; that was addressed by **Phase 1 / Plan K** (timeouts, goal routing, honest remote capabilities) **together with** Plan L (ownership, seeding, verification).
+
+| Checkpoint | Result |
+|------------|--------|
+| L0 | O1 engine-owned corpus; `docker/seed_rag/` source; no host mirror / memory bind / Phase 3 / Cognate |
+| L1 | Seed whitelist + `seed-workspace.sh` (Compose-resolved `/workspace`) |
+| L2 | Sentinel + structured `chat_rag.jsonl` / decision-trace evidence checklist |
+| L3 | 🔒 Deferred — L1 reseed remains sole supported Compose corpus path |
+| L4 | Closeout + Final Architecture State |
+
+**Final architecture (remote):** GUI communicates with the engine over HTTP/SSE only (does not own or synchronize engine workspace). Engine owns `/workspace` (RAG corpus, `rag_index.bin`, `memory.db`, traces) and `/logs`. Supported workflow: `docker/seed_rag/` → `./docker/seed-workspace.sh` → engine workspace → L2 verification. This is the supported operational model for remote Compose / hybrid deployments.
+
+---
+
+### Containerization — Plan L L3 (dev-rag bind profile) 🔒 Deferred (2026-07-16)
+
+**Spec:** [`plan_l_workspace_corpus.md`](plan_l_workspace_corpus.md) § L3
+
+Locked decision: **Defer L3**. No `compose.dev-rag.yml`. L1 explicit reseeding remains the only supported Compose corpus path. Architectural justification (L1 vs file-level binds) recorded in Plan L; reopen only with a new Approve L3 lock.
+
+---
+
+### Containerization — Plan L L2 (retrieval evidence checklist) ✅ (2026-07-16)
+
+**Spec:** [`plan_l_workspace_corpus.md`](plan_l_workspace_corpus.md)
+
+Docs-only: operator checklist seed → restart → Evidence A/B/C. Sentinel `THOTH_PLAN_L_SEED_SENTINEL_7f3a9c2e` in `docker/seed_rag/HOWTO.md`. Evidence C prefers `/logs/chat_rag.jsonl` (`CHAT_RAG_*`, `grounding_mode`) and decision-trace stages over answer text. Documents unseeded `no_retrieval_hits` failure. No `SMOKE_SEED`, no smoke.sh / CI changes.
+
+**Files:** `docker/README.md`, `docker/seed_rag/HOWTO.md`, `docker/seed_rag/README.md`, `docs/GETTING_STARTED.md`, plan + log.
+
+---
+
+### Containerization — Plan L L1 (seed workspace RAG) ✅ (2026-07-15)
+
+**Spec:** [`plan_l_workspace_corpus.md`](plan_l_workspace_corpus.md) · **Roadmap:** Step 10
+
+- `docker/seed_rag/` curated whitelist: `GRAG.md`, `HOWTO.md`, `AGENTS.md`, `cognate.md` (+ README)
+- `docker/seed-workspace.sh`: fail if whitelist incomplete; ignore extras; seed via `docker compose run` into `thoth-engine:/workspace` (no hardcoded volume name; honors `COMPOSE_PROJECT_NAME`); clear `rag_index.bin`; never touch `memory.db`; `--dry-run` / `--no-restart`
+- Operator docs in `docker/README.md`
+
+**Later:** L2 ✅ · L3 deferred · L4 closeout ✅ · Phase 3 ingest / Cognate APIs still out of Plan L scope
+
+---
+
+### Containerization — Plan L L0 (engine workspace corpus lock) 🔒 (2026-07-15)
+
+**Spec:** [`plan_l_workspace_corpus.md`](plan_l_workspace_corpus.md) · **Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 10
+
+Docs-only lock: **O1 engine-owned** corpus on `thoth-workspace`; seed source = repo `docker/seed_rag/` (L1); no host `agent_workspace` mirror; no `memory.db` bind; no Phase 3 ingest; no Cognate APIs; optional dev-rag bind profile deferred until after L1. No scripts/seed files in L0.
+
+**L1 plan lock (2026-07-15):** Whitelist-only four files (fail if missing; ignore extras); Compose-resolved `thoth-engine:/workspace` volume (no hardcoded volume name; respect `COMPOSE_PROJECT_NAME`).
+
+---
+
+### Remote GUI — Phase 1 timeout / goal routing ✅ (2026-07-15)
+
+**Context:** Post–Plan K hybrid regression: `/v1/chat` client timeout (120s) vs engine LLM budget (600s); typed `goal:` blocked on chat path; host RAG/memory sync no-ops spammed while claiming success.
+
+**Changes (Plan K boundary preserved — no cognate/RAG ingest APIs):**
+- Remote HTTP chat/goals timeouts aligned with LLM budget (`kChatTimeoutSec=600`, `kGoalsTimeoutSec=1260`); override via `THOTH_REMOTE_HTTP_TIMEOUT_SECONDS`
+- Explicit `goal:` / `/goal` → `executeGoal` → `/v1/goals` (SSE for progress), not `/v1/chat`
+- `loadConversationMemory*` returns `false` in remote mode; MainFrame skips sync no-ops + honest status text
+- Offline test asserts timeout floor
+
+**Files:** `remote_agent_http_utils.h`, `remote_agent_backend.cpp`, `AgentInterface.*`, `MainFrame.*`, `tests/unit_tests.cpp`, `docker/README.md`
+
+**Deferred:** Phase 2 workspace ownership (arch review); Phase 3 RAG ingest API (separate plan)
+
+---
+
+### Containerization — Plan K complete (GUI API client) ✅ (2026-07-15)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 9 · **Spec:** [`plan_k_gui_api_client.md`](plan_k_gui_api_client.md) 🔒
+
+Transport-only GUI client: `IAgentBackend` + `LocalAgentBackend` (default in-process) + `RemoteAgentBackend` (libcurl HTTP/SSE). `THOTH_ENGINE_URL` selects Remote at `AgentInterface` startup only. Offline mapping/selection/SSE tests in `ctest -L pr`; manual smoke checklist in `docker/README.md`; opt-in live via `THOTH_REMOTE_LIVE_URL`. No EngineRuntime/GRAG/planner/tools/F–G contract changes; MainFrame unchanged.
+
+| Checkpoint | Summary |
+|------------|---------|
+| K1 | Backend abstraction; Local owns `BasicAgentPlugin` |
+| K2 | Remote HTTP (`/health`, `/ready`, chat, goals, control) |
+| K3 | SSE `/v1/events` thread + pure framing helpers |
+| K4 | `THOTH_ENGINE_URL` selection + hybrid docs |
+| K5 | Chat/goal mapping tests, smoke docs, audit, closeout |
+
+---
+
+### Containerization — Plan K K4 (THOTH_ENGINE_URL selection) ✅ (2026-07-15)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 9 · **Spec:** [`plan_k_gui_api_client.md`](plan_k_gui_api_client.md) 🔒
+
+`AgentInterface` selects Local vs Remote from `THOTH_ENGINE_URL` at startup (trim/normalize; one log line). Engine need not be up for GUI launch. Hybrid docs updated. Pure selection unit test; backends do not read env.
+
+---
+
+### Containerization — Plan K K3 (SSE client) ✅ (2026-07-15)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 9 · **Spec:** [`plan_k_gui_api_client.md`](plan_k_gui_api_client.md) 🔒
+
+Single joinable `GET /v1/events` SSE thread on `RemoteAgentBackend`; pure framing/mapping helpers; serial callbacks; cancel→abort→join shutdown; no reconnect. AgentInterface still Local-only until K4.
+
+**Files:** `includes/remote_agent_sse_utils.h`, `remote_agent_backend.*`, `tests/unit_tests.cpp` (`testRemoteSseUtilsOffline`).
+
+---
+
+### Containerization — Plan K K2 (RemoteAgentBackend) ✅ (2026-07-15)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 9 · **Spec:** [`plan_k_gui_api_client.md`](plan_k_gui_api_client.md) 🔒
+
+libcurl RemoteAgentBackend for F routes (`/health`, `/ready`, chat, goals, control). Ready gate cached; no retries; no `curl_global_*`. AgentInterface still Local-only until K4. Offline utils tests in `ctest -L pr`; live opt-in via `THOTH_REMOTE_LIVE_URL`.
+
+**Files:** `includes/remote_agent_http_utils.h`, `includes/remote_agent_backend.h`, `src/remote_agent_backend.cpp`, CMake/tests wiring.
+
+---
+
+### Containerization — Plan K K1 (backend abstraction) ✅ (2026-07-14)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 9 · **Spec:** [`plan_k_gui_api_client.md`](plan_k_gui_api_client.md) 🔒
+
+Internal `IAgentBackend` + `LocalAgentBackend` (exclusive `BasicAgentPlugin` owner). `AgentInterface` public API unchanged; always Local in K1; event bridge owned by AgentInterface. No remote/HTTP/`THOTH_ENGINE_URL` yet (K2+).
+
+**Files:** `includes/i_agent_backend.h`, `includes/local_agent_backend.h`, `src/local_agent_backend.cpp`, `AgentInterface.*`, GUI/tests CMake.
+
+---
+
+### Containerization — Plan J complete ✅ (2026-07-14)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 7 · **Spec:** [`plan_j_ci_compose.md`](plan_j_ci_compose.md) 🔒
+
+| Checkpoint | Work |
+|------------|------|
+| **J1** | `docker/compose.ci.yml` — `depends_on: !override []` (no llama health gate) |
+| **J2** | `SMOKE_MODE=ci` in `docker/smoke.sh` — engine-only packaging smoke |
+| **J3** | `.github/workflows/ci-compose.yml` — parallel to native `ctest -L pr` |
+| **J4** | Docs / roadmap / plan IMPLEMENTED |
+
+**Verification:** `SMOKE_MODE=ci ./docker/smoke.sh` → PASS (no GGUF)
+
+---
+
+### Containerization — Step 6 hybrid docs ✅ (2026-07-14)
+
+**Roadmap:** [`docker_roadmap.md`](docker_roadmap.md) Step 6
+
+Docs-only: host `curl`/scripts against Compose `thoth-engine` on `:8090`; clarify GUI still in-process until Plan K; persistence boundary between container volumes and host `agent_workspace/`.
+
+**Files:** `docker/README.md`, `docs/GETTING_STARTED.md`, `docs/docker_roadmap.md`
+
+---
 
 ### Repair — R2 test-suite-dev mutex UB ✅ (2026-07-14)
 
@@ -23,7 +248,7 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | Checkpoint | Work |
 |------------|------|
 | **I1** | `docker/Dockerfile.engine` — multi-stage Release headless build; `.dockerignore` |
-| **I2** | `llama-server` — `ghcr.io/ggerganov/llama.cpp:server-b4719` (pinned) |
+| **I2** | `llama-server` — `ghcr.io/ggml-org/llama.cpp:server` digest-pinned |
 | **I3** | `docker-compose.yml` — `thoth-net`, `depends_on: service_healthy`, `unless-stopped` |
 | **I4** | Env table, named volumes, `entrypoint-engine.sh` dir/bootstrap |
 | **I5** | Healthchecks both services; `stop_grace_period: 30s` |
