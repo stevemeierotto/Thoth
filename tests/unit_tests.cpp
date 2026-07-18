@@ -7,6 +7,7 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -66,6 +67,9 @@
 #include "chat_rag_observability.h"
 #include "chat_query_utils.h"
 #include "chat_prompt_config.h"
+#include "chat_generation_safety.h"
+#include "robustness_mock_responses.h"
+#include "grag_diagnostics_display.h"
 #include "prompt_factory.h"
 #include "llama_server_client.h"
 #include "ollama_client.h"
@@ -5287,12 +5291,13 @@ static bool testPlanMChatPromptCueAndAntiTranscript() {
     return true;
 }
 
-// Plan M G3 — stop payload serialization (omit when empty; exact two stops when set).
+// Plan M G3 / Plan N N3 — empty stops omit key; explicit non-empty still serialize (N-T7).
 static bool testPlanMChatStopPayloadSerialization() {
     Thoth::InferenceGenerateRequest emptyStops;
     emptyStops.model = "test-model";
     emptyStops.prompt = "hi";
     emptyStops.max_tokens = 512;
+    emptyStops.stop_sequences = Thoth::ChatPrompt::chatStopSequences();
 
     const auto llamaEmpty = nlohmann::json::parse(Thoth::LlamaServerClient::serializeGeneratePayload(emptyStops));
     const auto ollamaEmpty = nlohmann::json::parse(Thoth::OllamaClient::serializeGeneratePayload(emptyStops));
@@ -5301,8 +5306,9 @@ static bool testPlanMChatStopPayloadSerialization() {
         return false;
     }
 
+    // N-T7 — explicit non-empty stops (not chatStopSequences()) still serialize.
     Thoth::InferenceGenerateRequest withStops = emptyStops;
-    withStops.stop_sequences = Thoth::ChatPrompt::chatStopSequences();
+    withStops.stop_sequences = {Thoth::ChatPrompt::kChatStopUser, Thoth::ChatPrompt::kChatStopAgent};
     const auto llama = nlohmann::json::parse(Thoth::LlamaServerClient::serializeGeneratePayload(withStops));
     const auto ollama = nlohmann::json::parse(Thoth::OllamaClient::serializeGeneratePayload(withStops));
     if (!llama.contains("stop") || !ollama.contains("stop")) {
@@ -5310,17 +5316,692 @@ static bool testPlanMChatStopPayloadSerialization() {
         return false;
     }
     if (!llama["stop"].is_array() || llama["stop"].size() != 2 ||
-        llama["stop"][0] != "\n[User]" || llama["stop"][1] != "\n[Agent]") {
+        llama["stop"][0] != Thoth::ChatPrompt::kChatStopUser ||
+        llama["stop"][1] != Thoth::ChatPrompt::kChatStopAgent) {
         std::cerr << "testPlanMChatStopPayloadSerialization: llama stop list wrong\n";
         return false;
     }
     if (!ollama["stop"].is_array() || ollama["stop"].size() != 2 ||
-        ollama["stop"][0] != "\n[User]" || ollama["stop"][1] != "\n[Agent]") {
+        ollama["stop"][0] != Thoth::ChatPrompt::kChatStopUser ||
+        ollama["stop"][1] != Thoth::ChatPrompt::kChatStopAgent) {
         std::cerr << "testPlanMChatStopPayloadSerialization: ollama stop list wrong\n";
         return false;
     }
     if (Thoth::ChatPrompt::kChatMaxTokens != 512) {
         std::cerr << "testPlanMChatStopPayloadSerialization: kChatMaxTokens must be 512\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N3 / N-T6 — conversational stop policy is empty.
+static bool testPlanNChatStopSequencesEmpty() {
+    if (!Thoth::ChatPrompt::chatStopSequences().empty()) {
+        std::cerr << "testPlanNChatStopSequencesEmpty: chatStopSequences must return {}\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N3 / N-T6c — generateAndSanitizeChat with empty stops → used_stops=false.
+static bool testPlanNGenerateEmptyStops() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("Hello without stops.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.max_tokens = 64;
+    opts.stop_sequences = {};
+
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.provider_ok || out.used_stops || out.retried_without_stops || out.fallback_used) {
+        std::cerr << "testPlanNGenerateEmptyStops: flags wrong\n";
+        return false;
+    }
+    if (out.sanitized_text != "Hello without stops.") {
+        std::cerr << "testPlanNGenerateEmptyStops: unexpected text: " << out.sanitized_text << "\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N4 / N-T8 — range span uses source_span=; no Lines: header in prompt content.
+static bool testPlanNFormatChunkSourceSpanRange() {
+    CodeChunk chunk;
+    chunk.fileName = "/workspace/rag/GRAG.md";
+    chunk.startLine = 29;
+    chunk.endLine = 33;
+    chunk.code = "GRAG means Goal-Relative Adaptive Graph Retrieval.";
+
+    const std::string out = Thoth::ChatRetrieval::formatChunkForPrompt(chunk);
+    if (out.find("source_span=29-33") == std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanRange: missing source_span=29-33\n";
+        return false;
+    }
+    if (out.find("Lines:") != std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanRange: must not emit Lines: header\n";
+        return false;
+    }
+    if (out.find("Document: GRAG.md") == std::string::npos
+        || out.find("Goal-Relative Adaptive Graph Retrieval") == std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanRange: document/body missing\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N4 / N-T8b — single-line span has no range suffix.
+static bool testPlanNFormatChunkSourceSpanSingle() {
+    CodeChunk chunk;
+    chunk.fileName = "SEED.md";
+    chunk.startLine = 5;
+    chunk.endLine = 5;
+    chunk.code = "one line";
+
+    const std::string out = Thoth::ChatRetrieval::formatChunkForPrompt(chunk);
+    if (out.find("source_span=5\n") == std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanSingle: expected source_span=5\\n\n";
+        return false;
+    }
+    if (out.find("source_span=5-") != std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanSingle: must not emit range suffix\n";
+        return false;
+    }
+    if (out.find("Lines:") != std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanSingle: must not emit Lines: header\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N4 / N-T8c — startLine=0 omits span entirely.
+static bool testPlanNFormatChunkSourceSpanOmitted() {
+    CodeChunk chunk;
+    chunk.fileName = "SEED.md";
+    chunk.startLine = 0;
+    chunk.endLine = 10;
+    chunk.code = "no span";
+
+    const std::string out = Thoth::ChatRetrieval::formatChunkForPrompt(chunk);
+    if (out.find("source_span=") != std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanOmitted: source_span must be omitted\n";
+        return false;
+    }
+    if (out.find("Lines:") != std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanOmitted: must not emit Lines: header\n";
+        return false;
+    }
+    if (out.find("Document: SEED.md\nno span") == std::string::npos) {
+        std::cerr << "testPlanNFormatChunkSourceSpanOmitted: unexpected layout\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N6 / N-T9 — greeting-skip context telemetry unchanged; response has counts/flags only.
+static bool testPlanNGreetingSkipTelemetryUnchanged() {
+    Thoth::ChatRagContextRecord greeting;
+    greeting.grounding_mode = "no_retrieval_hits";
+    greeting.retrieval_ran = false;
+    greeting.retrieval_skip_reason = "greeting";
+    greeting.candidates_found = 0;
+    greeting.candidates_passed_gate = 0;
+    greeting.grounding_decision_reason = "greeting_skip";
+    greeting.grounded = false;
+
+    const auto ctx = Thoth::ChatRagLogger::contextToJson(greeting);
+    if (ctx.value("retrieval_skip_reason", "") != "greeting"
+        || ctx.value("grounding_decision_reason", "") != "greeting_skip"
+        || ctx.value("grounded", true) != false
+        || ctx.value("retrieval_ran", true) != false) {
+        std::cerr << "testPlanNGreetingSkipTelemetryUnchanged: greeting context shape regresssed\n";
+        return false;
+    }
+
+    Thoth::ChatRagResponseRecord response;
+    response.request_id = "n6-t9";
+    response.answer_chars = 12;
+    response.grounding_mode = "no_retrieval_hits";
+    response.fallback_used = true;
+    response.raw_answer_chars = 40;
+    response.sanitized_answer_chars = 12;
+    response.sanitize_reason = Thoth::ChatGeneration::kSanitizeTruncatedTranscriptMarker;
+    response.retried_without_stops = true;
+    response.used_stops = false;
+    response.provider_ok = true;
+    response.finish_reason = "length";
+
+    const auto resp = Thoth::ChatRagLogger::responseToJson(response);
+    if (!resp.contains("raw_answer_chars") || !resp.contains("sanitize_reason")
+        || !resp.contains("provider_ok") || resp.value("fallback_used", false) != true) {
+        std::cerr << "testPlanNGreetingSkipTelemetryUnchanged: missing gen diagnostic fields\n";
+        return false;
+    }
+    if (resp.contains("raw_text") || resp.contains("sanitized_text") || resp.contains("prompt")) {
+        std::cerr << "testPlanNGreetingSkipTelemetryUnchanged: telemetry must not dump raw text\n";
+        return false;
+    }
+    return true;
+}
+
+static int countAssistantMessages(const Memory& memory) {
+    int count = 0;
+    for (const auto& msg : memory.getConversation()) {
+        if (msg.value("role", "") == "assistant") {
+            ++count;
+        }
+    }
+    return count;
+}
+
+static std::string lastAssistantContent(const Memory& memory) {
+    std::string last;
+    for (const auto& msg : memory.getConversation()) {
+        if (msg.value("role", "") == "assistant") {
+            last = msg.value("content", "");
+        }
+    }
+    return last;
+}
+
+static bool hasTranscriptScaffoldMarkers(const std::string& text) {
+    return text.find("[User]") != std::string::npos
+        || text.find("[Agent]") != std::string::npos
+        || text.find("[RAG Context]") != std::string::npos
+        || text.find("📝") != std::string::npos;
+}
+
+// Plan N N6 / N-T10 — helper retry still yields one assistant memory write.
+static bool testPlanNMemoryOncePerTurn() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_n6_memory_once.db").string();
+    Memory memory(cfg);
+    memory.setActiveSessionId("n6-t10");
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager indexManager(engine.get());
+    RAGPipeline rag(std::move(engine), &indexManager, &cfg);
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    CommandProcessor cp(memory, rag, llm, &cfg);
+
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("Stable reply after retry.");
+
+    const std::string out = cp.processQuery("hi there");
+    Thoth::RobustnessMockResponses::reset();
+
+    if (out != "Stable reply after retry.") {
+        std::cerr << "testPlanNMemoryOncePerTurn: unexpected reply: " << out << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (countAssistantMessages(memory) != 1) {
+        std::cerr << "testPlanNMemoryOncePerTurn: expected one assistant memory write, got "
+                  << countAssistantMessages(memory) << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+// Plan N N6 / N-T11 — scaffold sanitized before memory; no Empty completion string.
+static bool testPlanNCpScaffoldSanitizedToMemory() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_n6_scaffold.db").string();
+    Memory memory(cfg);
+    memory.setActiveSessionId("n6-t11");
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager indexManager(engine.get());
+    RAGPipeline rag(std::move(engine), &indexManager, &cfg);
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    CommandProcessor cp(memory, rag, llm, &cfg);
+
+    const std::string scripted =
+        "Welcome.\n"
+        "\n"
+        "[User] How can I help?\n"
+        "[Agent] Let's start with a simple question.\n";
+
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push(scripted);
+
+    const std::string out = cp.processQuery("hello there");
+    Thoth::RobustnessMockResponses::reset();
+
+    if (out.find("Empty completion") != std::string::npos) {
+        std::cerr << "testPlanNCpScaffoldSanitizedToMemory: Empty completion leaked\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (hasTranscriptScaffoldMarkers(out)) {
+        std::cerr << "testPlanNCpScaffoldSanitizedToMemory: scaffold markers in return\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (countAssistantMessages(memory) != 1) {
+        std::cerr << "testPlanNCpScaffoldSanitizedToMemory: expected one assistant write\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    const std::string stored = lastAssistantContent(memory);
+    if (hasTranscriptScaffoldMarkers(stored)) {
+        std::cerr << "testPlanNCpScaffoldSanitizedToMemory: scaffold markers in stored memory\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+// Plan N N6 / N-T12 — Class A: no tool call, formatted error, one memory write.
+static bool testPlanNCpProviderFailure() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_n6_provider_fail.db").string();
+    Memory memory(cfg);
+    memory.setActiveSessionId("n6-t12");
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    IndexManager indexManager(engine.get());
+    RAGPipeline rag(std::move(engine), &indexManager, &cfg);
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    CommandProcessor cp(memory, rag, llm, &cfg);
+
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::pushFailure("connection failed");
+    CommandProcessor::resetProcessToolCallProbeForTest();
+
+    const std::string out = cp.processQuery("hello there");
+    Thoth::RobustnessMockResponses::reset();
+
+    if (CommandProcessor::processToolCallProbeCountForTest() != 0) {
+        std::cerr << "testPlanNCpProviderFailure: processToolCall must not be called\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (out.find("[Error]") == std::string::npos || out.find("connection failed") == std::string::npos) {
+        std::cerr << "testPlanNCpProviderFailure: expected CP-formatted error, got: " << out << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (countAssistantMessages(memory) != 1) {
+        std::cerr << "testPlanNCpProviderFailure: expected one assistant memory write\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    const std::string stored = lastAssistantContent(memory);
+    if (stored.find("[Error]") == std::string::npos || stored.find("connection failed") == std::string::npos) {
+        std::cerr << "testPlanNCpProviderFailure: memory missing formatted error\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+// Plan N5 / N5-T1 — final score 1.18 is float text, never percent.
+static bool testPlanN5FormatFinalScoreNoPercent() {
+    const std::string out = Thoth::GragDiagnosticsDisplay::formatFinalScoreLabel(1.18f);
+    if (out.find("1.18") == std::string::npos) {
+        std::cerr << "testPlanN5FormatFinalScoreNoPercent: expected 1.18 in '" << out << "'\n";
+        return false;
+    }
+    if (out.find('%') != std::string::npos) {
+        std::cerr << "testPlanN5FormatFinalScoreNoPercent: must not contain %\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N5 / N5-T2 — 0.42 is not 42%.
+static bool testPlanN5FormatFinalScoreSmall() {
+    const std::string out = Thoth::GragDiagnosticsDisplay::formatFinalScoreLabel(0.42f);
+    if (out.find("0.42") == std::string::npos) {
+        std::cerr << "testPlanN5FormatFinalScoreSmall: expected 0.42 in '" << out << "'\n";
+        return false;
+    }
+    if (out.find('%') != std::string::npos || out.find("42.0") != std::string::npos) {
+        std::cerr << "testPlanN5FormatFinalScoreSmall: must not look like a percent\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N5 / N5-T3 — missing / non-finite → N/A.
+static bool testPlanN5FormatFinalScoreMissing() {
+    if (Thoth::GragDiagnosticsDisplay::formatFinalScoreLabel(std::nullopt) != "N/A") {
+        std::cerr << "testPlanN5FormatFinalScoreMissing: nullopt must be N/A\n";
+        return false;
+    }
+    if (Thoth::GragDiagnosticsDisplay::formatFinalScoreLabel(
+            std::numeric_limits<float>::quiet_NaN()) != "N/A") {
+        std::cerr << "testPlanN5FormatFinalScoreMissing: NaN must be N/A\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N5 / N5-T4 — conversational: Alpha N/A, magnitude numeric, Mode Conversational.
+static bool testPlanN5ConversationalAlphaMode() {
+    if (!Thoth::GragDiagnosticsDisplay::isConversationalNoGoalDirection("greeting_skip")
+        || !Thoth::GragDiagnosticsDisplay::isConversationalNoGoalDirection("rag_hybrid")
+        || !Thoth::GragDiagnosticsDisplay::isConversationalNoGoalDirection("no_index")) {
+        std::cerr << "testPlanN5ConversationalAlphaMode: expected conversational modes\n";
+        return false;
+    }
+    if (Thoth::GragDiagnosticsDisplay::isConversationalNoGoalDirection("grag_hybrid")
+        || Thoth::GragDiagnosticsDisplay::isConversationalNoGoalDirection("grag_blended_hybrid")) {
+        std::cerr << "testPlanN5ConversationalAlphaMode: grag_* should use goal direction\n";
+        return false;
+    }
+
+    const std::string alpha =
+        Thoth::GragDiagnosticsDisplay::formatAlphaLabel(0.0f, true);
+    if (alpha.find("N/A") == std::string::npos || alpha == "Alpha: 0.00") {
+        std::cerr << "testPlanN5ConversationalAlphaMode: Alpha must be N/A, not bare 0.00\n";
+        return false;
+    }
+
+    const std::string mag = Thoth::GragDiagnosticsDisplay::formatMagnitudeLabel(0.0f);
+    if (mag.find("0.000") == std::string::npos) {
+        std::cerr << "testPlanN5ConversationalAlphaMode: magnitude must stay numeric\n";
+        return false;
+    }
+
+    if (Thoth::GragDiagnosticsDisplay::formatModeLabel("greeting_skip") != "Conversational"
+        || Thoth::GragDiagnosticsDisplay::formatModeLabel("rag_hybrid") != "Conversational") {
+        std::cerr << "testPlanN5ConversationalAlphaMode: Mode should be Conversational\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N5 / N5-T5 — unknown scoring mode: fallback formatting, no %.
+static bool testPlanN5UnknownScoringMode() {
+    const std::string mode = Thoth::GragDiagnosticsDisplay::formatModeLabel("future_mystery_mode");
+    if (mode != "future_mystery_mode") {
+        std::cerr << "testPlanN5UnknownScoringMode: expected raw fallback mode, got " << mode << "\n";
+        return false;
+    }
+    const std::string score = Thoth::GragDiagnosticsDisplay::formatFinalScoreLabel(2.03f);
+    if (score.find("2.03") == std::string::npos || score.find('%') != std::string::npos) {
+        std::cerr << "testPlanN5UnknownScoringMode: Final Score fallback formatting failed\n";
+        return false;
+    }
+    const bool conversational =
+        Thoth::GragDiagnosticsDisplay::isConversationalNoGoalDirection("future_mystery_mode");
+    const std::string alpha =
+        Thoth::GragDiagnosticsDisplay::formatAlphaLabel(0.0f, conversational);
+    if (alpha.find('%') != std::string::npos) {
+        std::cerr << "testPlanN5UnknownScoringMode: Alpha must not invent %\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N1 / N-T1 — transcript loop truncation; mid-sentence + JSON preserved.
+static bool testPlanNSanitizeTranscriptLoop() {
+    const std::string input =
+        "29. GRAG is the Goal-Relative Adaptive Graph Retrieval component of Thoth.\n"
+        "\n"
+        "[User] Explain GRAG to me.\n"
+        "[Agent] 29. GRAG is the Goal-Relative Adaptive Graph Retrieval component of Thoth.\n"
+        "[User] Explain GRAG to me.\n"
+        "[Agent] 29\n";
+
+    const auto out = Thoth::ChatGeneration::sanitizeChatAssistantText(input);
+    if (out.empty_after_sanitize) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: should not be empty\n";
+        return false;
+    }
+    if (out.sanitize_reason != Thoth::ChatGeneration::kSanitizeTruncatedTranscriptMarker) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: expected truncated_transcript_marker, got "
+                  << out.sanitize_reason << "\n";
+        return false;
+    }
+    if (out.sanitized_text.find("[User]") != std::string::npos
+        || out.sanitized_text.find("[Agent]") != std::string::npos) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: markers should be removed\n";
+        return false;
+    }
+    if (out.sanitized_text.find("Goal-Relative Adaptive Graph Retrieval") == std::string::npos) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: useful content lost\n";
+        return false;
+    }
+
+    const std::string midSentence =
+        "Ask the user for clarification. RAG retrieval is directional.\n";
+    const auto mid = Thoth::ChatGeneration::sanitizeChatAssistantText(midSentence);
+    if (mid.empty_after_sanitize
+        || mid.sanitized_text.find("the user") == std::string::npos
+        || mid.sanitized_text.find("RAG retrieval") == std::string::npos) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: mid-sentence User/RAG must be preserved\n";
+        return false;
+    }
+    if (mid.sanitize_reason != Thoth::ChatGeneration::kSanitizeNone) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: mid-sentence reason should be none\n";
+        return false;
+    }
+
+    const std::string jsonBody =
+        "{\"tool_call\":{\"name\":\"summarize_text\",\"input\":{\"text\":\"hello\"}}}";
+    const auto jsonOut = Thoth::ChatGeneration::sanitizeChatAssistantText(jsonBody);
+    if (jsonOut.sanitized_text != jsonBody
+        || jsonOut.sanitize_reason != Thoth::ChatGeneration::kSanitizeNone
+        || jsonOut.empty_after_sanitize) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: JSON tool body must be preserved\n";
+        return false;
+    }
+
+    const std::string withNote =
+        "Useful answer about GRAG.\n"
+        "📝[RAG Context]\n"
+        "[User] again\n";
+    const auto noteOut = Thoth::ChatGeneration::sanitizeChatAssistantText(withNote);
+    if (noteOut.sanitize_reason != Thoth::ChatGeneration::kSanitizeTruncatedTranscriptMarker
+        || noteOut.sanitized_text.find("Useful answer") == std::string::npos
+        || noteOut.sanitized_text.find("📝") != std::string::npos) {
+        std::cerr << "testPlanNSanitizeTranscriptLoop: 📝 marker truncate failed\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N1 / N-T2 — scaffold-only "[User] help".
+static bool testPlanNSanitizeUserHelpScaffold() {
+    const auto out = Thoth::ChatGeneration::sanitizeChatAssistantText("[User] help");
+    if (!out.empty_after_sanitize || !out.sanitized_text.empty()) {
+        std::cerr << "testPlanNSanitizeUserHelpScaffold: expected empty sanitized text\n";
+        return false;
+    }
+    if (out.sanitize_reason != Thoth::ChatGeneration::kSanitizeAllScaffold) {
+        std::cerr << "testPlanNSanitizeUserHelpScaffold: expected all_scaffold, got "
+                  << out.sanitize_reason << "\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N1 / N-T2b — leading scaffold then useful body.
+static bool testPlanNSanitizeLeadingScaffoldStrip() {
+    const std::string input = "[Agent] OK.\nGRAG is directional retrieval.\n";
+    const auto out = Thoth::ChatGeneration::sanitizeChatAssistantText(input);
+    if (out.empty_after_sanitize) {
+        std::cerr << "testPlanNSanitizeLeadingScaffoldStrip: should keep body\n";
+        return false;
+    }
+    if (out.sanitize_reason != Thoth::ChatGeneration::kSanitizeStrippedLeadingScaffold) {
+        std::cerr << "testPlanNSanitizeLeadingScaffoldStrip: expected stripped_leading_scaffold, got "
+                  << out.sanitize_reason << "\n";
+        return false;
+    }
+    if (out.sanitized_text.find("[Agent]") != std::string::npos) {
+        std::cerr << "testPlanNSanitizeLeadingScaffoldStrip: leading scaffold remains\n";
+        return false;
+    }
+    if (out.sanitized_text.find("GRAG is directional retrieval") == std::string::npos) {
+        std::cerr << "testPlanNSanitizeLeadingScaffoldStrip: body lost\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N2 / N-T3c — llama soft-empty parse + finish_reason.
+static bool testPlanNLlamaSoftEmptyParse() {
+    const auto generated = Thoth::LlamaServerClient::parseCompletionResponse(
+        R"({"choices":[{"text":"","finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}})");
+    if (!generated.ok || !generated.text.empty()) {
+        std::cerr << "testPlanNLlamaSoftEmptyParse: expected ok + empty text\n";
+        return false;
+    }
+    if (generated.finish_reason != "stop") {
+        std::cerr << "testPlanNLlamaSoftEmptyParse: finish_reason lost\n";
+        return false;
+    }
+    if (!generated.error.empty()) {
+        std::cerr << "testPlanNLlamaSoftEmptyParse: must not set Empty completion text error\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N2 / N-T5b — malformed JSON is hard failure.
+static bool testPlanNLlamaMalformedJson() {
+    const auto generated = Thoth::LlamaServerClient::parseCompletionResponse("{not-json");
+    if (generated.ok) {
+        std::cerr << "testPlanNLlamaMalformedJson: expected ok=false\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N2 / N-T3 — provider empty then retry success.
+static bool testPlanNGenerateRetrySuccess() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("Hello from retry.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.max_tokens = 64;
+    opts.stop_sequences = {"\n[User]"};
+    opts.use_greeting_fallback = false;
+
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.provider_ok || !out.retried_without_stops || out.fallback_used) {
+        std::cerr << "testPlanNGenerateRetrySuccess: flags wrong\n";
+        return false;
+    }
+    if (out.sanitized_text != "Hello from retry.") {
+        std::cerr << "testPlanNGenerateRetrySuccess: unexpected text: " << out.sanitized_text
+                  << "\n";
+        return false;
+    }
+    if (out.sanitized_text.find("Empty completion") != std::string::npos
+        || out.provider_error.find("Empty completion") != std::string::npos) {
+        std::cerr << "testPlanNGenerateRetrySuccess: Empty completion leaked\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N2 / N-T3b — sanitize-empty then retry success.
+static bool testPlanNGenerateSanitizeEmptyThenRetry() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("[User] help");
+    Thoth::RobustnessMockResponses::push("Useful answer.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.max_tokens = 64;
+
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.retried_without_stops || out.fallback_used || out.sanitized_text != "Useful answer.") {
+        std::cerr << "testPlanNGenerateSanitizeEmptyThenRetry: failed\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N2 / N-T4 — empty then empty → fallback.
+static bool testPlanNGenerateFallback() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.use_greeting_fallback = true;
+
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.fallback_used || !out.retried_without_stops) {
+        std::cerr << "testPlanNGenerateFallback: expected fallback after retry\n";
+        return false;
+    }
+    if (out.sanitized_text != Thoth::ChatGeneration::kFallbackGreeting) {
+        std::cerr << "testPlanNGenerateFallback: wrong fallback text\n";
+        return false;
+    }
+    if (out.sanitized_text.find("Empty completion") != std::string::npos) {
+        std::cerr << "testPlanNGenerateFallback: Empty completion in result\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N2 / N-T5 — transport failure, no retry.
+static bool testPlanNGenerateTransportFailure() {
+    Thoth::RobustnessMockResponses::reset();
+    setenv("THOTH_MOCK_LLM_UNAVAILABLE", "1", 1);
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+
+    unsetenv("THOTH_MOCK_LLM_UNAVAILABLE");
+    Thoth::RobustnessMockResponses::reset();
+
+    if (out.provider_ok || out.retried_without_stops || out.fallback_used) {
+        std::cerr << "testPlanNGenerateTransportFailure: flags wrong\n";
+        return false;
+    }
+    if (out.sanitized_text.empty() == false) {
+        std::cerr << "testPlanNGenerateTransportFailure: sanitized_text must be empty\n";
+        return false;
+    }
+    if (out.provider_error.empty()) {
+        std::cerr << "testPlanNGenerateTransportFailure: provider_error missing\n";
+        return false;
+    }
+    return true;
+}
+
+// Plan N N2 / N-T6b — query() compatibility mapping.
+static bool testPlanNQueryCompatibility() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    const std::string empty = llm.query("hello", 32, {});
+    if (!empty.empty()) {
+        std::cerr << "testPlanNQueryCompatibility: soft-empty should return empty string\n";
+        Thoth::RobustnessMockResponses::reset();
+        return false;
+    }
+
+    setenv("THOTH_MOCK_LLM_UNAVAILABLE", "1", 1);
+    const std::string err = llm.query("hello", 32, {});
+    unsetenv("THOTH_MOCK_LLM_UNAVAILABLE");
+    Thoth::RobustnessMockResponses::reset();
+
+    if (err.find("[Error]") == std::string::npos) {
+        std::cerr << "testPlanNQueryCompatibility: hard fail should keep [Error] prefix\n";
         return false;
     }
     return true;
@@ -12995,6 +13676,30 @@ int main() {
     if (!testPlanMGreetingSkipTelemetryShape()) failures++;
     if (!testPlanMChatPromptCueAndAntiTranscript()) failures++;
     if (!testPlanMChatStopPayloadSerialization()) failures++;
+    if (!testPlanNChatStopSequencesEmpty()) failures++;
+    if (!testPlanNGenerateEmptyStops()) failures++;
+    if (!testPlanNFormatChunkSourceSpanRange()) failures++;
+    if (!testPlanNFormatChunkSourceSpanSingle()) failures++;
+    if (!testPlanNFormatChunkSourceSpanOmitted()) failures++;
+    if (!testPlanNGreetingSkipTelemetryUnchanged()) failures++;
+    if (!testPlanNMemoryOncePerTurn()) failures++;
+    if (!testPlanNCpScaffoldSanitizedToMemory()) failures++;
+    if (!testPlanNCpProviderFailure()) failures++;
+    if (!testPlanN5FormatFinalScoreNoPercent()) failures++;
+    if (!testPlanN5FormatFinalScoreSmall()) failures++;
+    if (!testPlanN5FormatFinalScoreMissing()) failures++;
+    if (!testPlanN5ConversationalAlphaMode()) failures++;
+    if (!testPlanN5UnknownScoringMode()) failures++;
+    if (!testPlanNSanitizeTranscriptLoop()) failures++;
+    if (!testPlanNSanitizeUserHelpScaffold()) failures++;
+    if (!testPlanNSanitizeLeadingScaffoldStrip()) failures++;
+    if (!testPlanNLlamaSoftEmptyParse()) failures++;
+    if (!testPlanNLlamaMalformedJson()) failures++;
+    if (!testPlanNGenerateRetrySuccess()) failures++;
+    if (!testPlanNGenerateSanitizeEmptyThenRetry()) failures++;
+    if (!testPlanNGenerateFallback()) failures++;
+    if (!testPlanNGenerateTransportFailure()) failures++;
+    if (!testPlanNQueryCompatibility()) failures++;
     if (!testE1GragBenchmarkSmoke()) failures++;
     if (!testG1dFilterTrajectoryCases()) failures++;
     if (!testG1dArmConfigs()) failures++;

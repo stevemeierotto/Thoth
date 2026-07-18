@@ -649,6 +649,14 @@ prompt: anti-transcript + cue B ("[User] " + input + "\n") + stops {\n[User], \n
 2. Embedding / retrieval score analysis (distributions, embed alignment, zero-score clusters)  
 3. Optional live Compose/GGUF smoke (not a Plan M PR gate)
 
+### Plan N revision (conversational stops) — 2026-07-17
+
+**Locked supersession for conversational chat only:** Plan M G3’s transcript stop list (`\n[User]`, `\n[Agent]`) is **withdrawn from the chat path** by [Plan N — Chat Generation Safety](plan_n_chat_generation_safety.md) (Option A). Live Compose/GGUF evidence showed those stops can produce empty completions and still miss no-newline scaffolding (e.g. `[User] help`).
+
+**Unchanged from Plan M G3:** cue B (no open `[Agent]`), anti-transcript rules, `kChatMaxTokens = 512`, grounding G1/G2.
+
+**Preserved:** `InferenceGenerateRequest::stop_sequences` and provider serializers for **non-chat** callers. See Plan N L6.
+
 ---
 
 ## Priority work (historical — delivered)
@@ -716,14 +724,16 @@ Each: **Plan → Review → Approve → Implement → Verify → STOP** unless a
 2. GRAG/corpus query → grounded; telemetry shows ran + passed ≥1.  
 3. Operators distinguish **attempt** vs **successful grounding** from telemetry alone (**G1+**).  
 4. Fake `[User]`/`[Agent]`/`📝[RAG Context]` scripts suppressed by prompt/stops (**G3**).  
+   - **Post-ship note:** conversational transcript **stops** superseded by Plan N (sanitize + empty-stop chat policy); cue B + anti-transcript remain.  
 5. Plan K/L unchanged.
 
 ---
 
 ## Current gate
 
-**Plan M ✅ Complete (G4 docs closeout 2026-07-16).**
+**Plan M ✅ Complete (G4 docs closeout 2026-07-16).**  
+**Follow-on:** [Plan N](plan_n_chat_generation_safety.md) 🔒 Locked 2026-07-17 (chat generation safety).
 
-No further Plan M checkpoints. Runtime changes (stronger threshold, embedding/score analysis, etc.) require a **new** plan and explicit approval.
+No further Plan M checkpoints. Runtime changes (stronger threshold, embedding/score analysis, diagnostics UI, etc.) require a **new** plan and explicit approval.
 
 STATUS: PLAN M COMPLETE

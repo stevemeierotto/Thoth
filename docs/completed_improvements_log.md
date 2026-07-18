@@ -1,8 +1,118 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-16 (Plan M ✅ Complete — G4 closeout)
+Last updated: 2026-07-18 (Plan N5 ✅ Implemented — GRAG diagnostics display honesty)
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+
+### Chat — Plan N5 (GRAG diagnostics display honesty) ✅ (2026-07-18)
+
+**Spec:** [`plan_n5_grag_diagnostics_display.md`](plan_n5_grag_diagnostics_display.md)
+
+Column **Final Score** as plain floats (no `%`); Alpha `N/A (chat)` when no goal embedding; magnitude stays numeric; **Mode** maps `scoring_type` (Conversational / GRAG / …). Pure helpers in `includes/grag_diagnostics_display.h`; panel wiring in `GragDiagnosticsPanel.cpp`. No engine/payload changes. Tests N5-T1–T5. `thoth-core-tests` green; `thoth-control-panel` builds.
+
+---
+
+### Chat — Plan N5 lock (GRAG diagnostics display honesty) 🔒 (2026-07-18)
+
+**Spec:** [`plan_n5_grag_diagnostics_display.md`](plan_n5_grag_diagnostics_display.md)
+
+N5 plan **locked** (not implemented). Column **Final Score** as plain float (no `%`); Alpha `N/A` when no goal embedding; keep magnitude numeric + Mode for interpretation; **no engine / payload changes**; no bars/gauges/normalization/probability. Tests N5-T1–T5 (incl. `%` absence + unknown mode). Awaits explicit **Implement** per AGENTS.md.
+
+---
+
+### Chat — Plan N N6 (wire chat generation safety) ✅ (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Wire chat generation safety (N6)
+
+`CommandProcessor::runConversationalGenerate` wraps all three chat arms → `generateAndSanitizeChat`. Class A: `formatProviderError`, no `processToolCall`, one memory write. Telemetry: flags/reasons/char counts only. Tests N-T9–T12. `chat_generation_safety.*` untouched. No conversational `llm.query(` in CP. `thoth-core-tests`: all unit tests passed.
+
+**Live note:** Rebuild Docker engine image before retesting GUI `hello` — sanitize/fallback now on the live path.
+
+---
+
+### Chat — Plan N N6 lock (wire chat generation safety) 🔒 (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Wire chat generation safety (N6)
+
+N6 plan **locked** (not implemented). Required one CP conversational wrapper for all three arms; Class A via `formatProviderError` (no tools); telemetry flags/reasons/counts only (no raw text); tests N-T9–T12 (N-T11: no scaffold in stored memory; N-T12: provider failure). `chat_generation_safety.*` untouched / N2 not reopened. Awaits explicit **Implement** per AGENTS.md.
+
+---
+
+### Chat — Plan N N4 (source_span prompt header) ✅ (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Prompt-control header (N4)
+
+`formatChunkForPrompt` emits `source_span=` (range / single / omit when `startLine<=0`); no `Lines:` as LLM-facing header. Plan M cue fixture untouched. Tests N-T8, N-T8b, N-T8c. No CP / RAG / grounding changes. `thoth-core-tests`: all unit tests passed.
+
+---
+
+### Chat — Plan N N4 lock (source_span prompt header) 🔒 (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Prompt-control header (N4)
+
+N4 plan **locked** (not implemented). `formatChunkForPrompt` → `source_span=`; required **N-T8 / N-T8b / N-T8c**; verify no `Lines:` emit as prompt content (not whole-file grep); Plan M fixture untouched; non-goals: no citation guarantee, no RAG/ranking/grounding/citation changes. Awaits explicit **Implement** per AGENTS.md.
+
+---
+
+### Chat — Plan N N3 (conversational empty stops) ✅ (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Conversational stop policy (N3)
+
+`chatStopSequences()` → `{}` (L6); `kChatStopUser` / `kChatStopAgent` retained (tests / explicit non-chat). Three CP arms still call the policy function (empty stops on live string `query` path). Plan M stop test revised for empty omit + explicit N-T7 serialize. Tests N-T6, N-T6c, N-T7. No CP→`generateAndSanitizeChat` migration (N6). `thoth-core-tests`: all unit tests passed.
+
+**Live-path note:** N3 removes transcript stops from chat generate payloads. Full sanitize / retry / fallback still requires **N6**. Unchanged scaffolding after N3 alone is not necessarily an N3 failure.
+
+---
+
+### Chat — Plan N N3 lock (conversational empty stops) 🔒 (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Conversational stop policy (N3)
+
+N3 plan **locked** (not implemented). `chatStopSequences()` → `{}`; keep `kChatStop*` unless audit shows zero refs; three CP arms keep calling the policy function; no CP→helper migration; revise Plan M stop test only; **N-T6c required**. Awaits explicit **Implement** per AGENTS.md.
+
+---
+
+### Chat — Plan N N2 (structured generation + empty handling) ✅ (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Structured generation + empty handling (N2)
+
+Soft-empty llama parse (`ok=true` + empty text); `finish_reason` / Ollama `done_reason`; `LLMInterface::queryDetailed` + compatible `query()`; `generateAndSanitizeChat` (sanitize, one stop-free retry, L8 fallback, no UI error strings in result). Tests N-T3–T5 / T3b / T3c / T5b / T6b. No CommandProcessor migration (N6). `thoth-core-tests`: all unit tests passed.
+
+**Explicit verification (do not misread as failure):** N2 **capability exists** (`queryDetailed` + `generateAndSanitizeChat`) but is **not yet the live chat path**. `CommandProcessor` still calls string `llm.query(...)` in all three arms. GUI/`hello` behavior will **not** fully change until **N6** wires the helper. Soft-empty via `query()` may only turn some llama empty completions into `""` instead of `Empty completion text` — that is interim, not full Plan N chat safety. If `hello` still looks wrong after N2, the pipeline migration has simply not happened yet.
+
+---
+
+### Chat — Plan N N2 lock (structured generation + empty handling) 🔒 (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Structured generation + empty handling (N2)
+
+N2 plan **locked** (not implemented). Soft-empty llama parse; `finish_reason`; `queryDetailed` + compatible `query()`; `generateAndSanitizeChat` with A–D taxonomy, one stop-free retry, L8 fallback; no UI strings in `ChatGenerationResult`; no CommandProcessor migration. Tests N-T3–T5 / T3b / T3c / T5b / T6b. Awaits explicit **Implement** approval per AGENTS.md (Plan → Review → Refine → Lock → Implement → Verify).
+
+---
+
+### Chat — Plan N N1 (helper foundation) ✅ (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Sanitization (N1)
+
+Pure chat safety seam: `SanitizeOutcome` + `sanitizeChatAssistantText` + `ChatGenerationResult` defaults in `chat_generation_safety.{h,cpp}`; CMake registration; unit tests N-T1 / N-T2 / N-T2b. No CommandProcessor, LLMInterface, inference client, retry, stops, or telemetry wiring. Runtime chat behavior unchanged. `thoth-core-tests`: all unit tests passed.
+
+---
+
+### Chat — Plan N N1 lock (helper foundation) 🔒 (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md) § Sanitization (N1)
+
+N1 plan **locked** (not implemented). Pure `SanitizeOutcome` + `sanitizeChatAssistantText` + `ChatGenerationResult` defaults; CMake source registration; tests N-T1 / N-T2 / N-T2b. No CommandProcessor, LLMInterface, inference client, retry, stops, or telemetry wiring. No runtime chat behavior change. Awaits explicit Implement approval per AGENTS.md.
+
+---
+
+### Chat — Plan N N0 lock (Chat Generation Safety) 🔒 (2026-07-17)
+
+**Spec:** [`plan_n_chat_generation_safety.md`](plan_n_chat_generation_safety.md)
+
+Plan N **locked** (N0 documentation only). One conversational generation boundary (`generateAndSanitizeChat`); soft provider-empty; sanitize-before-persist; Option A (no transcript stops on chat); N4 `source_span=` prompt-control; N5 diagnostics UI deferred. Revises Plan M G3 conversational stops only. Awaits explicit N1+ Implement approval per AGENTS.md.
+
+---
 
 ### Chat RAG — Plan M ✅ Complete (G4 docs closeout) (2026-07-16)
 
@@ -15,6 +125,8 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | G1: fail-closed floor `0.01f` on post-boost `final_score`; `grounded` ↔ post-floor injection; attempt/success telemetry | Stronger meaningful-retrieval threshold beyond R1 |
 | G2: exact-match greeting skip + `greeting_skip` telemetry | **Embedding / retrieval score analysis** (distributions, embed alignment, zero-score clusters) |
 | G3: cue B (no open `[Agent]`); anti-transcript; stops `\n[User]`/`\n[Agent]`; chat max tokens 512 | Optional live Compose/GGUF smoke (not a Plan M PR gate) |
+
+**Post-complete revision:** Conversational transcript stops superseded by [Plan N](plan_n_chat_generation_safety.md) (2026-07-17). Cue B + anti-transcript + 512 remain.
 
 **Operator reading rule:** `grounding_mode=no_retrieval_hits` is ambiguous alone — pair with `retrieval_ran` + `retrieval_skip_reason` (see Plan M telemetry state table). Preserve Plan K/L.
 

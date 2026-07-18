@@ -1,10 +1,11 @@
 /*
  * Copyright (c) 2025 Steve Meierotto
  * 
- * Thoth — GRAG Diagnostics Panel Implementation Phase 2.2
+ * Thoth — GRAG Diagnostics Panel Implementation Phase 2.2 / Plan N5
  */
 
 #include "GragDiagnosticsPanel.h"
+#include "grag_diagnostics_display.h"
 #include <wx/sizer.h>
 #include <wx/statline.h>
 #include <iomanip>
@@ -26,19 +27,19 @@ void GragDiagnosticsPanel::InitializeUI() {
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Directional Strength (Alpha):"), 0, wxALL, 5);
     m_alphaGauge = new wxGauge(this, wxID_ANY, 100, wxDefaultPosition, wxDefaultSize, wxGA_HORIZONTAL);
     mainSizer->Add(m_alphaGauge, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-    m_alphaLabel = new wxStaticText(this, wxID_ANY, "Alpha: 0.00");
+    m_alphaLabel = new wxStaticText(this, wxID_ANY, "N/A (chat)");
     mainSizer->Add(m_alphaLabel, 0, wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
     mainSizer->Add(new wxStaticLine(this), 0, wxEXPAND | wxALL, 5);
 
-    // Magnitude and Scoring Type
+    // Magnitude and Mode (Plan N5 — Mode carries interpretation; magnitude stays numeric)
     wxFlexGridSizer* infoSizer = new wxFlexGridSizer(2, 5, 10);
     infoSizer->Add(new wxStaticText(this, wxID_ANY, "Magnitude ||G-C||:"), 0, wxALIGN_CENTER_VERTICAL);
     m_magnitudeValue = new wxStaticText(this, wxID_ANY, "0.000");
     infoSizer->Add(m_magnitudeValue, 0, wxALIGN_CENTER_VERTICAL);
 
-    infoSizer->Add(new wxStaticText(this, wxID_ANY, "Scoring Type:"), 0, wxALIGN_CENTER_VERTICAL);
-    m_scoringTypeValue = new wxStaticText(this, wxID_ANY, "N/A");
+    infoSizer->Add(new wxStaticText(this, wxID_ANY, "Mode:"), 0, wxALIGN_CENTER_VERTICAL);
+    m_scoringTypeValue = new wxStaticText(this, wxID_ANY, "Conversational");
     infoSizer->Add(m_scoringTypeValue, 0, wxALIGN_CENTER_VERTICAL);
     mainSizer->Add(infoSizer, 0, wxALL, 10);
 
@@ -48,7 +49,7 @@ void GragDiagnosticsPanel::InitializeUI() {
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Retrieved Chunks:"), 0, wxALL, 5);
     m_chunksList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
     m_chunksList->SetMinSize(wxSize(-1, 60));
-    m_chunksList->AppendTextColumn("Score", wxDATAVIEW_CELL_INERT, 80);
+    m_chunksList->AppendTextColumn("Final Score", wxDATAVIEW_CELL_INERT, 100);
     m_chunksList->AppendTextColumn("File", wxDATAVIEW_CELL_INERT, 150);
     m_chunksList->AppendTextColumn("Symbol", wxDATAVIEW_CELL_INERT, 150);
     mainSizer->Add(m_chunksList, 1, wxEXPAND | wxALL, 5);
@@ -68,16 +69,6 @@ static std::optional<float> ExtractFinalScore(const nlohmann::json& chunk) {
         }
     } catch (...) {}
     return std::nullopt;
-}
-
-static std::string FormatScoreLabel(std::optional<float> score) {
-    if (!score.has_value() || !std::isfinite(score.value())) {
-        return "N/A";
-    }
-
-    std::stringstream ss;
-    ss << std::fixed << std::setprecision(1) << (score.value() * 100.0f) << "%";
-    return ss.str();
 }
 
 static nlohmann::json ExtractDiagnosticsPayload(const nlohmann::json& metadata) {
@@ -108,26 +99,35 @@ void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
         const nlohmann::json diagnostics = ExtractDiagnosticsPayload(metadata);
         
         if (diagnostics.is_object()) {
+            std::string scoringType;
+            if (diagnostics.contains("scoring_type") && diagnostics["scoring_type"].is_string()) {
+                scoringType = diagnostics["scoring_type"].get<std::string>();
+            }
+
+            const bool conversational =
+                Thoth::GragDiagnosticsDisplay::isConversationalNoGoalDirection(scoringType);
+
+            float alpha = 0.0f;
             if (diagnostics.contains("alpha") && diagnostics["alpha"].is_number()) {
-                float alpha = diagnostics["alpha"].get<float>();
+                alpha = diagnostics["alpha"].get<float>();
+            }
+
+            m_alphaLabel->SetLabel(
+                Thoth::GragDiagnosticsDisplay::formatAlphaLabel(alpha, conversational));
+            if (conversational) {
+                m_alphaGauge->SetValue(0);
+            } else {
                 m_alphaGauge->SetValue(std::clamp(static_cast<int>(alpha * 100), 0, 100));
-                std::stringstream ss;
-                ss << "Alpha: " << std::fixed << std::setprecision(2) << alpha;
-                m_alphaLabel->SetLabel(ss.str());
             }
 
             if (diagnostics.contains("direction_magnitude") && diagnostics["direction_magnitude"].is_number()) {
-                float mag = diagnostics["direction_magnitude"].get<float>();
-                std::stringstream ss;
-                ss << std::fixed << std::setprecision(3) << mag;
-                m_magnitudeValue->SetLabel(ss.str());
+                const float mag = diagnostics["direction_magnitude"].get<float>();
+                m_magnitudeValue->SetLabel(
+                    Thoth::GragDiagnosticsDisplay::formatMagnitudeLabel(mag));
             }
 
-            if (diagnostics.contains("scoring_type") && diagnostics["scoring_type"].is_string()) {
-                m_scoringTypeValue->SetLabel(diagnostics["scoring_type"].get<std::string>());
-            } else {
-                m_scoringTypeValue->SetLabel("RAG (Baseline)");
-            }
+            m_scoringTypeValue->SetLabel(
+                Thoth::GragDiagnosticsDisplay::formatModeLabel(scoringType));
 
             if (diagnostics.contains("breakdowns") && diagnostics["breakdowns"].is_array()) {
                 m_chunksList->DeleteAllItems();
@@ -139,7 +139,8 @@ void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
                     if (!chunk.is_object()) continue;
 
                     wxVector<wxVariant> data;
-                    std::string scoreLabel = FormatScoreLabel(ExtractFinalScore(chunk));
+                    std::string scoreLabel = Thoth::GragDiagnosticsDisplay::formatFinalScoreLabel(
+                        ExtractFinalScore(chunk));
                     data.push_back(wxVariant(wxString::FromUTF8(scoreLabel)));
 
                     std::string fileName = "unknown";
@@ -169,7 +170,8 @@ void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
                     if (!chunk.is_object()) continue;
 
                     wxVector<wxVariant> data;
-                    std::string scoreLabel = FormatScoreLabel(ExtractFinalScore(chunk));
+                    std::string scoreLabel = Thoth::GragDiagnosticsDisplay::formatFinalScoreLabel(
+                        ExtractFinalScore(chunk));
                     data.push_back(wxVariant(wxString::FromUTF8(scoreLabel)));
                     
                     std::string f = chunk.value("file", "unknown");
