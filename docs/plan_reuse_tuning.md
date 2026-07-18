@@ -2,7 +2,7 @@
 
 **Purpose:** Single reference for tunable thresholds affecting plan history reuse, trajectory-aware GRAG, and reflection replan. Constants live in `external/basic_agent/include/plan_reuse_config.h`.
 
-**Last updated:** 2026-06-15
+**Last updated:** 2026-07-18 (G1d **DROP** — `w_t=0.0`; **G1e** Phase 3 ✅ KEEP@−0.05 candidate; Phase 4 pending)
 
 ---
 
@@ -32,12 +32,19 @@
 |-------------------|---------|----------|--------|
 | `TrajectoryReuse::kMinEpisodeStepsForEmbedding` | **3** | `trajectory_builder.cpp` | Fewer steps → zero T vector |
 | `TrajectoryReuse::kZeroVectorEpsilon` | **1e-6** | `executive_controller.cpp` | Forces `wt=0` when T is effectively zero |
-| `agent_workspace/retrieval_config.json` → `trajectory` | **0.2** | Loaded at runtime | Global GRAG trajectory weight when T is active |
-| `Config::wt` default | 0.2 | `config.cpp` | Overridden by `retrieval_config.json` |
+| `agent_workspace/retrieval_config.json` → `trajectory` | **0.0** | Loaded at runtime | Global GRAG trajectory weight when T is active |
+| `Config::wt` default | 0.0 | `config.h` | Overridden by `retrieval_config.json` when present |
+
+**G1d close-out (2026-07-18):** Bucket ablation on `TRAJECTORY_DISAMBIGUATES` → terminal **DROP**. Production `trajectory` set to **0.0**. Evidence: Phase B `run-1784399242046` + TUNE micro-runs `0.05` / `0.1` — see [`completed_improvements_log.md`](completed_improvements_log.md) and [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md).
+
+**Does not foreclose research:** G1d only tested the current trajectory term at positive weights. Mean Δ(B−A): `0.20` worse, `0.10` worse, `0.05` closer to baseline.
+
+**G1e polarity fork:** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **v1.1** — Phase 3 ✅. KEEP candidate `w_t=−0.05` (`run-1784408754379`); `−0.10`/`−0.20` failed dual KEEP. Production remains `0.0` until Phase 4. No-scalar-rescue does not apply.
 
 **Tuning notes:**
-- If trajectory disambiguation hurts nDCG (see `docs/benchmark_results.md`), try lowering config `trajectory` to **0.1** before disabling entirely.
-- T only activates after ≥3 episode steps for the current plan id.
+- Do not re-enable non-zero `trajectory` without a KEEP logged under a locked eval (G1e or later).
+- T plumbing remains; weight is zero so the term does not contribute when config is loaded.
+- Empty-T executive zeroing remains as defense in depth.
 
 ---
 

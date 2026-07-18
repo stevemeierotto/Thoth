@@ -11,7 +11,8 @@
 ### [SYSTEM AUDIT NOTE]
 - **Core Scoring:** Fully functional.
 - **Codebase Indexing:** Read-only verified. Selective re-indexing active.
-- **Trajectory Awareness:** **[PARTIAL]**. $w_t=0.2$ in `retrieval_config.json`; executive zeroes the term when trajectory embedding $T$ is empty (typically before ≥3 steps). Mixed lift on `TRAJECTORY_DISAMBIGUATES` cases — see [`plan_reuse_tuning.md`](plan_reuse_tuning.md).
+- **Trajectory Awareness:** **[DROPPED for production weight]**. G1d close-out (2026-07-18) terminal **DROP** → `retrieval_config.json` `trajectory: 0.0`. Plumbing retained; empty-T executive zeroing remains. See [`plan_reuse_tuning.md`](plan_reuse_tuning.md), [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md).
+  - **G1e (post-G1d polarity fork):** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **v1.1** — Phase 3 ✅; **KEEP candidate `w_t=−0.05`** (Phase 4 pending). `−0.10`/`−0.20` not KEEP. Production still `0.0`. G1d positives were harmful; negatives-first polarity hypothesis supported at −0.05.
 - **Subgoal Trees:** **[PLANNED — NOT YET IMPLEMENTED]**. Root goal embedding is used for the entire plan duration.
 - **Self-Modification:** **[STUB — optional future expansion]**. The `code_modify` tool exists but its `apply_diff` operation is a non-functional prototype.
 
@@ -50,7 +51,7 @@ $$\text{HybridVectorScore} = (1 - \alpha) \times w_q \times \text{cos}(Q, \text{
 Optimized during Phase 4 weight sweep:
 - **$w_q$ (Query):** 0.4
 - **$w_d$ (Direction):** 0.4
-- **$w_t$ (Trajectory):** 0.2 **[active when $T$ non-empty; zeroed by executive when trajectory is empty]**
+- **$w_t$ (Trajectory):** 0.0 **[G1d DROP 2026-07-18 — production weight zeroed; term inactive]**
 - **$w_k$ (Keyword/TF-IDF):** 0.3
 - **$w_g$ (Graph):** 0.3 **[PROTOTYPE]**
 - **THRESHOLD:** 0.3
@@ -109,7 +110,7 @@ Full run archive: [`benchmark_results.md`](benchmark_results.md). **Always cite 
 
 ## 6. Known Gaps & Planned Upgrades
 1.  **[PLANNED] Hierarchical Subgoals (Upgrade 1):** Moving from a single $G$ to an active subgoal embedding $G_{active}$ to reduce direction noise in complex plans.
-2.  **[PARTIAL] Trajectory Awareness (Upgrade 2):** $w_t$ and $T$ are wired; tuning and benchmark lift on trajectory-disambiguation cases remain active work (see [`plan_reuse_tuning.md`](plan_reuse_tuning.md)).
+2.  **[DROPPED weight] Trajectory Awareness (Upgrade 2):** G1d ablation closed **DROP** (2026-07-18); production `w_t=0.0`. Construction/F5 redesign remains optional future work — see [`plan_reuse_tuning.md`](plan_reuse_tuning.md).
 3.  **[COMPLETE] Dynamic Graph Learning:** Graph edges are dynamically updated via `GraphRefiner` based on execution success. Edge weights are adjusted using a logistic learning rule (learning_rate=0.2) that rewards successful trajectories and penalizes failures. Graph density metrics (node count, edge count, avg weight, activations) are logged in `grag_benchmark.jsonl`.
 4.  **[STUB — optional future expansion] Code Modification:** `CodeModifyTool` needs a functional `apply_diff` before self-building claims apply.
 

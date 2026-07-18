@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-18 (M4 range restore implemented)
+Last updated: 2026-07-18 (G1e Phase 3 ✅ science executed; KEEP@−0.05 candidate; Phase 4 pending; G1d ✅ DROP)
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
@@ -8,6 +8,16 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 | Track | What shipped | Status |
 |-------|----------------|--------|
+| **G1e Phase 3** | Authoritative polarity runs `{−0.05,−0.10,−0.20}` | ✅ 2026-07-18 |
+| **G1e Phase 2 execute** | Operational preflight (ollama External; `fork=g1e`) | ✅ 2026-07-18 |
+| **G1e Phase 2 checklist** | Preflight contract locked (v1.1) | 🔒 2026-07-18 |
+| **G1e Phase 0–1** | Polarity protocol lock + harness `--wt` allowlist | ✅ 2026-07-18 |
+| **G1d close-out** | A0→D; terminal **DROP**; `w_t=0.0` | ✅ 2026-07-18 |
+| **G1d Phase C TUNE** | Micro-runs `w_t∈{0.05,0.1}`; harness `--wt` | ✅ 2026-07-18 |
+| **G1d Phase B** | Authoritative ~30-case ablation (`ollama` External) | ✅ 2026-07-18 |
+| **G1d Phase A** | Operational preflight (ollama External path) | ✅ 2026-07-18 |
+| **G1d Phase A0** | Backend-neutral probe / env_hash / harness labels | ✅ code 2026-07-18 |
+| **G1d close-out protocol** | A0→D contracts | 🔒 G1d-CO v1.2 |
 | **M4 range restore** | Replay + rehydrate per protocol | ✅ 2026-07-18 |
 | E2 Phase E | Empirical certification v0.1 (`n=3_strict_trio`, lift=0.0) | ✅ 2026-07-09 |
 | C6.3 | Longitudinal track C6.3-01–06 | ✅ 2026-07-11 |
@@ -18,9 +28,256 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 | Plan N N0–N6 | Chat generation safety (sanitize, soft-empty, empty stops, source_span, CP wire) | ✅ 2026-07-17 |
 | Plan N5 | GRAG diagnostics display honesty (Final Score float; Alpha N/A chat) | ✅ 2026-07-18 |
 
-Commits (parent): `f005e25` … `c747804`. Submodule Plan N engine: `405c144`.
+Commits (parent): `f005e25` … `e08341e`. Submodule: Plan N `405c144`; M4 `99c522f`.
 
 Detail entries below remain the chronological source of truth; this table is the operator index.
+
+---
+
+### G1e — Phase 3 executed ✅ (2026-07-18) — Checkpoint Phase 3
+
+**Protocol:** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **G1e v1.1** Phase 3.  
+**Science:** Full `TRAJECTORY_DISAMBIGUATES` bucket (30 cases × arms A/B/C); no `--sample`; no TfIdf; `fork=g1e`.  
+**Production:** `trajectory: 0.0` **unchanged** (Phase 4 owns optional config).
+
+**Shared provenance (matches Phase 2):** `env_hash=116927dd257acfdbb51e863831d0e7f0ecd58f7fe3b18fd5d8d27261ea66e460`, `backend=ollama` @ `http://127.0.0.1:11434`, tier `FULL`, `index_hash=89d910caa37e48527747712db42d31d0e7a17204b73a213e1f0ed7a34c363e8d`, 311 chunks.
+
+| `w_t` | run_id | B vs A (excl. ties) | Win % | mean Δ(B−A) | G1e KEEP? | Harness label* |
+|-------|--------|---------------------|-------|-------------|-----------|----------------|
+| **−0.05** | `run-1784408754379` | 6 / 4 | **60.0%** | **+0.00516** | **YES** | KEEP |
+| **−0.10** | `run-1784410045867` | 8 / 6 | 57.1% | +0.00664 | no | TUNE† |
+| **−0.20** | `run-1784411288514` | 8 / 6 | 57.1% | +0.01814 | no | TUNE† |
+
+\*Harness still emits G1d matrix strings (`KEEP`/`TUNE`/`DROP`).  
+†Under G1e there is **no TUNE branch** — these are **Not KEEP** only.
+
+**Mechanism note:** All three runs have mean nDCG C = A (empty-T ≈ no-weight), so lift when present is from weight × non-empty `T`, not from the weight alone.
+
+**No-scalar-rescue:** **Does not apply** — schedule produced a KEEP candidate at `w_t=−0.05`.
+
+**Recommended Phase 4 decision (pending owner confirm):** **KEEP @ −0.05** as the polarity production candidate (optional config write). Do not adopt −0.10/−0.20 (failed dual KEEP). Do not hand off to F5 via no-scalar-rescue.
+
+**STOP:** Phase 4 (decision log + optional `retrieval_config.json` write) awaits separate owner approval. Production remains `0.0` until then.
+
+### G1e — Phase 2 executed ✅ (2026-07-18) — Checkpoint Phase 2
+
+**Protocol:** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **G1e v1.1** operational preflight.  
+**Not science:** `--sample 2 --wt -0.05` path confirmation only; Phase 3 required for polarity KEEP/NO_SCALAR_RESCUE.  
+**Production:** `trajectory: 0.0` unchanged.
+
+| Step | Result |
+|------|--------|
+| **1 Backend gate** | `probeInferenceBackend()` → reachable; instantiated backend `ollama` |
+| **2 Record** | Sidecar `logs/benchmark_env.latest.json` + `BENCHMARK_ENV`: `backend_name=ollama`, `base_url=http://127.0.0.1:11434`, `embed_base_url=http://127.0.0.1:11434`, `diagnostic_digest=e33a310d…` |
+| **3 Corpus / index** | Five research docs; index built; **311 chunks** |
+| **4 Path confirmation** | `embedding_method=External`, tier `FULL`; no `THOTH_TRAJECTORY_ABLATION_TFIDF`; `--sample 2 --wt -0.05` exit 0 |
+| **5 Provenance** | stdout `backend=ollama fork=g1e tune_wt=-0.05`; JSONL `fork=g1e` (not Phase C TUNE); COMPLETE payload includes `fork`/`tune_wt` |
+| **6 Evidence packet** | This entry |
+
+**Persistent artifact check (Phase 2 lineage `run-1784407500480`)**
+
+| Field | Sidecar `logs/benchmark_env.latest.json` | `benchmark_env.jsonl` (`BENCHMARK_ENV`) | Ablation JSONL |
+|-------|------------------------------------------|----------------------------------------|----------------|
+| `run_id` | ✅ | ✅ | ✅ |
+| `env_hash` | ✅ | ✅ | ✅ |
+| backend | ✅ `environment.inference.backend_name=ollama` | ✅ same | ✅ top-level `backend=ollama` |
+| endpoint | ✅ `http://127.0.0.1:11434` (base + embed) | ✅ same | (via env_hash lineage) |
+| tier | ✅ `FULL` | ✅ same | — |
+| fork | — | COMPLETE payload `fork=g1e` | ✅ `fork=g1e` |
+
+**Preflight record**
+
+- **timestamp:** ~2026-07-18T20:26Z → 20:45Z (~18 min, mostly External embed index)
+- **reachable:** true  
+- **backend:** ollama (Ollama version 0.18.0; embed model `nomic-embed-text:v1.5`)  
+- **endpoints:** `http://127.0.0.1:11434` (base + embed)  
+- **run_id:** `run-1784407500480`  
+- **env_hash:** `116927dd257acfdbb51e863831d0e7f0ecd58f7fe3b18fd5d8d27261ea66e460` (same lineage as G1d Phase A/B)  
+- **index_hash:** `89d910caa37e48527747712db42d31d0e7a17204b73a213e1f0ed7a34c363e8d`  
+- **harness:** `trajectory_ablation_benchmark`  
+- **sample note:** 2 ties, indicative DROP — **not** authoritative polarity evidence  
+
+**Checkpoint Phase 2 Conclusion:** All preflight criteria satisfied. Phase 3 may proceed without further infrastructure changes **after separate owner approval**.
+
+**STOP:** Phase 3 remains behind its own owner approval gate (full ~30-case runs at `−0.05` → `−0.10` → `−0.20`; no `--sample`; no TfIdf; backend/`env_hash` lineage must match above). G1e is still **not scientifically executed**.
+
+### G1e — Phase 2 preflight checklist locked 🔒 (2026-07-18) — v1.1
+
+**Protocol:** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **G1e v1.1**.
+
+**What locked:** Normative Phase 2 operational preflight checklist (backend gate, provenance record, corpus/index, path confirmation, provenance spot-check, evidence packet). Mirror of G1d Phase A adapted for `fork=g1e`.
+
+**Execution status:** **Phase 2 executed** (ops only). Checklist was locked in v1.1; preflight run logged. **Not scientifically executed** until Phase 3. No probe/sample/bucket science claims from Phase 2.
+
+**Non-claim:** No KEEP / NO_SCALAR_RESCUE / production config change.
+
+**Next:** Owner approval for Phase 3 polarity runs.
+
+### G1e — Phase 0–1 ✅ (2026-07-18) — protocol + harness (STOP before experiments)
+
+**Protocol:** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **G1e v1.0** locked.
+
+**Scope:** Post-G1d polarity fork only. G1d remains ✅ DROP; production `trajectory: 0.0` unchanged. No authoritative bucket runs.
+
+| Phase | Deliverable |
+|-------|-------------|
+| **0** | Locked protocol; tracking in `cursor_list.md`, `GRAG.md`, `plan_reuse_tuning.md`, `improvements.md` |
+| **1** | `isTrajectoryAblationG1eWt` / `isTrajectoryAblationCliWt`; CLI `--wt` accepts `{−0.05,−0.10,−0.20}` + G1d TUNE `{0.05,0.1}`; JSONL/stdout `fork=g1e`; `testG1ePolarityWtAllowlist` |
+
+**Schedule (deferred to Phase 3):** `−0.05` → `−0.10` → `−0.20`. **No-scalar-rescue:** if no KEEP → hand off to F5.
+
+**Next:** Phase 2+ requires separate owner approval.
+
+### G1d — Closed ✅ DROP (2026-07-18) — Phase D
+
+**Protocol:** [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) **G1d-CO v1.2** Phase D.  
+**Methodology:** [`trajectory_ablation_benchmark.md`](trajectory_ablation_benchmark.md) v1.0 — arms/EPSILON/matrix unchanged.  
+**Terminal decision:** **DROP** production trajectory weight on the `TRAJECTORY_DISAMBIGUATES` bucket evidence.
+
+| Run | Role | run_id | Key result |
+|-----|------|--------|------------|
+| Phase B (`w_t=0.2`) | Authoritative | `run-1784399242046` | Δ(B−A)=−0.0138; pairwise 6/6 (50%) → TUNE |
+| TUNE `0.05` | Micro | `run-1784401765860` | Δ=−0.0076; B vs A 2/5 → DROP |
+| TUNE `0.1` | Micro | `run-1784402971475` | Δ=−0.0164; B vs A 4/6 (40%) → no KEEP |
+
+**Shared provenance:** `env_hash=116927dd257acfdbb51e863831d0e7f0ecd58f7fe3b18fd5d8d27261ea66e460`, `backend=ollama` @ `http://127.0.0.1:11434`, tier `FULL`, 30 cases.
+
+**Rationale:** After locked TUNE path (`w_t ∈ {0.05, 0.1}`), mean Δ(B−A) ≤ 0 and KEEP dual criteria unmet → **DROP**.
+
+**Config:** `agent_workspace/retrieval_config.json` → `trajectory: 0.0` (was 0.2). No scorer/TrajectoryBuilder/F5 code changes.
+
+**Docs:** `plan_reuse_tuning.md`, `GRAG.md`, `cursor_list.md`, `improvements.md` updated. F5 unblocked as decision gate only (implementation still 📋).
+
+**Research caveat:** DROP zeros the *current* positive-weight trajectory contribution; it does not foreclose alternate formulations (calibration, normalization, polarity, F5). Observed mean Δ(B−A): `0.20` −0.014; `0.10` −0.016; `0.05` −0.008 (closer to baseline).
+
+### G1d — Phase C TUNE micro-runs ✅ (2026-07-18) — Checkpoint C-TUNE
+
+**Accepted from Phase B:** **TUNE** (matrix). Follow-up only: `w_t ∈ {0.05, 0.1}`.  
+**Harness:** `--wt 0.05|0.1` override (Arm A=0; B/C use tune wt; C empty T). Matrix code unchanged.  
+**No** production `retrieval_config.json` change.
+
+| Micro-run | run_id | tune_wt | A/B/C wins | Ties | B vs A | mean Δ(B−A) | Harness decision |
+|-----------|--------|---------|------------|------|--------|-------------|------------------|
+| 1 | `run-1784401765860` | **0.05** | 0/2/0 | 28 | 2 / 5 (28.6%) | **−0.00763** | **DROP** (win rate < 40%) |
+| 2 | `run-1784402971475` | **0.1** | 0/4/0 | 26 | 4 / 6 (40%) | **−0.01638** | TUNE (no KEEP; mean ≤ 0) |
+
+**Shared provenance:** `env_hash=116927dd…` (Phase A/B), `backend=ollama` @ `http://127.0.0.1:11434`, tier `FULL`, 30 cases, `sample_mode=false`, C mean = A mean both runs.
+
+**Phase B reference (wt=0.2):** `run-1784399242046` — Δ=−0.0138, pairwise 6/6 (50%) → TUNE.
+
+**Matrix after micro-runs (locked):** Neither candidate meets KEEP (≥60% wins **and** mean Δ>0). Both have mean Δ(B−A) ≤ 0 after TUNE path → terminal **DROP** for production `w_t`. Not CONSTRUCTION_BUG (majority `C≈A∧B<A` not met).
+
+**Recommended terminal decision (pending owner confirm):** **DROP** — do not keep/tune production trajectory weight from this bucket evidence.
+
+**Checkpoint C-TUNE Conclusion:** TUNE follow-up complete. Phase D (docs + optional config) awaits owner approval of **DROP**; no config write in this phase.
+
+**STOP:** Owner review before Phase D.
+
+### G1d — Phase B executed ✅ (2026-07-18) — Checkpoint B
+
+**Protocol:** [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) G1d-CO v1.1 Phase B (authoritative run).  
+**Methodology:** [`trajectory_ablation_benchmark.md`](trajectory_ablation_benchmark.md) v1.0 — arms/EPSILON/matrix unchanged.  
+**Harness decision string is indicative only** — do **not** treat as accepted until Phase C / Checkpoint C.
+
+| Criterion | Result |
+|-----------|--------|
+| Full bucket | **30 / 30** `TRAJECTORY_DISAMBIGUATES`; `sample_mode=false` |
+| No TfIdf | `embedding_method=External`; tier `FULL` |
+| Exit | 0 (~23 min wall: 18:05:51Z → 18:29:09Z UTC) |
+| Lineage vs Phase A | Same `env_hash`, backend `ollama`, endpoints `http://127.0.0.1:11434`; **new** `run_id` |
+
+**Authoritative provenance**
+
+- **run_id:** `run-1784399242046`  
+- **env_hash:** `116927dd257acfdbb51e863831d0e7f0ecd58f7fe3b18fd5d8d27261ea66e460` (matches Phase A)  
+- **index_hash:** `89d910caa37e48527747712db42d31d0e7a17204b73a213e1f0ed7a34c363e8d`  
+- **backend:** `ollama` @ `http://127.0.0.1:11434` (sidecar `environment.inference.*`)  
+- **chunks:** 311  
+- **log:** `logs/trajectory_ablation_benchmark.jsonl`  
+
+**Results (harness summary — not yet Phase C accepted)**
+
+| Metric | Value |
+|--------|-------|
+| A / B / C wins | 0 / **6** / 0 |
+| Ties | 24 |
+| B vs A (non-tie pairwise) | 6 / 6 |
+| mean nDCG A / B / C | 0.441745 / 0.427969 / 0.441745 |
+| mean Δ (B−A) | **−0.013776** |
+| Harness `decision` | **TUNE** — B win rate ≥ 40% but KEEP dual criteria not met |
+| Arm C vs A | mean C = mean A (exact); C wins = 0 |
+
+**B-win cases:** T3, T8, T18, T19, T22, T27  
+
+**Checkpoint B Conclusion:** Authoritative evidence complete and provenance-honest. Decision matrix **not** applied (Phase C). No `retrieval_config.json` change.
+
+**STOP:** Owner review of Checkpoint B required before Phase C.
+
+### G1d — Phase A executed ✅ (2026-07-18) — Checkpoint A
+
+**Protocol:** [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) G1d-CO v1.1 operational preflight.  
+**Not close-out evidence:** `--sample 2` path confirmation only; Phase B required for decision.
+
+| Step | Result |
+|------|--------|
+| **1 Measure** | `probeInferenceBackend()` → reachable; instantiated backend `ollama` |
+| **1 Record** | Sidecar + `BENCHMARK_ENV`: `backend_name=ollama`, `base_url=http://127.0.0.1:11434`, `embed_base_url=http://127.0.0.1:11434`, `diagnostic_digest=e33a310d…` |
+| **1 Apply** | Gate passed; same identity used for preflight sample |
+| **2 Corpus** | Five research docs present; index built; **311 chunks** |
+| **3 External path** | `embedding_method=External`, tier `FULL`; no `THOTH_TRAJECTORY_ABLATION_TFIDF`; `--sample 2` exit 0 |
+| **4 Provenance** | Persistent artifacts verified (below); stdout `backend=ollama` matches |
+
+**Persistent artifact check (Phase A lineage `run-1784397513912`)**
+
+| Field | Sidecar `benchmark_env.latest.json` | `benchmark_env.jsonl` (`BENCHMARK_ENV`) | Ablation JSONL |
+|-------|-------------------------------------|----------------------------------------|----------------|
+| `run_id` | ✅ | ✅ | ✅ |
+| `env_hash` / `environment_hash` | ✅ | ✅ | ✅ |
+| backend | ✅ `environment.inference.backend_name=ollama` | ✅ same | ✅ top-level `backend=ollama` |
+| endpoint | ✅ `environment.inference.base_url` / `embed_base_url` = `http://127.0.0.1:11434` | ✅ same | (via env_hash lineage) |
+| tier | ✅ `environment.runtime.tier=FULL` | ✅ same | — |
+
+Backend identity is in the persisted sidecar/`BENCHMARK_ENV` inference block (and participates in `env_hash`), not stdout-only.
+
+**Preflight record**
+
+- **timestamp_utc:** 2026-07-18T17:36:49Z → 17:58:41Z (~22 min, mostly External embed index)
+- **reachable:** true  
+- **backend:** ollama (Ollama version 0.18.0; embed model available: `nomic-embed-text:v1.5`)  
+- **endpoints:** `http://127.0.0.1:11434` (base + embed)  
+- **run_id:** `run-1784397513912`  
+- **env_hash:** `116927dd257acfdbb51e863831d0e7f0ecd58f7fe3b18fd5d8d27261ea66e460`  
+- **index_hash:** `89d910caa37e48527747712db42d31d0e7a17204b73a213e1f0ed7a34c363e8d`  
+- **harness:** `trajectory_ablation_benchmark`  
+- **sample note:** indicative DROP on 2 ties — **not** authoritative  
+
+**Checkpoint A Conclusion:** All preflight criteria satisfied. Phase B may proceed without further infrastructure changes.
+
+**STOP:** Phase B remains behind its own owner approval gate (full ~30-case run, no `--sample`, no TfIdf; backend lineage must match above).
+
+### G1d — Phase A operational contract locked 🔒 (2026-07-18)
+
+- **Protocol:** [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) **G1d-CO v1.1** — Phase A (measure / record / apply backend gate; corpus; External path; provenance spot-check; Checkpoint A evidence packet).
+- **Not execution:** Phase A still requires Checkpoint A0 approval before running.
+- **Phase B link:** Authoritative run backend identity MUST match Phase A recorded snapshot lineage.
+
+### G1d — Phase A0 implemented ✅ (2026-07-18) — Checkpoint A0
+
+- **Protocol:** [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) v1.0 Phase A0 (infrastructure only; methodology unchanged).
+- **Probe:** `inference_backend_probe.{h,cpp}` — `probeInferenceBackend` / `snapshotFromInferenceClient` / `isInferenceBackendReachable`; identity from instantiated `InferenceClient::backendName()`.
+- **env_hash:** `InferenceEnvironment` in `benchmark_environment` (backend_name, base_url, embed_base_url, diagnostic_digest) participates in canonical identity.
+- **Harness:** `run_trajectory_ablation_benchmark` — preflight via probe (not `isOllamaReachable`); tier `FULL` (authoritative) / `MOCK` (TfIdf); stdout/JSONL `backend=...`.
+- **Tests:** `testG1dA0EnvHashDistinguishesInferenceBackend`, `…Endpoint`, `…SnapshotUsesClientBackendName`; E1 JSON round-trip covers inference.
+- **Verify:** debug build OK; `thoth-core-tests` all passed; `THOTH_TRAJECTORY_ABLATION_TFIDF=1 --sample 2` smoke prints `backend=tfidf`.
+- **STOP:** Owner review of Checkpoint A0 required before Phase A/B (authoritative run).
+
+### G1d — Close-out protocol locked 🔒 (2026-07-18)
+
+- **Normative:** [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) — G1d-CO v1.0 base; **v1.1** adds locked Phase A operational contract.
+- **Methodology (unchanged):** [`trajectory_ablation_benchmark.md`](trajectory_ablation_benchmark.md) v1.0 — arms, EPSILON, decision matrix immutable.
+- **Key rule:** Fix infrastructure (A0 backend-neutral preflight/provenance) before authoritative run; Checkpoint A0 and Checkpoint B are mandatory review stops.
+- **Backend identity:** Instantiated `InferenceClient::backendName()`, not config alone.
+- **Next:** Checkpoint A0 approval → execute Phase A per v1.1 → Checkpoint A → Phase B.
 
 ---
 

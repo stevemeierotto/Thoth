@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
@@ -30,6 +31,7 @@
 #include "ollama_client.h"
 #include "llama_server_client.h"
 #include "ollama_snapshot.h"
+#include "inference_backend_probe.h"
 #include "inference_http.h"
 #include "runtime_bootstrap.h"
 #include "engine_runtime.h"
@@ -4829,6 +4831,11 @@ static bool testE1BenchmarkEnvironmentJsonRoundTrip() {
         "0.5.1",
         {{"llama3", "digest-a"}, {"nomic-embed-text", "digest-b"}},
     };
+    inputs.inference_backend_name = "ollama";
+    inputs.inference_base_url = "http://127.0.0.1:11434";
+    inputs.inference_embed_base_url = "http://127.0.0.1:11434";
+    inputs.inference_diagnostics = {{"ollama_version", "0.5.1"}};
+    inputs.inference_reachable = true;
 
     const Thoth::BenchmarkEnvironment original = Thoth::assembleEnvironment(inputs);
     const nlohmann::json json = Thoth::benchmarkEnvironmentToJson(original);
@@ -4839,12 +4846,118 @@ static bool testE1BenchmarkEnvironmentJsonRoundTrip() {
         restored.runtime.tier != original.runtime.tier ||
         restored.corpus.fingerprint != original.corpus.fingerprint ||
         restored.environment_hash != original.environment_hash ||
-        restored.ollama.models_digest != original.ollama.models_digest) {
+        restored.ollama.models_digest != original.ollama.models_digest ||
+        restored.inference.backend_name != original.inference.backend_name ||
+        restored.inference.base_url != original.inference.base_url ||
+        restored.inference.diagnostic_digest != original.inference.diagnostic_digest) {
         std::cerr << "testE1BenchmarkEnvironmentJsonRoundTrip: round-trip field mismatch\n";
         return false;
     }
     if (!restored.prov.hostname.has_value() || *restored.prov.hostname != "bench-host") {
         std::cerr << "testE1BenchmarkEnvironmentJsonRoundTrip: hostname missing\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testG1dA0EnvHashDistinguishesInferenceBackend() {
+    auto base = makeE1SampleInputs();
+    base.tier = Thoth::BenchmarkTier::FULL;
+    base.harness = "trajectory_ablation_benchmark";
+    base.model.embedding_method = "External";
+    base.model.embedding_model = "nomic-embed-text";
+    base.inference_base_url = "http://127.0.0.1:8080";
+    base.inference_embed_base_url = "http://127.0.0.1:8080";
+    base.inference_reachable = true;
+
+    auto ollamaInputs = base;
+    ollamaInputs.inference_backend_name = "ollama";
+    ollamaInputs.inference_diagnostics = {{"ollama_version", "0.5.1"}};
+
+    auto llamaInputs = base;
+    llamaInputs.inference_backend_name = "llama_cpp";
+    llamaInputs.inference_diagnostics = {{"available_models", nlohmann::json::array({"nomic"})}};
+
+    const auto ollamaEnv = Thoth::assembleEnvironment(ollamaInputs);
+    const auto llamaEnv = Thoth::assembleEnvironment(llamaInputs);
+
+    if (ollamaEnv.inference.backend_name != "ollama" || llamaEnv.inference.backend_name != "llama_cpp") {
+        std::cerr << "testG1dA0EnvHashDistinguishesInferenceBackend: backend_name not assembled\n";
+        return false;
+    }
+    if (ollamaEnv.environment_hash == llamaEnv.environment_hash) {
+        std::cerr << "testG1dA0EnvHashDistinguishesInferenceBackend: backend change did not alter env_hash\n";
+        return false;
+    }
+    if (ollamaEnv.inference.diagnostic_digest.empty() || llamaEnv.inference.diagnostic_digest.empty()) {
+        std::cerr << "testG1dA0EnvHashDistinguishesInferenceBackend: expected diagnostic digest\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testG1dA0EnvHashDistinguishesInferenceEndpoint() {
+    auto base = makeE1SampleInputs();
+    base.tier = Thoth::BenchmarkTier::FULL;
+    base.harness = "trajectory_ablation_benchmark";
+    base.model.embedding_method = "External";
+    base.inference_backend_name = "llama_cpp";
+    base.inference_reachable = true;
+
+    auto endpointA = base;
+    endpointA.inference_base_url = "http://127.0.0.1:8080";
+    endpointA.inference_embed_base_url = "http://127.0.0.1:8080";
+
+    auto endpointB = base;
+    endpointB.inference_base_url = "http://127.0.0.1:8081";
+    endpointB.inference_embed_base_url = "http://127.0.0.1:8081";
+
+    const auto envA = Thoth::assembleEnvironment(endpointA);
+    const auto envB = Thoth::assembleEnvironment(endpointB);
+    if (envA.environment_hash == envB.environment_hash) {
+        std::cerr << "testG1dA0EnvHashDistinguishesInferenceEndpoint: endpoint change did not alter env_hash\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testG1dA0SnapshotUsesClientBackendName() {
+    Thoth::MockInferenceClient client;
+    client.backend_name = "llama_cpp";
+    client.on_health = []() {
+        Thoth::InferenceHealthResult health;
+        health.reachable = true;
+        health.available_models = {"nomic-embed-text"};
+        return health;
+    };
+
+    Thoth::InferenceEndpointConfig endpoints;
+    endpoints.base_url = "http://127.0.0.1:8080";
+    endpoints.embed_base_url = "http://127.0.0.1:8080/v1";
+
+    const Thoth::InferenceHealthResult health = client.health();
+    const Thoth::InferenceBackendSnapshot snap =
+        Thoth::snapshotFromInferenceClient(client, endpoints, health);
+
+    if (snap.backend_name != "llama_cpp") {
+        std::cerr << "testG1dA0SnapshotUsesClientBackendName: expected client backendName()\n";
+        return false;
+    }
+    if (!snap.reachable || snap.base_url != endpoints.base_url ||
+        snap.embed_base_url != endpoints.embed_base_url) {
+        std::cerr << "testG1dA0SnapshotUsesClientBackendName: endpoint/reachable mismatch\n";
+        return false;
+    }
+    if (!snap.diagnostics.contains("available_models")) {
+        std::cerr << "testG1dA0SnapshotUsesClientBackendName: missing available_models diagnostics\n";
+        return false;
+    }
+
+    // Conflicting config-style name must not override instantiated client identity.
+    client.backend_name = "ollama";
+    const auto ollamaNamed = Thoth::snapshotFromInferenceClient(client, endpoints, health);
+    if (ollamaNamed.backend_name != "ollama") {
+        std::cerr << "testG1dA0SnapshotUsesClientBackendName: renamed client not reflected\n";
         return false;
     }
     return true;
@@ -6995,6 +7108,79 @@ static bool testG1dArmConfigs() {
     }
     if (cfgA.wq != cfgB.wq || cfgA.wd != cfgB.wd) {
         std::cerr << "testG1dArmConfigs: wq/wd must match across arms\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testG1dTuneWtOverride() {
+    if (!Thoth::isTrajectoryAblationTuneWt(0.05f) || !Thoth::isTrajectoryAblationTuneWt(0.1f)) {
+        std::cerr << "testG1dTuneWtOverride: expected 0.05 and 0.1 accepted\n";
+        return false;
+    }
+    if (Thoth::isTrajectoryAblationTuneWt(0.2f) || Thoth::isTrajectoryAblationTuneWt(0.0f)) {
+        std::cerr << "testG1dTuneWtOverride: 0.2/0.0 must not be tune weights\n";
+        return false;
+    }
+    for (const float wt : {0.05f, 0.1f}) {
+        const auto cfgA = Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::A, wt);
+        const auto cfgB = Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::B, wt);
+        const auto cfgC = Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::C, wt);
+        if (cfgA.wt != 0.0f || cfgA.force_empty_trajectory) {
+            std::cerr << "testG1dTuneWtOverride: arm A must stay wt=0\n";
+            return false;
+        }
+        if (std::fabs(cfgB.wt - wt) > 1e-6f || cfgB.force_empty_trajectory) {
+            std::cerr << "testG1dTuneWtOverride: arm B wt mismatch\n";
+            return false;
+        }
+        if (std::fabs(cfgC.wt - wt) > 1e-6f || !cfgC.force_empty_trajectory) {
+            std::cerr << "testG1dTuneWtOverride: arm C wt/empty-T mismatch\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool testG1ePolarityWtAllowlist() {
+    for (const float wt : {-0.05f, -0.10f, -0.20f}) {
+        if (!Thoth::isTrajectoryAblationG1eWt(wt) || !Thoth::isTrajectoryAblationCliWt(wt)) {
+            std::cerr << "testG1ePolarityWtAllowlist: expected G1e wt accepted: " << wt << '\n';
+            return false;
+        }
+        if (Thoth::isTrajectoryAblationTuneWt(wt)) {
+            std::cerr << "testG1ePolarityWtAllowlist: G1e wt must not be G1d TUNE: " << wt << '\n';
+            return false;
+        }
+        const auto cfgB = Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::B, wt);
+        const auto cfgA = Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::A, wt);
+        const auto cfgC = Thoth::trajectoryAblationArmConfig(Thoth::TrajectoryAblationArm::C, wt);
+        if (cfgA.wt != 0.0f) {
+            std::cerr << "testG1ePolarityWtAllowlist: arm A must stay wt=0\n";
+            return false;
+        }
+        if (std::fabs(cfgB.wt - wt) > 1e-6f || cfgB.force_empty_trajectory) {
+            std::cerr << "testG1ePolarityWtAllowlist: arm B wt mismatch\n";
+            return false;
+        }
+        if (std::fabs(cfgC.wt - wt) > 1e-6f || !cfgC.force_empty_trajectory) {
+            std::cerr << "testG1ePolarityWtAllowlist: arm C wt/empty-T mismatch\n";
+            return false;
+        }
+    }
+    if (Thoth::isTrajectoryAblationG1eWt(0.05f) || Thoth::isTrajectoryAblationG1eWt(0.1f) ||
+        Thoth::isTrajectoryAblationG1eWt(0.2f) || Thoth::isTrajectoryAblationG1eWt(0.0f) ||
+        Thoth::isTrajectoryAblationG1eWt(0.25f) || Thoth::isTrajectoryAblationG1eWt(-0.25f)) {
+        std::cerr << "testG1ePolarityWtAllowlist: unexpected G1e accept\n";
+        return false;
+    }
+    if (Thoth::isTrajectoryAblationCliWt(0.2f) || Thoth::isTrajectoryAblationCliWt(0.0f) ||
+        Thoth::isTrajectoryAblationCliWt(0.25f) || Thoth::isTrajectoryAblationCliWt(-0.25f)) {
+        std::cerr << "testG1ePolarityWtAllowlist: CLI must reject non-schedule weights\n";
+        return false;
+    }
+    if (!Thoth::isTrajectoryAblationCliWt(0.05f) || !Thoth::isTrajectoryAblationCliWt(0.1f)) {
+        std::cerr << "testG1ePolarityWtAllowlist: CLI must still accept G1d TUNE\n";
         return false;
     }
     return true;
@@ -14178,6 +14364,9 @@ int main() {
     if (!testE1IndexHashDistinctFromEnvironmentHash()) failures++;
     if (!testE1TierMismatchPredicate()) failures++;
     if (!testE1BenchmarkEnvironmentJsonRoundTrip()) failures++;
+    if (!testG1dA0EnvHashDistinguishesInferenceBackend()) failures++;
+    if (!testG1dA0EnvHashDistinguishesInferenceEndpoint()) failures++;
+    if (!testG1dA0SnapshotUsesClientBackendName()) failures++;
     if (!testE1BenchmarkContextCreateSidecar()) failures++;
     if (!testE1BenchmarkContextBindIndexMerge()) failures++;
     if (!testE1BenchmarkContextDoubleBindMismatch()) failures++;
@@ -14222,6 +14411,8 @@ int main() {
     if (!testE1GragBenchmarkSmoke()) failures++;
     if (!testG1dFilterTrajectoryCases()) failures++;
     if (!testG1dArmConfigs()) failures++;
+    if (!testG1dTuneWtOverride()) failures++;
+    if (!testG1ePolarityWtAllowlist()) failures++;
     if (!testG1dWinnerAndTieEpsilon()) failures++;
     if (!testG1dTrajectoryAblationSmoke()) failures++;
     if (!testE2StrictInjectionLogFromCaseTable()) failures++;

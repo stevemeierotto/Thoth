@@ -3,12 +3,14 @@
 **Protocol version:** 1.0  
 **Locked:** 2026-07-01  
 **Applies to:** Thoth `8960c27`, basic_agent `4c45aca`  
-**Status:** 🔒 Protocol v1.0 locked — harness wired; **Ollama authoritative run pending** for KEEP/TUNE/DROP decision  
+**Status:** ✅ Closed **DROP** 2026-07-18 — methodology v1.0 immutable; close-out [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) **G1d-CO v1.2**; production `w_t=0.0`  
 **Prerequisite:** E1 ✅ (`docs/benchmark_environment.md`)  
 **Blocks:** F5 (semantic trajectory embeddings) — **no F5 work until G1d reaches a documented decision**  
-**Related:** `plan_reuse_tuning.md`, `benchmark_case_registry.cpp`, `run_grag_benchmark`
+**Related:** `plan_reuse_tuning.md`, `benchmark_case_registry.cpp`, `run_grag_benchmark`, **`G1D_CLOSEOUT_PROTOCOL.md`**
 
-> **Immutability:** This document may not be edited during an in-flight G1d run. Revisions require **Protocol v1.1** with a new lock date and commit SHA.
+> **Immutability:** Methodology sections in this document may not be edited during an in-flight G1d run. Revisions require **Protocol v1.1** with a new lock date and commit SHA.  
+> **Close-out:** Phased infrastructure + checkpoints are normative in [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) (locked 2026-07-18). That document does not alter arms, EPSILON, or the decision matrix below.  
+> **Provenance note:** “Ollama authoritative tier” below is historical wording. Under the close-out protocol, authoritative means External embeddings via the instantiated production `InferenceClient`, with honest `backend=` provenance.
 
 ---
 
@@ -153,15 +155,15 @@ If Ollama unreachable at close-out: log **“wired, Ollama decision pending”**
 
 ---
 
-## Implementation sequence (locked)
+## Implementation sequence (locked methodology; close-out superseded)
 
 1. **G1d spec** — this document ✅  
-2. **G1d harness** — `run_trajectory_ablation_benchmark`  
-3. **G1d run** — Ollama authoritative + CI smoke  
+2. **G1d harness** — `run_trajectory_ablation_benchmark` ✅  
+3. **G1d run** — authoritative External inference + CI smoke  
 4. **G1d decision** — log entry + update `plan_reuse_tuning.md`, `GRAG.md`, `cursor_list.md`  
 
-**E2 must not start until step 4 completes.** Trajectory usefulness must be resolved before episodic behavioral eval.
+**Close-out execution order** (including Phase A0 backend-neutral infrastructure and review gates): **normative in [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) v1.0** — do not start the expensive authoritative run until Checkpoint A0 passes owner review.
 
 ---
 
-*Locked: 2026-07-01 — per review: per-case winners, dual KEEP criteria (win rate + mean delta).*
+*Locked: 2026-07-01 — per review: per-case winners, dual KEEP criteria (win rate + mean delta). Close-out protocol locked 2026-07-18.*

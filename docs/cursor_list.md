@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-18 (M4 range restore ✅ — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0)  
+**Last updated:** 2026-07-18 (G1e Phase 3 ✅ KEEP@−0.05 candidate; Phase 4 pending; G1d ✅ DROP)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
@@ -3884,7 +3884,7 @@ STRICT / INTEGRATION share eval types and schema → **behavioral separation**, 
 | C1 planner context management (budgets, validator, memory hygiene) | ✅ 2026-06-27 |
 | `allow_shell_exec` tool gating | ✅ |
 | Memory consolidation (M2 age-based policy) | ✅ 2026-06-29 |
-| Trajectory $w_t$ in scoring path | 🔶 config 0.2; mixed lift on trajectory-disambiguation cases |
+| Trajectory $w_t$ in scoring path | ✅ DROP | G1d closed 2026-07-18; production `trajectory: 0.0` |
 | Unit tests | ✅ full suite green (~78s, 2026-06-16) |
 | Doc alignment P2.1–P2.6 | ✅ |
 
@@ -3987,7 +3987,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
-| **G1** | Trajectory tuning (Step 4.5) | 🔶 | Overlaps **C2** — $w_t=0.2$ active; trajectory-disambiguation bucket **−0.037** in one run |
+| **G1** | Trajectory tuning (Step 4.5) | ✅ | Superseded by **G1d DROP** 2026-07-18 — production `w_t=0.0` |
 | **G2** | Hierarchical subgoal trees (Step 4.4) | 📋 | `GoalNode`, active subgoal embedding in `GragScorer`; single root $G$ today |
 | **G3** | Model upgrade path (Step 4.7) | 📋 | Audit `LLMInterface` for model-specific assumptions; `ModelConfig` + migration playbook |
 | **G4** | Trace replay vs SQLite resume | 🔶 | Document-only acceptable: trace is observability; `resume_from_plan()` is authoritative |
@@ -4007,7 +4007,8 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **E1** | Benchmark environment pinning | ✅ | A–E complete 2026-07-01 — **`docs/benchmark_environment.md`** |
 | **E2** | Episodic memory learning eval | ✅ | Phases A–E complete; Phase E v0.1 certified 2026-07-09 — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); paused before Zenodo V3 |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
-| **G1d** | Trajectory bucket diagnostic | 🔶 | Harness wired — `run_trajectory_ablation_benchmark`; Ollama 30-case run + decision pending — **`docs/trajectory_ablation_benchmark.md` v1.0** |
+| **G1d** | Trajectory bucket diagnostic | ✅ | Closed **DROP** 2026-07-18 — [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) v1.2; production `w_t=0.0` |
+| **G1e** | Trajectory polarity probe (post-G1d) | 🔶 | Phase 3 ✅ — KEEP candidate `w_t=−0.05` (`run-1784408754379`); Phase 4 pending — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.1 |
 
 ---
 
@@ -4061,7 +4062,7 @@ From `ui_improvements.md` §11–§12 — research console shell exists; these a
 | **F2** | **Smarter reflection strategies** | 📋 | Selective replan by failure type (timeout vs wrong answer vs tool error), not only low trajectory score. Separate reflection prompts and memory channel (started in **C1**). Measure first via **C3**, then implement targeted strategies. |
 | **F3** | **Richer episodic memory** | 📋 | Full episodic store: searchable trajectories, summarize-before-archive warm tier, restore/replay. Procedural vs episodic channel separation for planner vs conversation vs reflection. Overlaps **M1–M4**, **C1** memory channels. |
 | **F4** | **Long-term learning** | 📋 | Cross-session competence: strategy promotion over weeks, forgetting/decay, graph edge consolidation, plan-pattern libraries that improve without polluting prompts. Extends `StrategyEngine`, `GraphRefiner`, **C6** time-series metrics. |
-| **F5** | **More sophisticated trajectory scoring** | 📋 | Semantic trajectory embeddings (not stub/zero), step-sequence similarity, outcome-weighted $T$, better disambiguation on trajectory bucket. Overlaps **G1**, **C2**, `TrajectoryBuilder`. |
+| **F5** | **More sophisticated trajectory scoring** | 📋 | Gate cleared by G1d ✅ DROP; **G1e** no-scalar-rescue may hand off here if negatives fail KEEP. Overlaps **G1**, **G1e**, **C2**, `TrajectoryBuilder`. |
 | **F6** | **Multi-agent collaboration** | 📋 | Delegate subgoals to specialized agents/roles, coordination protocol, shared memory boundaries. No implementation today — architecture TBD (`PLAN.md`, `cognate.md`). |
 | **F7** | **Better tool selection** | 📋 | Goal-aware tool ranking from `StepMetricsRepository` success rates, strategy hints in planner, reduce unnecessary TOOL steps in non-corpus modes. Extends `ToolRegistry`, `StrategyEngine`, **F1**. |
 | **F8** | **Curriculum generation** | 📋 | Auto-generate eval/training goals from corpus gaps, progressive difficulty, regression suites for planner/retrieval/reflection. Feeds **B1**, **C5**, **C6**; supports thesis/paper benchmark expansion. |
@@ -4100,7 +4101,8 @@ The third tier does not exist yet. It is the missing bridge between "it works" a
 | — | **E1** — Environment pinning | ✅ | `docs/benchmark_environment.md` |
 | — | **E2** — Phases A–E | ✅ | Phase E certified; paused before Zenodo |
 | **1** | **M4** — `MemoryPruner::restore(session_id, range)` | ✅ | Implemented 2026-07-18 — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0 |
-| **2** | **G1d** — Trajectory scoring ablation | 🔶 | Decide tune vs drop vs redesign before F5 |
+| **2** | **G1d** — Trajectory scoring ablation | ✅ | Closed **DROP**; `w_t=0.0`; F5 gate cleared |
+| **2b** | **G1e** — Trajectory polarity (`−0.05/−0.10/−0.20`) | 🔶 | Phase 3 ✅ KEEP@−0.05; Phase 4 pending — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) |
 | **3** | **E3** — SCR in CI | 📋 | Strategy promotion as regression signal |
 | **4** | **C6 Phase 3** — Accumulated multi-session analysis | ✅ | C6.3-01–06 ✅; operator guide [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md); fixture catalog [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md) |
 | **5** | **B1** — 30 hardened corpus cases | 📋 | Required before generalization / V3 Zenodo |
@@ -4166,9 +4168,15 @@ Done    E2 Phase E Step 2 — authoritative STRICT trio sealed ✅ 2026-07-09
 Done    E2 Phase E Step 3 — L4 verification package ✅ 2026-07-09
 Done    E2 Phase E Step 4 — claims audit ✅ 2026-07-09
 Done    E2 Phase E Step 5 — `PHASE_E_COMPLETE.md` certified ✅ 2026-07-09
-Next 1  **G1d** / **E3** / **B1** — pick fork (M4 ✅)
+Done    **G1d** — close-out A0→D terminal **DROP**; production `w_t=0.0` ✅ 2026-07-18
+Done    **G1e** Phase 0–1 — protocol lock + harness allowlist ✅ 2026-07-18
+Done    **G1e** Phase 2 checklist lock (v1.1) ✅ 2026-07-18
+Done    **G1e** Phase 2 execute preflight (`run-1784407500480`) ✅ 2026-07-18
+Done    **G1e** Phase 3 polarity runs — KEEP@−0.05 candidate ✅ 2026-07-18
+Next 1  **G1e** Phase 4 — confirm KEEP@−0.05 + optional production config (separate approval)
 Next 2  **B1** — 30-case hardened corpus (required before V3 Zenodo)
 Next 3  **E3** — SCR harness
+Later   **G2** / **M5** — as scheduled in roadmap
 Later   F3/F1 — when eval identifies bottleneck (§ Reflection)
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)
