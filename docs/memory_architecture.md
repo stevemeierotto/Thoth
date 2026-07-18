@@ -116,13 +116,31 @@ Background repair of `summary_missing` rows is deferred (post-M1).
 
 **Knowledge Artifact model:** Unify documents, episodic memories, plans, strategies, reflections, and tool outputs as artifact types consumed by one GRAG retrieval interface. M1 introduces episodic memory as the **first non-document artifact type** without building the full abstraction yet.
 
-**Warm lifecycle (M4+):** Merge similar warm summaries → promote to semantic memory → archive; prevents unbounded tiny summary accumulation.
+**Warm lifecycle (post-M4):** Merge similar warm summaries → promote to semantic memory → archive; prevents unbounded tiny summary accumulation. **Not part of M4** — see [`M4_PROTOCOL.md`](M4_PROTOCOL.md) out-of-scope.
 
 **Rename:** `MemoryPruner` → `MemoryConsolidator` when churn allows; design docs use “consolidation” terminology now.
 
 ---
 
-**M1 verified** (2026-06-26). **M2 complete** (2026-06-29). **M3 complete** (2026-06-30).
+**M1 verified** (2026-06-26). **M2 complete** (2026-06-29). **M3 complete** (2026-06-30). **M4 complete** (2026-07-18) — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0.
+
+---
+
+## M4 — range restore ✅
+
+**Normative protocol:** [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0 (locked 2026-07-18; implemented 2026-07-18).
+
+| Mode | Behavior |
+|------|----------|
+| **Replay** | Read-only cold inspect by `original_timestamp_ms` range; no memory-store side effects |
+| **Rehydrate** | All-or-nothing transactional copy cold → hot; cold preserved; duplicate invariant `(ts, role, content)` |
+
+| Component | Detail |
+|-----------|--------|
+| API | `Memory::runRestore()`, `MemoryPruner::restore(session, RestoreRequest)`; legacy `restore(sessionId)` silent full-session replay |
+| CLI | `/prune restore [--rehydrate] [--unsafe] [--start <ms>] [--end <ms>] [session]` |
+| Trace | `memory_restore_replay` / `memory_restore_rehydrate` |
+| Tests | M4-01 – M4-10 (`THOTH_MOCK_EPISODIC=1`) |
 
 ---
 
@@ -181,4 +199,4 @@ Run: `THOTH_MOCK_EPISODIC=1 ./build/debug/tests/thoth-unit-tests`
 
 ---
 
-*Last updated: 2026-06-30 (M3 `/prune` operational interface complete)*
+*Last updated: 2026-07-18 (M4 range restore implemented — see `M4_PROTOCOL.md`)*

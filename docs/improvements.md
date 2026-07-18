@@ -57,7 +57,7 @@ Before making any changes:
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
-**Active work:** Remaining Phase 3–4 items (M4 range restore, G2 subgoals, G1d trajectory diagnostic, M5 vector benchmarks). **Phase 5 (Self-Building)** is optional future expansion — not scheduled. **E1 ✅**; **E2 Phases A–E ✅ certified** (2026-07-09). **C6.3-03 ✅** sealed; **C6.3-04 ✅** promotion policy; **C6.3-05 ✅** operator guide; **C6.3-06 ✅** regression fixtures — see [`completed_improvements_log.md`](completed_improvements_log.md). Next forks: **B1**, **G1d**, **E3**, **M4**. See `cursor_list.md`.
+**Active work:** Remaining Phase 3–4 items (G2 subgoals, G1d trajectory diagnostic, M5 vector benchmarks). **M4 range restore ✅** ([`M4_PROTOCOL.md`](M4_PROTOCOL.md)). **Phase 5 (Self-Building)** is optional future expansion — not scheduled. **E1 ✅**; **E2 Phases A–E ✅ certified** (2026-07-09). **C6.3-03 ✅** sealed; **C6.3-04 ✅** promotion policy; **C6.3-05 ✅** operator guide; **C6.3-06 ✅** regression fixtures. **Containerization Plans A–L ✅** (2026-07-12–16); **Plan M ✅**; **Plan N (N0–N6) ✅**; **Plan N5 ✅** (2026-07-17–18) — see [`completed_improvements_log.md`](completed_improvements_log.md) July 2026 at-a-glance. Next forks: **B1**, **G1d**, **E3**. See `cursor_list.md`.
 
 ---
 
@@ -189,7 +189,7 @@ Copy and fill when promoting an F-item:
 | Step | Status | Notes |
 |------|--------|-------|
 | 3.1 Pruning design | ✅ | `PruningPolicy`, `archived_turns` schema in code |
-| 3.2 Pruning implementation | 🔶 | M1–M3 ✅ (consolidate + age + `/prune`); **M4 range restore** still open |
+| 3.2 Pruning implementation | 🔶 | M1–M4 ✅ (consolidate + age + `/prune` + range restore); M5 vector benchmarks still open |
 | 3.3 Fact Store | ✅ | `FactStore` + `store_fact` tool |
 | 3.4 IVectorStore | 🔶 | `IVectorStore` + `FlatVectorStore`; full benchmark contract tests not done |
 
@@ -248,7 +248,8 @@ Memory **consolidation** (design term; code: `MemoryPruner` until rename) transf
 - Updated `memory_pruner.cpp`, `sqlite_memory_repository.cpp`, `rag.cpp`
 - Unit tests: consolidate at threshold, warm row + cold archive, GRAG recall
 
-**Deferred (M4+):** range restore, async queue, background repair, warm merge lifecycle; token/pressure triggers (enum reserved).
+**Deferred (post-M4):** async queue, background repair, warm merge lifecycle; token/pressure triggers (enum reserved).  
+**M4:** ✅ 2026-07-18 — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0.
 
 ---
 
@@ -314,7 +315,8 @@ Three orthogonal trace dimensions: `requested_by` (CLI/GUI/TEST/SYSTEM), `source
 | `/prune batch [--ignore-thresholds] [--unsafe] [session]` | Single batch |
 | `/prune run [--ignore-thresholds] [--unsafe] [session]` | Full loop (cap 5 batches) |
 
-**Deferred (M4+):** `restore(session, range)`, warm merge lifecycle, consolidation queue.
+**M4:** ✅ 2026-07-18 — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0 implemented (replay + rehydrate).  
+**Deferred (post-M4):** warm merge lifecycle, consolidation queue.
 
 **Output:**
 - `consolidation_api.*` (Status, Request, Result, explain helper)
@@ -395,7 +397,7 @@ Before moving to Phase 4:
 - ✅ Verify `facts` table exists and `store_fact` tool is accessible via tool registry
 - ✅ Confirm `IVectorStore` builds cleanly and existing RAG behavior is unchanged
 - 🔶 Verify `step_metrics` populated after goal execution (infrastructure exists; manual verify optional)
-- 🔶 Pruning: **M4** range restore still open (M1 consolidate ✅; M2 age ✅; M3 `/prune` ✅)
+- ✅ Pruning: **M4** range restore ✅ ([`M4_PROTOCOL.md`](M4_PROTOCOL.md); M1 consolidate ✅; M2 age ✅; M3 `/prune` ✅)
 
 **Deferred:** Vector store benchmark contract suite; pruning warm-tier summarization.
 

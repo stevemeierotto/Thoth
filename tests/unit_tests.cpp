@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -3169,6 +3170,514 @@ static bool testM3GoalBlockedUnlessUnsafe() {
     const auto unsafe_result = memory.runConsolidation("m3-block", unsafe);
     if (unsafe_result.blocked || unsafe_result.archived <= 0) {
         std::cerr << "testM3GoalBlockedUnlessUnsafe: expected --unsafe to allow run\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static Thoth::RestoreRequest makeTestRestoreRequest(
+    Thoth::RestoreMode mode = Thoth::RestoreMode::REPLAY) {
+    Thoth::RestoreRequest request;
+    request.mode = mode;
+    request.requested_by = "TEST";
+    return request;
+}
+
+static bool setupM4ArchivedSession(Memory& memory,
+                                   Thoth::SQLiteMemoryRepository& repo,
+                                   const std::string& sid,
+                                   int hotSeedCount,
+                                   std::shared_ptr<Thoth::FakeClock> clock) {
+    seedSessionMessages(repo, sid, hotSeedCount, clock->nowMs());
+    auto request = makeTestManualRequest(true, false);
+    const auto result = memory.runConsolidation(sid, request);
+    return !result.blocked && result.archived > 0;
+}
+
+static bool testM4LegacyEqualsFullReplay() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_01.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-01");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-01", 55, clock)) {
+        std::cerr << "testM4LegacyEqualsFullReplay: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto legacy = memory.getArchivedTurns();
+    auto req = makeTestRestoreRequest(Thoth::RestoreMode::REPLAY);
+    const auto ranged = memory.runRestore("m4-01", req);
+    if (ranged.blocked || legacy.size() != ranged.turns.size() || legacy.empty()) {
+        std::cerr << "testM4LegacyEqualsFullReplay: size mismatch\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    for (size_t i = 0; i < legacy.size(); ++i) {
+        if (legacy[i].archive_id != ranged.turns[i].archive_id
+            || legacy[i].original_timestamp_ms != ranged.turns[i].original_timestamp_ms
+            || legacy[i].content != ranged.turns[i].content) {
+            std::cerr << "testM4LegacyEqualsFullReplay: content/order mismatch at " << i << "\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+    for (size_t i = 1; i < legacy.size(); ++i) {
+        if (legacy[i - 1].original_timestamp_ms > legacy[i].original_timestamp_ms
+            || (legacy[i - 1].original_timestamp_ms == legacy[i].original_timestamp_ms
+                && legacy[i - 1].archive_id > legacy[i].archive_id)) {
+            std::cerr << "testM4LegacyEqualsFullReplay: unstable order\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4RangedReplaySubset() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_02.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-02");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-02", 55, clock)) {
+        std::cerr << "testM4RangedReplaySubset: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto all = memory.getArchivedTurns();
+    if (all.size() < 3) {
+        std::cerr << "testM4RangedReplaySubset: need more archives\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    const int64_t start = all[1].original_timestamp_ms;
+    const int64_t end = all[all.size() - 2].original_timestamp_ms;
+
+    auto req = makeTestRestoreRequest(Thoth::RestoreMode::REPLAY);
+    req.range.start_ms = start;
+    req.range.end_ms = end;
+    const auto result = memory.runRestore("m4-02", req);
+    if (result.blocked || result.turns.empty() || result.matched != static_cast<int>(result.turns.size())) {
+        std::cerr << "testM4RangedReplaySubset: unexpected result\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (result.matched >= static_cast<int>(all.size())) {
+        std::cerr << "testM4RangedReplaySubset: expected strict subset\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    for (const auto& t : result.turns) {
+        if (t.original_timestamp_ms < start || t.original_timestamp_ms > end) {
+            std::cerr << "testM4RangedReplaySubset: out-of-range turn\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4OpenEndedRanges() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_03.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-03");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-03", 55, clock)) {
+        std::cerr << "testM4OpenEndedRanges: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const auto all = memory.getArchivedTurns();
+    const int64_t mid = all[all.size() / 2].original_timestamp_ms;
+
+    auto startOnly = makeTestRestoreRequest(Thoth::RestoreMode::REPLAY);
+    startOnly.range.start_ms = mid;
+    const auto startRes = memory.runRestore("m4-03", startOnly);
+    for (const auto& t : startRes.turns) {
+        if (t.original_timestamp_ms < mid) {
+            std::cerr << "testM4OpenEndedRanges: start-only failed\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+
+    auto endOnly = makeTestRestoreRequest(Thoth::RestoreMode::REPLAY);
+    endOnly.range.end_ms = mid;
+    const auto endRes = memory.runRestore("m4-03", endOnly);
+    for (const auto& t : endRes.turns) {
+        if (t.original_timestamp_ms > mid) {
+            std::cerr << "testM4OpenEndedRanges: end-only failed\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+    if (startRes.matched + endRes.matched < static_cast<int>(all.size())) {
+        // mid appears in both — sum can be >= all.size()
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4ReplayNoSideEffects() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_04.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-04");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-04", 55, clock)) {
+        std::cerr << "testM4ReplayNoSideEffects: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const int hotBefore = repo->getHotMessageCount("m4-04");
+    const int coldBefore = static_cast<int>(repo->getArchivedMessages("m4-04").size());
+    const int warmBefore = static_cast<int>(repo->getRecentWarmMemory("m4-04", 100).size());
+
+    auto req = makeTestRestoreRequest(Thoth::RestoreMode::REPLAY);
+    req.range.start_ms = 0;
+    const auto result = memory.runRestore("m4-04", req);
+    if (result.blocked || result.matched <= 0) {
+        std::cerr << "testM4ReplayNoSideEffects: replay failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    if (repo->getHotMessageCount("m4-04") != hotBefore
+        || static_cast<int>(repo->getArchivedMessages("m4-04").size()) != coldBefore
+        || static_cast<int>(repo->getRecentWarmMemory("m4-04", 100).size()) != warmBefore) {
+        std::cerr << "testM4ReplayNoSideEffects: tier counts changed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4RehydrateInserts() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_05.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-05");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-05", 55, clock)) {
+        std::cerr << "testM4RehydrateInserts: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    // Clear hot so archived turns are not duplicates of remaining hot.
+    const int coldBefore = static_cast<int>(repo->getArchivedMessages("m4-05").size());
+    repo->clearMessages("m4-05");
+    const int hotBefore = repo->getHotMessageCount("m4-05");
+
+    auto req = makeTestRestoreRequest(Thoth::RestoreMode::REHYDRATE);
+    const auto result = memory.runRestore("m4-05", req);
+    if (result.blocked || result.restored <= 0 || !result.turns.empty()) {
+        std::cerr << "testM4RehydrateInserts: unexpected result restored="
+                  << result.restored << " blocked=" << result.blocked << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (static_cast<int>(repo->getArchivedMessages("m4-05").size()) != coldBefore) {
+        std::cerr << "testM4RehydrateInserts: cold mutated\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (repo->getHotMessageCount("m4-05") != hotBefore + result.restored) {
+        std::cerr << "testM4RehydrateInserts: hot delta mismatch\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4RehydrateIdempotent() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_06.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-06");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-06", 55, clock)) {
+        std::cerr << "testM4RehydrateIdempotent: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    repo->clearMessages("m4-06");
+
+    auto req = makeTestRestoreRequest(Thoth::RestoreMode::REHYDRATE);
+    const auto first = memory.runRestore("m4-06", req);
+    const auto second = memory.runRestore("m4-06", req);
+    if (first.restored <= 0 || second.restored != 0
+        || second.skipped_dup != second.matched
+        || second.matched != first.matched) {
+        std::cerr << "testM4RehydrateIdempotent: expected full skip on second pass\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4GoalBlockedUnlessUnsafe() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_07.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-07");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-07", 55, clock)) {
+        std::cerr << "testM4GoalBlockedUnlessUnsafe: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    repo->clearMessages("m4-07");
+    memory.setGoalActiveChecker([]() { return true; });
+
+    auto blocked = makeTestRestoreRequest(Thoth::RestoreMode::REHYDRATE);
+    const auto blocked_result = memory.runRestore("m4-07", blocked);
+    if (!blocked_result.blocked || blocked_result.restored != 0) {
+        std::cerr << "testM4GoalBlockedUnlessUnsafe: expected blocked rehydrate\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    // Replay must still be allowed while goal active.
+    auto replay = makeTestRestoreRequest(Thoth::RestoreMode::REPLAY);
+    const auto replay_result = memory.runRestore("m4-07", replay);
+    if (replay_result.blocked || replay_result.matched <= 0) {
+        std::cerr << "testM4GoalBlockedUnlessUnsafe: replay should be allowed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    auto unsafe = makeTestRestoreRequest(Thoth::RestoreMode::REHYDRATE);
+    unsafe.allow_during_goal = true;
+    const auto unsafe_result = memory.runRestore("m4-07", unsafe);
+    if (unsafe_result.blocked || unsafe_result.restored <= 0) {
+        std::cerr << "testM4GoalBlockedUnlessUnsafe: expected --unsafe to allow\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4InvalidRangeBlocked() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_08.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-08");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-08", 55, clock)) {
+        std::cerr << "testM4InvalidRangeBlocked: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const int hotBefore = repo->getHotMessageCount("m4-08");
+    const int coldBefore = static_cast<int>(repo->getArchivedMessages("m4-08").size());
+
+    auto req = makeTestRestoreRequest(Thoth::RestoreMode::REHYDRATE);
+    req.range.start_ms = 200;
+    req.range.end_ms = 100;
+    const auto result = memory.runRestore("m4-08", req);
+    if (!result.blocked || result.restored != 0) {
+        std::cerr << "testM4InvalidRangeBlocked: expected blocked invalid range\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (repo->getHotMessageCount("m4-08") != hotBefore
+        || static_cast<int>(repo->getArchivedMessages("m4-08").size()) != coldBefore) {
+        std::cerr << "testM4InvalidRangeBlocked: writes on invalid range\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testM4RehydrateRollback() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_09.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-09");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-09", 55, clock)) {
+        std::cerr << "testM4RehydrateRollback: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    repo->clearMessages("m4-09");
+    const int hotBefore = repo->getHotMessageCount("m4-09");
+
+#ifdef _WIN32
+    _putenv_s("THOTH_INJECT_RESTORE_FAIL", "insert");
+#else
+    setenv("THOTH_INJECT_RESTORE_FAIL", "insert", 1);
+#endif
+
+    auto req = makeTestRestoreRequest(Thoth::RestoreMode::REHYDRATE);
+    const auto result = memory.runRestore("m4-09", req);
+
+#ifdef _WIN32
+    _putenv_s("THOTH_INJECT_RESTORE_FAIL", "");
+#else
+    unsetenv("THOTH_INJECT_RESTORE_FAIL");
+#endif
+
+    if (result.blocked || result.restored != 0
+        || result.block_reason.find("failed") == std::string::npos) {
+        std::cerr << "testM4RehydrateRollback: expected failed rehydrate\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (repo->getHotMessageCount("m4-09") != hotBefore) {
+        std::cerr << "testM4RehydrateRollback: hot changed after rollback\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool readLastTraceTypes(std::vector<std::string>& out, int maxLines = 40) {
+    FileHandler fh;
+    const std::string path = fh.getAgentWorkspacePath("decision_trace.jsonl");
+    std::ifstream in(path);
+    if (!in) {
+        return false;
+    }
+    std::deque<std::string> lines;
+    std::string line;
+    while (std::getline(in, line)) {
+        lines.push_back(line);
+        if (static_cast<int>(lines.size()) > maxLines) {
+            lines.pop_front();
+        }
+    }
+    for (const auto& l : lines) {
+        try {
+            auto j = nlohmann::json::parse(l);
+            if (j.contains("trace_type")) {
+                out.push_back(j["trace_type"].get<std::string>());
+            }
+        } catch (...) {
+        }
+    }
+    return !out.empty();
+}
+
+static bool testM4DistinctDecisionTraceNames() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_m4_10.db").string();
+    enableEpisodicMock();
+    auto clock = makeM2TestClock();
+    Memory memory(cfg);
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf, &cfg);
+    memory.configureConsolidation(nullptr, &engine, clock);
+    memory.setActiveSessionId("m4-10");
+
+    auto* repo = memory.getSQLiteRepo();
+    if (!repo || !setupM4ArchivedSession(memory, *repo, "m4-10", 55, clock)) {
+        std::cerr << "testM4DistinctDecisionTraceNames: setup failed\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    repo->clearMessages("m4-10");
+
+    auto replay = makeTestRestoreRequest(Thoth::RestoreMode::REPLAY);
+    memory.runRestore("m4-10", replay);
+    auto rehydrate = makeTestRestoreRequest(Thoth::RestoreMode::REHYDRATE);
+    memory.runRestore("m4-10", rehydrate);
+
+    // Legacy silent path must not be required to emit.
+    (void)memory.getArchivedTurns();
+
+    std::vector<std::string> types;
+    if (!readLastTraceTypes(types, 80)) {
+        std::cerr << "testM4DistinctDecisionTraceNames: could not read traces\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    bool sawReplay = false;
+    bool sawRehydrate = false;
+    for (const auto& t : types) {
+        if (t == "memory_restore_replay") sawReplay = true;
+        if (t == "memory_restore_rehydrate") sawRehydrate = true;
+        if (t == "memory_restore") {
+            std::cerr << "testM4DistinctDecisionTraceNames: shared memory_restore name forbidden\n";
+            fs::remove(cfg.database_path);
+            return false;
+        }
+    }
+    if (!sawReplay || !sawRehydrate) {
+        std::cerr << "testM4DistinctDecisionTraceNames: missing distinct events\n";
         fs::remove(cfg.database_path);
         return false;
     }
@@ -13630,6 +14139,16 @@ int main() {
     if (!testM3IdempotentDoubleRun()) failures++;
     if (!testM3StatusRunStatus()) failures++;
     if (!testM3GoalBlockedUnlessUnsafe()) failures++;
+    if (!testM4LegacyEqualsFullReplay()) failures++;
+    if (!testM4RangedReplaySubset()) failures++;
+    if (!testM4OpenEndedRanges()) failures++;
+    if (!testM4ReplayNoSideEffects()) failures++;
+    if (!testM4RehydrateInserts()) failures++;
+    if (!testM4RehydrateIdempotent()) failures++;
+    if (!testM4GoalBlockedUnlessUnsafe()) failures++;
+    if (!testM4InvalidRangeBlocked()) failures++;
+    if (!testM4RehydrateRollback()) failures++;
+    if (!testM4DistinctDecisionTraceNames()) failures++;
     if (!testMemorySessionScoping()) failures++;
     if (!testFactStore()) failures++;
     if (!testStoreFactTool()) failures++;

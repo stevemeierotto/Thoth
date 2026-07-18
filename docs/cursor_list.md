@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-09 (Phase E — **v0.1 certified complete** · paused before Zenodo)  
+**Last updated:** 2026-07-18 (M4 range restore ✅ — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
@@ -3974,7 +3974,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **M1.5** | Episodic verification gate | ✅ | **`episodic_memory_benchmark.md`** — E2E retrieval, failure injection, latency, negative cases |
 | **M2** | Pruning: age-based trigger | ✅ | Policy-driven consolidation — `memory` config, `ConsolidationDecision`, Clock |
 | **M3** | Pruning: admin `/prune` command | ✅ | Manual trigger + `DecisionTraceLogger`; `getConsolidationStatus` / `runConsolidation` API |
-| **M4** | Pruning: `MemoryPruner::restore(session_id, range)` | 📋 | On-demand historical replay; transactional SQLite |
+| **M4** | Pruning: `MemoryPruner::restore(session_id, range)` | ✅ | **Implemented** 2026-07-18 — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0 (replay + rehydrate); tests M4-01–M4-10 |
 | **M5** | Vector store benchmark scaffold | 📋 | Step 3.4: ingest/latency/memory contract tests at 10k/50k/100k chunks; dual-write stub (disabled) |
 
 **Done already (don't redo):** `FactStore`, `MemoryPruner` hot-tier auto-prune, `IVectorStore` / `FlatVectorStore` wrapper.
@@ -4099,7 +4099,7 @@ The third tier does not exist yet. It is the missing bridge between "it works" a
 | — | **M3** — `/prune` admin command | ✅ | Operational memory loop closed |
 | — | **E1** — Environment pinning | ✅ | `docs/benchmark_environment.md` |
 | — | **E2** — Phases A–E | ✅ | Phase E certified; paused before Zenodo |
-| **1** | **M4** — `MemoryPruner::restore(session_id, range)` | 📋 | Foundation F3 needs; operators cannot replay archives |
+| **1** | **M4** — `MemoryPruner::restore(session_id, range)` | ✅ | Implemented 2026-07-18 — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0 |
 | **2** | **G1d** — Trajectory scoring ablation | 🔶 | Decide tune vs drop vs redesign before F5 |
 | **3** | **E3** — SCR in CI | 📋 | Strategy promotion as regression signal |
 | **4** | **C6 Phase 3** — Accumulated multi-session analysis | ✅ | C6.3-01–06 ✅; operator guide [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md); fixture catalog [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md) |
@@ -4166,9 +4166,9 @@ Done    E2 Phase E Step 2 — authoritative STRICT trio sealed ✅ 2026-07-09
 Done    E2 Phase E Step 3 — L4 verification package ✅ 2026-07-09
 Done    E2 Phase E Step 4 — claims audit ✅ 2026-07-09
 Done    E2 Phase E Step 5 — `PHASE_E_COMPLETE.md` certified ✅ 2026-07-09
-Next 1  **M4** — range restore (or **G1d** / **C6 Phase 3** / **E3** — pick fork)
+Next 1  **G1d** / **E3** / **B1** — pick fork (M4 ✅)
 Next 2  **B1** — 30-case hardened corpus (required before V3 Zenodo)
-Next 3  **C6 Phase 3 + E3** — longitudinal metrics; SCR harness
+Next 3  **E3** — SCR harness
 Later   F3/F1 — when eval identifies bottleneck (§ Reflection)
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)

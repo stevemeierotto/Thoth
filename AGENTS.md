@@ -644,20 +644,19 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 - Strategy Engine and trajectory learning infrastructure
 - Scientific execution mode
 - Memory pruning (hot-tier auto-archive + GUI session trim)
-- Memory consolidation M1–M3 (warm tier, age policy, `/prune` admin API)
+- Memory consolidation M1–M4 (warm tier, age policy, `/prune` admin API, range restore)
 - Security enforcement (ConstraintChecker, sandbox boundaries)
 - E2 evaluation kernel + Phases A–E (Phase E v0.1 certified — see `docs/phases/PHASE_E_COMPLETE.md`)
 
 ### 🔬 Prototype / Partial
 
-- Memory pruning: **M4** range restore not yet implemented (M1 consolidate ✅; M2 age policy ✅; M3 `/prune` ✅).
 - Trajectory retrieval: $w_t$ active locally; mixed lift on trajectory-disambiguation benchmark cases (see `plan_reuse_tuning.md`).
 - E2 episodic learning eval: Phase E v0.1 certified for `n=3_strict_trio` with **no measurable lift** (`mean_episodic_lift = 0.0`); generalization and Zenodo V3 deferred (see `docs/phases/PHASE_E_COMPLETE.md`).
 
 ### 📋 Planned
 
 - Hierarchical Subgoal Trees (active subgoal embedding per subgoal)
-- Post-E forks: B1 hardened corpus, C6 Phase 3 longitudinal metrics, E3 SCR harness, M4 restore, G1d trajectory ablation
+- Post-E forks: B1 hardened corpus, E3 SCR harness, G1d trajectory ablation (M4 ✅)
 
 ### 🔮 Future expansion (optional — not scheduled)
 
