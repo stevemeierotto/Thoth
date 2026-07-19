@@ -1,9 +1,9 @@
 # G1e — Trajectory Polarity Probe Protocol
 
-**Protocol version:** G1e v1.1  
-**Status:** 🔒 **Locked** — v1.0/v1.1; Phase 2 ✅; **Phase 3 executed** 2026-07-18 (KEEP candidate `w_t=−0.05`)  
-**Execution status:** Scientifically executed (Phase 3). **Phase 4 pending** — production still `trajectory: 0.0` until KEEP confirmed  
-**Prerequisite:** G1d ✅ closed (terminal **DROP**; production `trajectory: 0.0` until Phase 4)  
+**Protocol version:** G1e v1.2  
+**Status:** 🔒 **Phase 4 KEEP @ −0.05 applied** 2026-07-19 — production `trajectory: -0.05`; magnitude tuning **paused (not dropped)**  
+**Execution status:** Phase 0–4 complete for KEEP@−0.05. Future probes (e.g. `−0.40`) remain allowed under separate approval — fork not closed as DROP  
+**Prerequisite:** G1d ✅ closed for **positive** `w_t`; G1e supersedes production weight with polarity KEEP  
 **Methodology reuse (immutable science source):** [`trajectory_ablation_benchmark.md`](trajectory_ablation_benchmark.md) v1.0 — case filter, arms A/B/C structure, EPSILON, winner rules  
 **G1d close-out (immutable):** [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) G1d-CO v1.2 — **not** reopened by this fork  
 **Checkpoint tracking:** [`cursor_list.md`](cursor_list.md) § G1e  
@@ -14,7 +14,7 @@
 
 | Class | Sections | Binding? |
 |-------|----------|----------|
-| **Normative** | Framing, schedule, no-scalar-rescue, decision criteria, sequencing, Phase 0–1, **Phase 2 preflight checklist**, Phase 3–4 stubs, non-goals, exit criteria | **Yes** — SHALL/MUST |
+| **Normative** | Framing, schedule, no-scalar-rescue, **Phase 3b**, decision criteria, sequencing, Phase 0–1, Phase 2 preflight, Phase 3–4, non-goals | **Yes** — SHALL/MUST |
 | **Informative** | Rationale, doc map | **No** |
 
 If informative text conflicts with a normative rule, the **normative** rule governs.
@@ -63,11 +63,56 @@ On `TRAJECTORY_DISAMBIGUATES` cases only: does Arm B with scheduled **negative**
 
 | Order | `w_t` | Notes |
 |-------|-------|--------|
-| 1 | **−0.05** | First polarity probe |
-| 2 | **−0.10** | Next scheduled weight |
-| 3 | **−0.20** | Final scalar probe under G1e |
+| 1 | **−0.05** | First polarity probe — **KEEP** (Phase 3) |
+| 2 | **−0.10** | Not KEEP |
+| 3 | **−0.20** | Not KEEP; win rate baseline for Phase 3b early-stop |
+| 3b | **−0.30** | Magnitude extension (v1.2); early-stop if win rate worsens |
 
-**Excluded:** `+0.25` and any other positive `w_t` under this fork.
+**Excluded:** `+0.25` and any other positive `w_t` under this fork. **`−0.40` is not authorized** unless Phase 3b early-stop does not fire **and** owner separately approves.
+
+---
+
+## Normative — Phase 3b (magnitude probe + win-rate early-stop) — locked v1.2
+
+### Goal
+
+Test whether more negative `w_t=−0.30` improves (or at least does not worsen) B-vs-A win rate vs the Phase 3 `−0.20` result, given mean Δ improved with magnitude while win rate stalled.
+
+### Preconditions
+
+1. Phase 3 complete  
+2. Same backend / `env_hash` lineage as Phase 2/3  
+3. Production `trajectory` remains **0.0**  
+4. No TfIdf; full ~30-case; no `--sample`
+
+### Schedule
+
+| Order | `w_t` |
+|-------|-------|
+| 1 | **−0.30** |
+
+### Early-stop rule (normative)
+
+| Metric | Baseline (Phase 3 `−0.20`) | Stop if |
+|--------|----------------------------|---------|
+| Win % (B vs A, ties excluded) | **57.1%** (8 wins / 6 losses) | new win % **&lt; 57.1%** |
+
+If early-stop fires:
+
+1. **Stop** further scalar magnitude tuning under G1e (including `−0.40`).  
+2. Log **TUNING_STOPPED_WIN_RATE** with `−0.30` provenance.  
+3. KEEP@`−0.05` remains the Phase 4 candidate unless owner revises selection.
+
+If win rate does **not** worsen vs baseline:
+
+1. Log `−0.30` results (KEEP or not).  
+2. **STOP for owner review** before any `−0.40` run (separate approval required).
+
+Δ alone **SHALL NOT** authorize continuing to `−0.40`.
+
+### Harness
+
+`isTrajectoryAblationG1eWt` / CLI `--wt` **SHALL** accept `−0.30` (and `-0.3` via float epsilon) in addition to `{−0.05, −0.10, −0.20}`.
 
 ---
 
@@ -125,14 +170,14 @@ STOP — owner review before Phase 3
   ↓
 Phase 3  Authoritative runs: −0.05 → −0.10 → −0.20              ✅ executed 2026-07-18
   ↓
-STOP — owner review before Phase 4
+Phase 4  Decision log / optional config                         ✅ KEEP@−0.05 production 2026-07-19
   ↓
-Phase 4  Decision log / optional config / F5 handoff            [separate approval]
+OPEN     Magnitude tuning paused (not dropped) — e.g. −0.40 later [separate approval]
 ```
 
 Each **STOP** requires explicit owner go-ahead before the next phase (AGENTS.md Planning / Implementation Gate).
 
-**Current freeze:** Phase 3 complete. KEEP candidate at `w_t=−0.05` (`run-1784408754379`). **Do not** write production config until Phase 4 approved. Lineage: `env_hash=116927dd…`, `backend=ollama` @ `http://127.0.0.1:11434`.
+**Current status:** Production `trajectory: -0.05` (KEEP). G1e magnitude search is **paused, not abandoned**. `−0.40` and further probes require separate approval.
 
 ---
 
@@ -171,7 +216,7 @@ Accept G1e weights on `run_trajectory_ablation_benchmark` without breaking G1d T
 | Item | Requirement |
 |------|-------------|
 | Keep | `isTrajectoryAblationTuneWt()` = `{0.05, 0.1}` only |
-| Add | `isTrajectoryAblationG1eWt(float)` → `{−0.05, −0.10, −0.20}` |
+| Add | `isTrajectoryAblationG1eWt(float)` → `{−0.05, −0.10, −0.20}` (+ `−0.30` under v1.2 Phase 3b) |
 | CLI `--wt` | Accept **either** G1d TUNE **or** G1e set; reject all else |
 | Provenance | When G1e wt: stdout + JSONL include `fork=g1e` and `tune_wt=<value>`; **SHALL NOT** label as Phase C TUNE |
 | Arms | Reuse `trajectoryAblationArmConfig(arm, wt_bc)` |
@@ -246,7 +291,8 @@ Fail any step → do **not** start Phase 3.
 | Phase | Work |
 |-------|------|
 | **3** | Full ~30-case External runs at −0.05, then −0.10, then −0.20 (no TfIdf for decisions); same `env_hash` lineage as approved Phase 2 |
-| **4** | Log KEEP or **NO_SCALAR_RESCUE → F5**; optional production config only if KEEP approved |
+| **3b** | Optional magnitude probe `−0.30` with win-rate early-stop vs `−0.20` (v1.2); `−0.40` only with separate approval if early-stop does not fire |
+| **4** | Log KEEP @ −0.05; set production `trajectory: -0.05`; **do not drop** open magnitude-tuning lane |
 
 Scientific execution of G1e **begins at Phase 3**.
 
@@ -282,4 +328,4 @@ G1d positive weights (`0.20`, `0.10`, `0.05`) all yielded mean Δ(B−A) ≤ 0; 
 
 ---
 
-*G1e v1.0 locked 2026-07-18 (Phase 0–1). Phase 2 checklist locked in v1.1; Phase 2 executed 2026-07-18. Phase 3 executed 2026-07-18 (KEEP@−0.05 candidate). Phase 4 requires separate owner approval. Production remains `0.0` until Phase 4.*
+*G1e v1.0–v1.2. Phase 4 KEEP@−0.05 applied to production 2026-07-19. Magnitude tuning paused (not dropped); further probes (e.g. −0.40) need separate approval.*

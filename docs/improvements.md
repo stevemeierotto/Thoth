@@ -57,7 +57,7 @@ Before making any changes:
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
-**Active work:** Remaining Phase 3–4 items (G2 subgoals, **G1d ✅ DROP** 2026-07-18 — production `w_t=0.0`; **G1e** Phase 3 ✅ KEEP@−0.05 — Phase 4 pending — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.1, M5 vector benchmarks). **M4 range restore ✅** ([`M4_PROTOCOL.md`](M4_PROTOCOL.md)). **Phase 5 (Self-Building)** is optional future expansion — not scheduled. **E1 ✅**; **E2 Phases A–E ✅ certified** (2026-07-09). **C6.3-03 ✅** sealed; **C6.3-04 ✅** promotion policy; **C6.3-05 ✅** operator guide; **C6.3-06 ✅** regression fixtures. **Containerization Plans A–L ✅** (2026-07-12–16); **Plan M ✅**; **Plan N (N0–N6) ✅**; **Plan N5 ✅** (2026-07-17–18) — see [`completed_improvements_log.md`](completed_improvements_log.md) July 2026 at-a-glance. Next forks: **G1e** Phase 4, **B1**, **E3**, **G2/M5**. See `cursor_list.md`.
+**Active work:** Remaining Phase 3–4 items (G2 subgoals, **G1d** positive-weight DROP + **G1e** KEEP@−0.05 in production 2026-07-19 — magnitude tuning paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.2, M5 vector benchmarks). **M4 range restore ✅** ([`M4_PROTOCOL.md`](M4_PROTOCOL.md)). **Phase 5 (Self-Building)** is optional future expansion — not scheduled. **E1 ✅**; **E2 Phases A–E ✅ certified** (2026-07-09). **C6.3-03 ✅** sealed; **C6.3-04 ✅** promotion policy; **C6.3-05 ✅** operator guide; **C6.3-06 ✅** regression fixtures. **Containerization Plans A–L ✅** (2026-07-12–16); **Plan M ✅**; **Plan N (N0–N6) ✅**; **Plan N5 ✅** (2026-07-17–18) — see [`completed_improvements_log.md`](completed_improvements_log.md) July 2026 at-a-glance. Next forks: **B1**, **E3**, **G2/M5**. See `cursor_list.md`.
 
 ---
 
@@ -417,7 +417,7 @@ Before moving to Phase 4:
 | 4.2 Scientific execution mode | ✅ | `ScientificExecutionMode`; Cognate V2 (2026-03-28) |
 | 4.3 Strategy memory / hints | ✅ | `StrategyEngine` + planner injection (not separate `StrategyMemory` class) |
 | 4.4 Hierarchical subgoals | 📋 | Not implemented |
-| 4.5 Trajectory awareness | ✅ DROP / 🔶 G1e | G1d closed (`w_t=0.0`); G1e Phase 3 ✅ KEEP@−0.05; Phase 4 pending — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) |
+| 4.5 Trajectory awareness | ✅ G1e KEEP | Production `w_t=−0.05` (2026-07-19); magnitude tuning paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) |
 | 4.6 Adaptive graph learning | ✅ | `GraphRefiner` operational |
 | 4.7 Model upgrade path | 📋 | Design/doc step not closed out |
 
@@ -537,7 +537,7 @@ Requirements:
 
 ## Step 4.5 — GRAG Upgrade: Trajectory Awareness
 
-**Status:** ✅ DROP 2026-07-18 — infrastructure retained; production `w_t=0.0` after G1d close-out. **G1e** Phase 3 ✅ KEEP candidate `−0.05`; Phase 4 pending — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.1. See `plan_reuse_tuning.md`, `completed_improvements_log.md`.
+**Status:** ✅ G1e KEEP 2026-07-19 — production `w_t=−0.05`. G1d DROP remains historical for positive weights. Magnitude tuning paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.2. See `plan_reuse_tuning.md`, `completed_improvements_log.md`.
 
 **Description:**
 Implement progress-aware retrieval per `grag_upgrade.md` Upgrade #2.

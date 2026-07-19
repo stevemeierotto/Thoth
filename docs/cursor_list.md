@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-18 (G1e Phase 3 ✅ KEEP@−0.05 candidate; Phase 4 pending; G1d ✅ DROP)  
+**Last updated:** 2026-07-19 (G1e Phase 4 ✅ production `w_t=-0.05`; magnitude tuning paused open)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
@@ -3884,7 +3884,7 @@ STRICT / INTEGRATION share eval types and schema → **behavioral separation**, 
 | C1 planner context management (budgets, validator, memory hygiene) | ✅ 2026-06-27 |
 | `allow_shell_exec` tool gating | ✅ |
 | Memory consolidation (M2 age-based policy) | ✅ 2026-06-29 |
-| Trajectory $w_t$ in scoring path | ✅ DROP | G1d closed 2026-07-18; production `trajectory: 0.0` |
+| Trajectory $w_t$ in scoring path | ✅ G1e KEEP | production `trajectory: -0.05` (2026-07-19); magnitude tuning paused open |
 | Unit tests | ✅ full suite green (~78s, 2026-06-16) |
 | Doc alignment P2.1–P2.6 | ✅ |
 
@@ -4008,7 +4008,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **E2** | Episodic memory learning eval | ✅ | Phases A–E complete; Phase E v0.1 certified 2026-07-09 — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); paused before Zenodo V3 |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
 | **G1d** | Trajectory bucket diagnostic | ✅ | Closed **DROP** 2026-07-18 — [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) v1.2; production `w_t=0.0` |
-| **G1e** | Trajectory polarity probe (post-G1d) | 🔶 | Phase 3 ✅ — KEEP candidate `w_t=−0.05` (`run-1784408754379`); Phase 4 pending — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.1 |
+| **G1e** | Trajectory polarity probe (post-G1d) | 🔶 | Phase 4 ✅ production `−0.05`; **tuning paused (not dropped)** — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.2 |
 
 ---
 
@@ -4102,7 +4102,7 @@ The third tier does not exist yet. It is the missing bridge between "it works" a
 | — | **E2** — Phases A–E | ✅ | Phase E certified; paused before Zenodo |
 | **1** | **M4** — `MemoryPruner::restore(session_id, range)` | ✅ | Implemented 2026-07-18 — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0 |
 | **2** | **G1d** — Trajectory scoring ablation | ✅ | Closed **DROP**; `w_t=0.0`; F5 gate cleared |
-| **2b** | **G1e** — Trajectory polarity (`−0.05/−0.10/−0.20`) | 🔶 | Phase 3 ✅ KEEP@−0.05; Phase 4 pending — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) |
+| **2b** | **G1e** — Trajectory polarity | 🔶 | KEEP@−0.05 in production; magnitude lane paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) |
 | **3** | **E3** — SCR in CI | 📋 | Strategy promotion as regression signal |
 | **4** | **C6 Phase 3** — Accumulated multi-session analysis | ✅ | C6.3-01–06 ✅; operator guide [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md); fixture catalog [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md) |
 | **5** | **B1** — 30 hardened corpus cases | 📋 | Required before generalization / V3 Zenodo |
@@ -4173,10 +4173,12 @@ Done    **G1e** Phase 0–1 — protocol lock + harness allowlist ✅ 2026-07-18
 Done    **G1e** Phase 2 checklist lock (v1.1) ✅ 2026-07-18
 Done    **G1e** Phase 2 execute preflight (`run-1784407500480`) ✅ 2026-07-18
 Done    **G1e** Phase 3 polarity runs — KEEP@−0.05 candidate ✅ 2026-07-18
-Next 1  **G1e** Phase 4 — confirm KEEP@−0.05 + optional production config (separate approval)
-Next 2  **B1** — 30-case hardened corpus (required before V3 Zenodo)
-Next 3  **E3** — SCR harness
-Later   **G2** / **M5** — as scheduled in roadmap
+Done    **G1e** Phase 3b `−0.30` — win rate flat vs −0.20; pause before −0.40 ✅ 2026-07-19
+Done    **G1e** Phase 4 — KEEP@−0.05 production ✅ 2026-07-19
+Next 1  **B1** — 30-case hardened corpus (required before V3 Zenodo)
+Next 2  **E3** — SCR harness
+Next 3  **G2** / **M5** — as scheduled; G1e magnitude resume (e.g. −0.40) on owner request
+Later   **G1e** resume magnitude probes when ready
 Later   F3/F1 — when eval identifies bottleneck (§ Reflection)
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)

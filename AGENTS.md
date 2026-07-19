@@ -324,7 +324,7 @@ Thoth/
 
 **Completed Upgrades**:
 
-- Trajectory-aware retrieval: infrastructure retained; production `w_t = 0.0` after G1d **DROP** (2026-07-18); executive zeroes weight when trajectory embedding is empty
+- Trajectory-aware retrieval: infrastructure retained; production `w_t = -0.05` after G1e **KEEP** (2026-07-19); executive zeroes weight when trajectory embedding is empty; magnitude tuning paused open
 - Dynamic Graph Edge Learning: Edge weights are now dynamically adjusted via `GraphRefiner` based on execution success/failure. Graph density metrics are logged in retrieval diagnostics.
 
 ### Tool System
@@ -650,13 +650,13 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 
 ### 🔬 Prototype / Partial
 
-- Trajectory retrieval: G1d ✅ **DROP** 2026-07-18 — production `w_t=0.0` (see `plan_reuse_tuning.md`, `G1D_CLOSEOUT_PROTOCOL.md`). **G1e** Phase 3 ✅ — KEEP candidate `w_t=−0.05`; Phase 4 pending — [`docs/G1E_POLARITY_PROTOCOL.md`](docs/G1E_POLARITY_PROTOCOL.md) v1.1.
+- Trajectory retrieval: G1d DROP (positives) + **G1e KEEP** 2026-07-19 — production `w_t=-0.05` (see `plan_reuse_tuning.md`, `G1E_POLARITY_PROTOCOL.md`). Magnitude tuning paused open.
 - E2 episodic learning eval: Phase E v0.1 certified for `n=3_strict_trio` with **no measurable lift** (`mean_episodic_lift = 0.0`); generalization and Zenodo V3 deferred (see `docs/phases/PHASE_E_COMPLETE.md`).
 
 ### 📋 Planned
 
 - Hierarchical Subgoal Trees (active subgoal embedding per subgoal)
-- Post-E forks: B1 hardened corpus, E3 SCR harness (M4 ✅; G1d ✅ DROP; G1e 🔶 Phase 4 pending)
+- Post-E forks: B1 hardened corpus, E3 SCR harness (M4 ✅; G1d/G1e trajectory weight lane paused open)
 
 ### 🔮 Future expansion (optional — not scheduled)
 

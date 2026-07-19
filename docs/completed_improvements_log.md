@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-18 (G1e Phase 3 ✅ science executed; KEEP@−0.05 candidate; Phase 4 pending; G1d ✅ DROP)
+Last updated: 2026-07-19 (G1e Phase 4 ✅ KEEP@−0.05 in production; magnitude tuning paused not dropped)
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
@@ -8,6 +8,8 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 | Track | What shipped | Status |
 |-------|----------------|--------|
+| **G1e Phase 4** | KEEP@−0.05 → production `trajectory: -0.05`; tuning paused open | ✅ 2026-07-19 |
+| **G1e Phase 3b** | `−0.30` magnitude probe + win-rate early-stop | ✅ 2026-07-19 |
 | **G1e Phase 3** | Authoritative polarity runs `{−0.05,−0.10,−0.20}` | ✅ 2026-07-18 |
 | **G1e Phase 2 execute** | Operational preflight (ollama External; `fork=g1e`) | ✅ 2026-07-18 |
 | **G1e Phase 2 checklist** | Preflight contract locked (v1.1) | 🔒 2026-07-18 |
@@ -33,6 +35,48 @@ Commits (parent): `f005e25` … `e08341e`. Submodule: Plan N `405c144`; M4 `99c5
 Detail entries below remain the chronological source of truth; this table is the operator index.
 
 ---
+
+### G1e — Phase 4 ✅ KEEP @ −0.05 (2026-07-19)
+
+**Protocol:** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **G1e v1.2** Phase 4.  
+**Decision:** **KEEP** production trajectory weight at **`−0.05`** (Phase 3 `run-1784408754379`: 60% B vs A, Δ+0.00516).
+
+**Config / defaults**
+
+| Location | Value |
+|----------|--------|
+| `agent_workspace/retrieval_config.json` → `trajectory` | **−0.05** |
+| `Config::wt` (`config.h`) | **−0.05** |
+| `RetrievalConfig::wt` | **−0.05** |
+| Empty-T executive zeroing | unchanged (still forces 0 when T empty) |
+
+**Tuning status:** **Paused, not dropped.** Phase 3b left magnitude search open (`−0.40` gated). Owner may resume later under separate approval. Not NO_SCALAR_RESCUE; not F5 handoff.
+
+**G1d relation:** G1d DROP remains the record for **positive** `w_t`. Production polarity weight is a **G1e** supersession.
+
+### G1e — Phase 3b executed ✅ (2026-07-19) — `−0.30` magnitude probe
+
+**Protocol:** [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) **G1e v1.2**.  
+**Production:** `trajectory: 0.0` unchanged.
+
+| Item | Value |
+|------|--------|
+| `w_t` | **−0.30** |
+| run_id | `run-1784477417536` |
+| B vs A | 8 / 6 (**57.1%**) |
+| mean Δ(B−A) | **+0.01406** |
+| G1e KEEP | **no** (win % &lt; 60%) |
+| Harness label | TUNE† (G1e: Not KEEP) |
+
+†Harness still emits G1d matrix strings.
+
+**Early-stop vs Phase 3 `−0.20` (8/6 = 57.1%):** win rate **equal, not worse** → early-stop **does not fire**. Per v1.2: **do not** run `−0.40` without separate owner approval.
+
+**Lineage note:** `env_hash=7e46b1e7…` differs from Phase 2/3 `116927dd…` because git SHAs advanced (`thoth` `98e87be`, `basic_agent` `fd169e4`). Backend/endpoints/models digest unchanged (`ollama` @ `http://127.0.0.1:11434`, `diagnostic_digest=e33a310d…`).
+
+**Phase 4 candidate:** still **KEEP @ −0.05** (`run-1784408754379`) unless owner revises selection. `−0.30` did not meet KEEP.
+
+**STOP:** Magnitude tuning paused pending owner decision (Phase 4 and/or optional `−0.40`).
 
 ### G1e — Phase 3 executed ✅ (2026-07-18) — Checkpoint Phase 3
 

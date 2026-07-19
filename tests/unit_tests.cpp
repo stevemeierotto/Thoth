@@ -7143,7 +7143,7 @@ static bool testG1dTuneWtOverride() {
 }
 
 static bool testG1ePolarityWtAllowlist() {
-    for (const float wt : {-0.05f, -0.10f, -0.20f}) {
+    for (const float wt : {-0.05f, -0.10f, -0.20f, -0.30f}) {
         if (!Thoth::isTrajectoryAblationG1eWt(wt) || !Thoth::isTrajectoryAblationCliWt(wt)) {
             std::cerr << "testG1ePolarityWtAllowlist: expected G1e wt accepted: " << wt << '\n';
             return false;
@@ -7168,14 +7168,21 @@ static bool testG1ePolarityWtAllowlist() {
             return false;
         }
     }
+    // -0.3 must match -0.30 within epsilon used by allowlist
+    if (!Thoth::isTrajectoryAblationG1eWt(-0.3f)) {
+        std::cerr << "testG1ePolarityWtAllowlist: expected -0.3 accepted as -0.30\n";
+        return false;
+    }
     if (Thoth::isTrajectoryAblationG1eWt(0.05f) || Thoth::isTrajectoryAblationG1eWt(0.1f) ||
         Thoth::isTrajectoryAblationG1eWt(0.2f) || Thoth::isTrajectoryAblationG1eWt(0.0f) ||
-        Thoth::isTrajectoryAblationG1eWt(0.25f) || Thoth::isTrajectoryAblationG1eWt(-0.25f)) {
+        Thoth::isTrajectoryAblationG1eWt(0.25f) || Thoth::isTrajectoryAblationG1eWt(-0.25f) ||
+        Thoth::isTrajectoryAblationG1eWt(-0.40f)) {
         std::cerr << "testG1ePolarityWtAllowlist: unexpected G1e accept\n";
         return false;
     }
     if (Thoth::isTrajectoryAblationCliWt(0.2f) || Thoth::isTrajectoryAblationCliWt(0.0f) ||
-        Thoth::isTrajectoryAblationCliWt(0.25f) || Thoth::isTrajectoryAblationCliWt(-0.25f)) {
+        Thoth::isTrajectoryAblationCliWt(0.25f) || Thoth::isTrajectoryAblationCliWt(-0.25f) ||
+        Thoth::isTrajectoryAblationCliWt(-0.40f)) {
         std::cerr << "testG1ePolarityWtAllowlist: CLI must reject non-schedule weights\n";
         return false;
     }
