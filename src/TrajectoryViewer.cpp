@@ -5,11 +5,13 @@
  */
 
 #include "TrajectoryViewer.h"
+#include "backend_capabilities.h"
 #include <wx/sizer.h>
 #include <iomanip>
 #include <sstream>
 #include <map>
 #include <vector>
+#include <algorithm>
 
 TrajectoryViewer::TrajectoryViewer(wxWindow* parent)
     : wxPanel(parent, wxID_ANY)
@@ -20,11 +22,13 @@ TrajectoryViewer::TrajectoryViewer(wxWindow* parent)
 void TrajectoryViewer::InitializeUI() {
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
 
-    // Using wxTreeListCtrl for robust hierarchical data with columns (Labels)
+    m_statusLabel = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    m_statusLabel->Hide();
+    mainSizer->Add(m_statusLabel, 0, wxALL, 5);
+
     m_treeList = new wxTreeListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTL_SINGLE);
     m_treeList->SetMinSize(wxSize(-1, 60));
     
-    // Define columns (The "Labels" requested)
     m_treeList->AppendColumn("Process (Goal / Step)", 400);
     m_treeList->AppendColumn("ID / Index", 120);
     m_treeList->AppendColumn("Score / Status", 100);
@@ -35,10 +39,52 @@ void TrajectoryViewer::InitializeUI() {
     SetSizer(mainSizer);
 }
 
-void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson, const nlohmann::json& episodeStepsJson) {
+void TrajectoryViewer::SetPresentationState(Thoth::PanelPresentationState state,
+                                            const wxString& message) {
+    using Thoth::PanelPresentationState;
+    wxString text = message;
+    switch (state) {
+    case PanelPresentationState::Loading:
+        if (text.empty()) text = "Loading…";
+        m_treeList->Hide();
+        m_treeList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Unavailable:
+        if (text.empty()) {
+            text = wxString::FromUTF8(Thoth::kUnavailableWithCurrentBackend);
+        }
+        m_treeList->Hide();
+        m_treeList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Error:
+        if (text.empty()) text = "Error loading trajectories.";
+        m_treeList->Hide();
+        m_treeList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Empty:
+        m_statusLabel->Hide();
+        m_treeList->DeleteAllItems();
+        m_treeList->Show();
+        break;
+    case PanelPresentationState::Populated:
+        m_statusLabel->Hide();
+        m_treeList->Show();
+        break;
+    }
+    Layout();
+}
+
+void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson,
+                                          const nlohmann::json& episodesJson) {
     if (!wxIsMainThread()) {
-        wxTheApp->CallAfter([this, trajectoriesJson, episodeStepsJson]() {
-            UpdateTrajectories(trajectoriesJson, episodeStepsJson);
+        wxTheApp->CallAfter([this, trajectoriesJson, episodesJson]() {
+            UpdateTrajectories(trajectoriesJson, episodesJson);
         });
         return;
     }
@@ -46,7 +92,15 @@ void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson
     m_treeList->DeleteAllItems();
     wxTreeListItem root = m_treeList->GetRootItem();
 
-    // 1. Map trajectories for easy lookup
+    const bool trajEmpty = !trajectoriesJson.is_array() || trajectoriesJson.empty();
+    const bool stepsEmpty = !episodesJson.is_array() || episodesJson.empty();
+    if (trajEmpty && stepsEmpty) {
+        SetPresentationState(Thoth::PanelPresentationState::Empty);
+        return;
+    }
+
+    SetPresentationState(Thoth::PanelPresentationState::Populated);
+
     std::map<std::string, const nlohmann::json*> trajMap;
     if (trajectoriesJson.is_array()) {
         for (const auto& t : trajectoriesJson) {
@@ -54,16 +108,13 @@ void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson
         }
     }
 
-    // 2. Group episode steps by episode_id
     std::map<std::string, std::vector<const nlohmann::json*>> stepsByEpisode;
-    if (episodeStepsJson.is_array()) {
-        for (const auto& s : episodeStepsJson) {
+    if (episodesJson.is_array()) {
+        for (const auto& s : episodesJson) {
             stepsByEpisode[s.value("episode_id", "unknown")].push_back(&s);
         }
     }
 
-    // 3. Populate Tree
-    // First, consolidated trajectories
     for (auto const& [tid, trajPtr] : trajMap) {
         const auto& traj = *trajPtr;
         std::string goal = traj.value("goal", "n/a");
@@ -79,7 +130,6 @@ void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson
         m_treeList->SetItemText(parent, 2, wxString::FromUTF8(ssScore.str()));
         m_treeList->SetItemText(parent, 3, dt.Format("%Y-%m-%d %H:%M:%S"));
 
-        // 3a. Initial Plan Node (The "Plan" in Plan vs Reality)
         if (traj.contains("trajectory") && traj["trajectory"].contains("plan_initial")) {
             auto const& plan = traj["trajectory"]["plan_initial"];
             if (plan.contains("steps") && plan["steps"].is_array()) {
@@ -92,7 +142,6 @@ void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson
             }
         }
 
-        // 3b. Reality Node (Actual Steps Taken - The "Reality")
         if (stepsByEpisode.count(tid)) {
             auto steps = stepsByEpisode[tid];
             std::sort(steps.begin(), steps.end(), [](const auto* a, const auto* b) {
@@ -111,7 +160,6 @@ void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson
         }
     }
 
-    // 4. In-progress/Orphan episodes
     for (auto const& [eid, steps] : stepsByEpisode) {
         if (trajMap.find(eid) == trajMap.end()) {
             const auto* firstStep = steps[0];

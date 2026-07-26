@@ -5,6 +5,7 @@
  */
 
 #include "StrategyPanel.h"
+#include "backend_capabilities.h"
 #include <wx/sizer.h>
 #include <iomanip>
 #include <sstream>
@@ -19,6 +20,10 @@ void StrategyPanel::InitializeUI() {
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
 
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Learned Strategies:"), 0, wxALL, 5);
+
+    m_statusLabel = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    m_statusLabel->Hide();
+    mainSizer->Add(m_statusLabel, 0, wxALL, 5);
     
     m_strategyList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
     m_strategyList->SetMinSize(wxSize(-1, 60));
@@ -31,10 +36,56 @@ void StrategyPanel::InitializeUI() {
     SetSizer(mainSizer);
 }
 
+void StrategyPanel::SetPresentationState(Thoth::PanelPresentationState state,
+                                         const wxString& message) {
+    using Thoth::PanelPresentationState;
+    wxString text = message;
+    switch (state) {
+    case PanelPresentationState::Loading:
+        if (text.empty()) text = "Loading…";
+        m_strategyList->Hide();
+        m_strategyList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Unavailable:
+        if (text.empty()) {
+            text = wxString::FromUTF8(Thoth::kUnavailableWithCurrentBackend);
+        }
+        m_strategyList->Hide();
+        m_strategyList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Error:
+        if (text.empty()) text = "Error loading strategies.";
+        m_strategyList->Hide();
+        m_strategyList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Empty:
+        m_statusLabel->Hide();
+        m_strategyList->DeleteAllItems();
+        m_strategyList->Show();
+        break;
+    case PanelPresentationState::Populated:
+        m_statusLabel->Hide();
+        m_strategyList->Show();
+        break;
+    }
+    Layout();
+}
+
 void StrategyPanel::UpdateStrategies(const nlohmann::json& strategiesJson) {
     m_strategyList->DeleteAllItems();
 
-    if (!strategiesJson.is_array()) return;
+    if (!strategiesJson.is_array() || strategiesJson.empty()) {
+        SetPresentationState(Thoth::PanelPresentationState::Empty);
+        return;
+    }
+
+    SetPresentationState(Thoth::PanelPresentationState::Populated);
 
     for (const auto& strat : strategiesJson) {
         wxVector<wxVariant> data;

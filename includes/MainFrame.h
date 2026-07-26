@@ -21,6 +21,7 @@
 #include "FileDropTarget.h"
 #include "ChatSessionDataViewModel.h"
 #include "ChatSessionTypes.h" // Contains ChatMessage and ChatSession structs
+#include "progress_source.h"
 
 class GragDiagnosticsPanel;
 class StrategyPanel;
@@ -69,6 +70,7 @@ private:
         ID_MENU_BENCH_STRATEGY_LEARNING,
         ID_MENU_BENCH_FULL_SYSTEM,
         ID_MENU_BENCH_EXPORT_COGNITIVE_METRICS,
+        ID_MENU_BENCH_STATUS,
         ID_MENU_VIEW_SHOW_SESSIONS,
         ID_MENU_VIEW_SHOW_PLAN,
         ID_MENU_VIEW_SHOW_GRAG,
@@ -131,6 +133,11 @@ private:
     wxButton* m_ragDeleteBtn3 = nullptr;
     wxButton* m_ragDeleteBtn4 = nullptr;
 
+    wxStaticText* m_corpusStatus = nullptr;
+    wxTextCtrl* m_corpusText = nullptr;
+    wxPanel* m_ragTab = nullptr;
+    wxButton* m_sendToEngineBtn = nullptr;
+
     // Data model for the chat list
     wxObjectDataPtr<ChatSessionDataViewModel> m_chatListModel;
 
@@ -141,6 +148,7 @@ private:
     std::vector<Thoth::ChatSession> m_sessions;
     int m_activeSessionIndex = -1;
     std::unordered_map<std::string, std::string> m_requestToSession;
+    std::unordered_map<std::string, int> m_inFlightChatBySession;
 
     std::unique_ptr<AgentInterface> agent;
 
@@ -152,18 +160,37 @@ private:
     void CreateNewSession(const std::string& title = "New Chat");
     void RefreshChatList();
     void RefreshRagPanel();
-    void UpdateRagSlotLabel(const std::string& path, const std::string& label);
+    void RefreshRagTabLayout();
+    void RefreshCorpusPanel();
+    void RefreshSessionConversationFromEngine(const std::string& sessionId);
+    void ApplyIngestControls(const Thoth::EventStreamSnapshot& snap);
+    void ApplyLocalNoteIndexingStarted(const std::string& engine_file_path);
+    void ApplyLocalNoteIndexingCompleted(const std::string& engine_file_path,
+                                         bool success,
+                                         int chunk_count);
+    void RecordLocalNoteIngestAccept(const std::string& host_path,
+                                     const std::string& document_id,
+                                     const std::string& document_name);
+    void SyncLocalNotesFromCorpus(const nlohmann::json& corpus_body);
+    bool HasPendingLocalNoteIndexing() const;
     void MigrateFilesToSandbox(std::vector<std::string>& paths);
     void RenderSession(std::size_t sessionIndex);
     void ScrollChatToBottom();
     void ActivateSession(std::size_t sessionIndex);
     bool SyncAgentMemoryFromActiveSession(bool includeRagFiles = true);
     void RefreshAllPanels();
+    void UpdateBackendModeBanner();
+    void RefreshEventStreamIndicators();
+    void ApplyEngineDegradedControls(const Thoth::EventStreamSnapshot& snap);
+    void OnConnectionPollTimer(wxTimerEvent& evt);
+    void ApplyBenchmarksMenuCapabilities();
+    void SetTransientStatus(const wxString& text);
     /** Strip leading "goal:" / "/goal" for executeGoal routing. Empty if not a goal. */
     static wxString ExtractGoalText(const wxString& input);
 
     // Event handlers
     void OnSend(wxCommandEvent& evt);
+    void OnSendToEngine(wxCommandEvent& evt);
     void OnChatContainerSize(wxSizeEvent& evt);
     void OnShowDecisionTrace(wxCommandEvent& evt);
     void OnChatSelected(wxDataViewEvent& evt);
@@ -203,12 +230,32 @@ private:
 
     void RefreshGoalBanner();
     void ClearActiveGoal();
+    void ClearSessionGoal(const std::string& sessionId);
     void SetSessionGoal(const std::string& sessionId, const std::string& goal);
+    /** R3 — align backend session identity with active tab before goal POST. */
+    void SyncBackendSessionIdentity();
+    /** R3-G6 — resolve session for goal lifecycle events (never broadcast on empty id). */
+    std::string ResolveGoalEventSessionId(const std::string& eventSessionId) const;
+    void RegisterPendingChatRequest(const std::string& requestId, const std::string& sessionId);
+    void ClearPendingChatRequest(const std::string& requestId, const std::string& sessionId);
+    void UpdateChatSendChrome();
     void RefreshExecutiveStripActivity();
     static bool InputStartsGoal(const wxString& input);
 
+    /** Phase 5 — work-implying strip text; no-op if source is UserAction/Unknown. */
+    void ApplyWorkActivity(const wxString& message, Thoth::ProgressSource source);
+    /** Phase 5 — work-implying status; chrome may use SetTransientStatus directly. */
+    void ApplyWorkStatus(const wxString& text, Thoth::ProgressSource source);
+    /** Phase 7 — one visible outcome per user-initiated Engine operation. */
+    void HandleOperationComplete(const Thoth::OperationResult& result,
+                                 const std::string& requestId);
+    Thoth::ProgressSource ActiveBackendProgressSource() const;
+
     int m_ragIndexingCount = 0;
     bool m_goalPlanningPending = false;
+
+    wxTimer m_connectionPollTimer;
+    std::int64_t m_lastCorpusPollForIndexingMs = 0;
 
     void SetupMenuBar();
     void ShowMenuStatus(const wxString& title, const wxString& message);

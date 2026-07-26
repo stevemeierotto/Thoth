@@ -5,8 +5,8 @@
 #   SMOKE_MODE=ci ./docker/smoke.sh
 #
 # Effect:
-# - Clears thoth-engine's depends_on llama-server health gate (!override)
-# - CI smoke starts only thoth-engine (llama-server not started — no GGUF)
+# - Clears thoth-engine's depends_on llama-server / llama-embed-server health gates (!override)
+# - CI smoke starts only thoth-engine (llama servers not started — no GGUF)
 # Default operator compose (docker-compose.yml alone) is unchanged.
 
 services:

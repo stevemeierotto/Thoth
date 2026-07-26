@@ -72,12 +72,27 @@ data: {"event_id":42,"sequence":42,"timestamp":"2026-07-13T20:15:31Z",...}
 | `EMBEDDING_FAILED` | Embedding backend failure |
 | `RETRIEVAL_DIAGNOSTICS` | GRAG retrieval diagnostics |
 | `INDEXING_STARTED` | RAG indexing started |
-| `INDEXING_COMPLETED` | RAG indexing finished |
+| `INDEXING_COMPLETED` | RAG indexing worker finished (see metadata below) |
 | `PLAN_REUSE_INJECTION` | Plan history hint injected |
 | `REFLECTION_REPLAN` | Reflection loop replan |
 | `PLAN_HISTORY_STORED` | Successful plan stored for reuse |
 
 Events are **observational only** — clients must not infer permission to mutate controller state from the stream.
+
+### `INDEXING_COMPLETED` metadata (R2)
+
+When the Engine arms outcome fields, `metadata` includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `file_path` | string | Engine storage path for the file |
+| `success` | bool | **true** iff indexing finished successfully |
+| `chunk_count` | int | Chunks stored for this file (0 on failure) |
+| `reason` | string | Present when `success` is **false** (closed set: `no_chunks`, `empty_document`, `read_failed`, `sandbox_rejected`, `engine_unavailable`) |
+
+**`INDEXING_COMPLETED` does not mean success** — clients must read `success` (and corpus `status` on refresh). Legacy events without `success` should refresh corpus only (neutral copy).
+
+Corpus list (`GET /v1/rag/corpus`) may include documents with `status: "failed"` and optional `reason`.
 
 ---
 

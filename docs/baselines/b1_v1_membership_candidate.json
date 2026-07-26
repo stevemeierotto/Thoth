@@ -1,0 +1,857 @@
+{
+  "lifecycle": "candidate",
+  "protocol_version": "B1 v1.1",
+  "suite_version": "b1_v1",
+  "selection_timestamp_utc": "2026-07-19T17:09:42Z",
+  "commit_thoth": "86f71bb32cde71f3616e160ba834d9a07d3cba8c",
+  "commit_basic_agent": "df13c98006d7788cd9388708576ae3caadd36505",
+  "summary": {
+    "pool_parsed": 100,
+    "removed_by_eligibility": 20,
+    "eligible_after_eligibility": 80,
+    "removed_by_deduplication": 0,
+    "eligible_after_dedup": 80,
+    "excluded_by_lexicographic_cutoff": 50,
+    "final_selected_count": 30,
+    "gap_cells": 0,
+    "per_paper_selected": {
+      "rag": 6,
+      "react": 6,
+      "genagents": 6,
+      "memgpt": 6,
+      "cot": 6
+    },
+    "per_type_selected": {
+      "UNAMBIGUOUS": 10,
+      "GOAL_DISAMBIGUATES": 10,
+      "TRAJECTORY_DISAMBIGUATES": 10
+    }
+  },
+  "corpus_manifest": [
+    {
+      "filename": "2005.11401v4.txt",
+      "paper_key": "rag",
+      "sha256": "96684118e6ff6bff9c9121e2cbb4fe377e690ccdf6429bfe8ea57b8de153e8ed",
+      "exists": true
+    },
+    {
+      "filename": "2210.03629v3.txt",
+      "paper_key": "react",
+      "sha256": "29addded17175e5fb5274c4d63475e6daad3556354eacd784175bbe09c21d435",
+      "exists": true
+    },
+    {
+      "filename": "2304.03442v2.txt",
+      "paper_key": "genagents",
+      "sha256": "230c2f964c97d524ebcdb87ce1555e563f36481cf75824ae34a99b65e8de62cd",
+      "exists": true
+    },
+    {
+      "filename": "2310.08560v2.txt",
+      "paper_key": "memgpt",
+      "sha256": "404bd58f1429320719513ec470e79ef998551444dc3d80b8bd974dd53ffd8d2c",
+      "exists": true
+    },
+    {
+      "filename": "2201.11903v6.txt",
+      "paper_key": "cot",
+      "sha256": "b11dfc1d35fd655c83ef9c8f58658ce672c0aafad7acb4a666a4fc89439c904d",
+      "exists": true
+    }
+  ],
+  "paper_mapping_frozen_for_b1_v1": {
+    "2005.11401v4.txt": "rag",
+    "2210.03629v3.txt": "react",
+    "2304.03442v2.txt": "genagents",
+    "2310.08560v2.txt": "memgpt",
+    "2201.11903v6.txt": "cot"
+  },
+  "gaps": [],
+  "removed_eligibility": [
+    {
+      "case_id": "D1",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2310.08560v2.txt",
+      "paper_key": "memgpt",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D2",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2304.03442v2.txt",
+      "paper_key": "genagents",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D3",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2210.03629v3.txt",
+      "paper_key": "react",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D4",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2304.03442v2.txt",
+      "paper_key": "genagents",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D5",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2005.11401v4.txt",
+      "paper_key": "rag",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D6",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2310.08560v2.txt",
+      "paper_key": "memgpt",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D7",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2201.11903v6.txt",
+      "paper_key": "cot",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D8",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2210.03629v3.txt",
+      "paper_key": "react",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D9",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2304.03442v2.txt",
+      "paper_key": "genagents",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "D10",
+      "case_type": "DISTRACTOR_NOISE",
+      "expected_file": "2210.03629v3.txt",
+      "paper_key": "react",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M1",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2304.03442v2.txt",
+      "paper_key": "genagents",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M2",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2210.03629v3.txt",
+      "paper_key": "react",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M3",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2310.08560v2.txt",
+      "paper_key": "memgpt",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M4",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2005.11401v4.txt",
+      "paper_key": "rag",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M5",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2201.11903v6.txt",
+      "paper_key": "cot",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M6",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2210.03629v3.txt",
+      "paper_key": "react",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M7",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2304.03442v2.txt",
+      "paper_key": "genagents",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M8",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2310.08560v2.txt",
+      "paper_key": "memgpt",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M9",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2005.11401v4.txt",
+      "paper_key": "rag",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    },
+    {
+      "case_id": "M10",
+      "case_type": "MULTI_HOP",
+      "expected_file": "2201.11903v6.txt",
+      "paper_key": "cot",
+      "reasons": [
+        "type_not_in_ugt"
+      ]
+    }
+  ],
+  "removed_deduplication": [],
+  "excluded_by_lexicographic_cutoff": [
+    {
+      "case_id": "U16",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "rag",
+      "cell": "rag/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "U6",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "rag",
+      "cell": "rag/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "G26",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "rag",
+      "cell": "rag/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G5",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "rag",
+      "cell": "rag/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T22",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "rag",
+      "cell": "rag/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T27",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "rag",
+      "cell": "rag/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T3",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "rag",
+      "cell": "rag/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T9",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "rag",
+      "cell": "rag/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "U3",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "react",
+      "cell": "react/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "U8",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "react",
+      "cell": "react/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "G18",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G20",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G24",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G28",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G3",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G8",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T2",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T21",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T26",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T30",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T6",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "react",
+      "cell": "react/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "U4",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "genagents",
+      "cell": "genagents/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "U9",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "genagents",
+      "cell": "genagents/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "G2",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G23",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G29",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G4",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G6",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G9",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T12",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T14",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T16",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T23",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T29",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T7",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "cell": "genagents/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "U2",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "memgpt",
+      "cell": "memgpt/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "U7",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "memgpt",
+      "cell": "memgpt/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "G16",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "cell": "memgpt/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G22",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "cell": "memgpt/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G27",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "cell": "memgpt/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T24",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "cell": "memgpt/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T28",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "cell": "memgpt/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T4",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "cell": "memgpt/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T8",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "cell": "memgpt/TRAJECTORY_DISAMBIGUATES"
+    },
+    {
+      "case_id": "U20",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "cot",
+      "cell": "cot/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "U5",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "cot",
+      "cell": "cot/UNAMBIGUOUS"
+    },
+    {
+      "case_id": "G25",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "cot",
+      "cell": "cot/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G30",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "cot",
+      "cell": "cot/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "G7",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "cot",
+      "cell": "cot/GOAL_DISAMBIGUATES"
+    },
+    {
+      "case_id": "T5",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "cot",
+      "cell": "cot/TRAJECTORY_DISAMBIGUATES"
+    }
+  ],
+  "candidate_membership": [
+    {
+      "case_id": "U1",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "rag",
+      "expected_file": "2005.11401v4.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "Maximum Inner Product Search MIPS for dense vector retrieval",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "U11",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "rag",
+      "expected_file": "2005.11401v4.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "DPR dense passage retriever Wikipedia snippets",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "G15",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "rag",
+      "expected_file": "2005.11401v4.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "dense vector indices",
+      "trajectory": "",
+      "goal": "Build a high-performance semantic search engine"
+    },
+    {
+      "case_id": "G21",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "rag",
+      "expected_file": "2005.11401v4.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "retrieval mechanism",
+      "trajectory": "",
+      "goal": "Implement a RAG-based question answering system"
+    },
+    {
+      "case_id": "T15",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "rag",
+      "expected_file": "2005.11401v4.txt",
+      "attestation": "e1_attested",
+      "query": "document ranking",
+      "trajectory": "I am optimizing the DPR (Dense Passage Retriever) component.",
+      "goal": "Improve retrieval accuracy"
+    },
+    {
+      "case_id": "T20",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "rag",
+      "expected_file": "2005.11401v4.txt",
+      "attestation": "e1_attested",
+      "query": "tiered storage",
+      "trajectory": "I'm looking at the non-parametric memory implementation.",
+      "goal": "Manage agent memory"
+    },
+    {
+      "case_id": "U13",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "react",
+      "expected_file": "2210.03629v3.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "HotpotQA and StrategyQA experimental results",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "U18",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "react",
+      "expected_file": "2210.03629v3.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "interleaving thoughts and actions for decision making",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "G12",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "expected_file": "2210.03629v3.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "context management",
+      "trajectory": "",
+      "goal": "Improve decision making in dynamic environments"
+    },
+    {
+      "case_id": "G14",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "react",
+      "expected_file": "2210.03629v3.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "agent observation",
+      "trajectory": "",
+      "goal": "Debug the reasoning trace of an agent"
+    },
+    {
+      "case_id": "T13",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "react",
+      "expected_file": "2210.03629v3.txt",
+      "attestation": "e1_attested",
+      "query": "action sequence",
+      "trajectory": "I just emitted a 'Thought' about the search results.",
+      "goal": "Solve reasoning tasks"
+    },
+    {
+      "case_id": "T18",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "react",
+      "expected_file": "2210.03629v3.txt",
+      "attestation": "e1_attested",
+      "query": "rationales",
+      "trajectory": "I am evaluating the ALFWorld trajectory success.",
+      "goal": "Verify reasoning quality"
+    },
+    {
+      "case_id": "U14",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "genagents",
+      "expected_file": "2304.03442v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "Hobbs Cafe and generative agent architecture",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "U19",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "genagents",
+      "expected_file": "2304.03442v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "reflection engine for agent generalization",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "G13",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "expected_file": "2304.03442v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "agent observation",
+      "trajectory": "",
+      "goal": "Track the behavior of thousands of simulated humans"
+    },
+    {
+      "case_id": "G19",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "expected_file": "2304.03442v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "daily schedules",
+      "trajectory": "",
+      "goal": "Create believable NPC routines in a game"
+    },
+    {
+      "case_id": "T1",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "expected_file": "2304.03442v2.txt",
+      "attestation": "e1_attested",
+      "query": "planning architecture",
+      "trajectory": "I just finished reviewing the memory stream mechanism.",
+      "goal": "Implement autonomous agents"
+    },
+    {
+      "case_id": "T10",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "genagents",
+      "expected_file": "2304.03442v2.txt",
+      "attestation": "e1_attested",
+      "query": "acting and behavior",
+      "trajectory": "The agent just decided to head to Hobbs Cafe for lunch.",
+      "goal": "Enable complex behaviors"
+    },
+    {
+      "case_id": "U12",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "memgpt",
+      "expected_file": "2310.08560v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "paging and disk swaps for context management",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "U17",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "memgpt",
+      "expected_file": "2310.08560v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "fixed-length context window as physical memory",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "G1",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "expected_file": "2310.08560v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "hierarchical memory system",
+      "trajectory": "",
+      "goal": "Manage limited context windows in long conversations"
+    },
+    {
+      "case_id": "G11",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "expected_file": "2310.08560v2.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "context management",
+      "trajectory": "",
+      "goal": "Optimize memory usage for OS-style agents"
+    },
+    {
+      "case_id": "T11",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "expected_file": "2310.08560v2.txt",
+      "attestation": "e1_attested",
+      "query": "memory management",
+      "trajectory": "I have implemented the virtual context manager.",
+      "goal": "Scale context handling"
+    },
+    {
+      "case_id": "T19",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "memgpt",
+      "expected_file": "2310.08560v2.txt",
+      "attestation": "e1_attested",
+      "query": "tiered storage",
+      "trajectory": "I just moved a block from main to external storage.",
+      "goal": "Manage agent memory"
+    },
+    {
+      "case_id": "U10",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "cot",
+      "expected_file": "2201.11903v6.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "series of intermediate reasoning steps emerge naturally",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "U15",
+      "case_type": "UNAMBIGUOUS",
+      "paper_key": "cot",
+      "expected_file": "2201.11903v6.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "few-shot prompting reasoning chain exemplars",
+      "trajectory": "",
+      "goal": "N/A"
+    },
+    {
+      "case_id": "G10",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "cot",
+      "expected_file": "2201.11903v6.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "reflection and planning",
+      "trajectory": "",
+      "goal": "Explain the series of steps taken to solve a problem"
+    },
+    {
+      "case_id": "G17",
+      "case_type": "GOAL_DISAMBIGUATES",
+      "paper_key": "cot",
+      "expected_file": "2201.11903v6.txt",
+      "attestation": "unvalidated_until_b1_run",
+      "query": "step-by-step logic",
+      "trajectory": "",
+      "goal": "Solve complex math word problems"
+    },
+    {
+      "case_id": "T17",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "cot",
+      "expected_file": "2201.11903v6.txt",
+      "attestation": "e1_attested",
+      "query": "rationales",
+      "trajectory": "I am providing 8-shot examples to the 540B model.",
+      "goal": "Verify reasoning quality"
+    },
+    {
+      "case_id": "T25",
+      "case_type": "TRAJECTORY_DISAMBIGUATES",
+      "paper_key": "cot",
+      "expected_file": "2201.11903v6.txt",
+      "attestation": "e1_attested",
+      "query": "chain of thought",
+      "trajectory": "I am looking at the LaMDA math results.",
+      "goal": "Study model reasoning"
+    }
+  ]
+}

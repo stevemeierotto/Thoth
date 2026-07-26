@@ -5,6 +5,7 @@
  */
 
 #include "GraphPanel.h"
+#include "backend_capabilities.h"
 #include <wx/sizer.h>
 #include <wx/graphics.h>
 #include <wx/dcclient.h>
@@ -55,24 +56,31 @@ void GraphPanel::InitializeUI() {
 
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Cognate Architecture Status:"), 0, wxALL, 5);
 
-    wxFlexGridSizer* grid = new wxFlexGridSizer(4, 5, 10);
-    grid->Add(new wxStaticText(this, wxID_ANY, "Nodes:"));
-    m_nodesValue = new wxStaticText(this, wxID_ANY, "0");
+    m_statusLabel = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    m_statusLabel->Hide();
+    mainSizer->Add(m_statusLabel, 0, wxALL, 5);
+
+    auto* statsPanel = new wxPanel(this, wxID_ANY);
+    auto* grid = new wxFlexGridSizer(4, 5, 10);
+    grid->Add(new wxStaticText(statsPanel, wxID_ANY, "Nodes:"));
+    m_nodesValue = new wxStaticText(statsPanel, wxID_ANY, "0");
     grid->Add(m_nodesValue);
 
-    grid->Add(new wxStaticText(this, wxID_ANY, "Edges:"));
-    m_edgesValue = new wxStaticText(this, wxID_ANY, "0");
+    grid->Add(new wxStaticText(statsPanel, wxID_ANY, "Edges:"));
+    m_edgesValue = new wxStaticText(statsPanel, wxID_ANY, "0");
     grid->Add(m_edgesValue);
 
-    grid->Add(new wxStaticText(this, wxID_ANY, "Weight:"));
-    m_avgWeightValue = new wxStaticText(this, wxID_ANY, "0.00");
+    grid->Add(new wxStaticText(statsPanel, wxID_ANY, "Weight:"));
+    m_avgWeightValue = new wxStaticText(statsPanel, wxID_ANY, "0.00");
     grid->Add(m_avgWeightValue);
 
-    grid->Add(new wxStaticText(this, wxID_ANY, "Success:"));
-    m_successRateValue = new wxStaticText(this, wxID_ANY, "0%");
+    grid->Add(new wxStaticText(statsPanel, wxID_ANY, "Success:"));
+    m_successRateValue = new wxStaticText(statsPanel, wxID_ANY, "0%");
     grid->Add(m_successRateValue);
 
-    mainSizer->Add(grid, 0, wxALL, 10);
+    statsPanel->SetSizer(grid);
+    mainSizer->Add(statsPanel, 0, wxALL, 10);
+    m_statsGrid = statsPanel;
 
     // Setup Cognitive Loop Nodes positions (relative)
     m_cognitiveNodes["GOAL"]       = {"Goal Ingestion", wxRect(20, 100, 120, 40)};
@@ -85,8 +93,49 @@ void GraphPanel::InitializeUI() {
     SetSizer(mainSizer);
 }
 
+void GraphPanel::SetPresentationState(Thoth::PanelPresentationState state,
+                                      const wxString& message) {
+    using Thoth::PanelPresentationState;
+    wxString text = message;
+    switch (state) {
+    case PanelPresentationState::Loading:
+        if (text.empty()) text = "Loading…";
+        if (m_statsGrid) m_statsGrid->Hide();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Unavailable:
+        if (text.empty()) {
+            text = wxString::FromUTF8(Thoth::kUnavailableWithCurrentBackend);
+        }
+        if (m_statsGrid) m_statsGrid->Hide();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Error:
+        if (text.empty()) text = "Error loading graph stats.";
+        if (m_statsGrid) m_statsGrid->Hide();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Empty:
+        m_statusLabel->Hide();
+        if (m_statsGrid) m_statsGrid->Show();
+        m_nodesValue->SetLabel("0");
+        m_edgesValue->SetLabel("0");
+        m_avgWeightValue->SetLabel("0.00");
+        m_successRateValue->SetLabel("0%");
+        break;
+    case PanelPresentationState::Populated:
+        m_statusLabel->Hide();
+        if (m_statsGrid) m_statsGrid->Show();
+        break;
+    }
+    Layout();
+}
+
 void GraphPanel::UpdateGraphStats(const nlohmann::json& statsJson) {
-    if (statsJson.is_null()) return;
+    SetPresentationState(Thoth::PanelPresentationState::Populated);
 
     m_nodesValue->SetLabel(std::to_string(statsJson.value("total_nodes", 0)));
     m_edgesValue->SetLabel(std::to_string(statsJson.value("total_edges", 0)));

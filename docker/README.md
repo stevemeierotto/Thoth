@@ -40,7 +40,8 @@ Without models, use `SMOKE_SKIP_INFERENCE=1` to skip the `/v1/goals` step when p
 | Service | Image | Host port | Role |
 |---------|-------|-----------|------|
 | `thoth-engine` | `thoth-engine:local` (built) | `8090` | HTTP API + SSE (`--serve`) |
-| `llama-server` | `ghcr.io/ggml-org/llama.cpp:server@sha256:823b6f01…` | *(internal)* | `llama_cpp` inference |
+| `llama-server` | `ghcr.io/ggml-org/llama.cpp:server@sha256:823b6f01…` | *(internal)* | Chat completions (`/v1/completions`) |
+| `llama-embed-server` | same digest-pinned image | *(internal)* | Embeddings (`/v1/embeddings`, `--embeddings`) |
 
 **Pinned llama image:** `ghcr.io/ggml-org/llama.cpp:server@sha256:823b6f019cafbee8878dfdd0d4750eae4f81dfafb60dc1fbefb66794a59903c8` (pulled 2026-07-14). Never `:latest`. To upgrade:
 
@@ -54,21 +55,57 @@ Package index: [ggml-org/llama.cpp packages](https://github.com/ggml-org/llama.c
 
 ## Model setup
 
-`llama-server` loads the chat model from:
+Chat and embeddings use **separate GGUF files** on the shared `llama-models` volume. The chat server cannot serve embeddings from the chat model alone — `llama-embed-server` runs with `--embeddings` on a dedicated embedding GGUF.
 
-```
-${LLAMA_CHAT_MODEL:-/models/chat.gguf}
-```
+| Variable | Default | Role |
+|----------|---------|------|
+| `LLAMA_CHAT_MODEL` | `/models/chat.gguf` | Chat / completion model path inside volume |
+| `LLAMA_EMBED_MODEL` | `/models/nomic-embed-text.gguf` | Embedding model path inside volume |
+| `OLLAMA_MODEL` | `chat` | API model name passed to llama-server for chat |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | API model name passed for embeddings (also `THOTH_EMBEDDING_MODEL`) |
 
 1. Copy a chat GGUF to the `llama-models` volume as `chat.gguf`, **or** set `LLAMA_CHAT_MODEL` in `.env`.
-2. For embeddings / RAG, also place an embedding GGUF and set `OLLAMA_EMBED_MODEL` / `config.json` `embedding_model` to match the name you pass to the API.
-3. First start with an empty `thoth-workspace` volume creates SQLite on demand; initial RAG indexing can be **slow** — allow extra time before `/ready` reports full capability.
+2. Copy an embedding GGUF (e.g. `nomic-embed-text`) as `nomic-embed-text.gguf`, **or** set `LLAMA_EMBED_MODEL`.
+3. After adding the embedding model or changing embed endpoints, **rebuild the RAG index** — indexes built during embed failures may contain TF-IDF fallback vectors (see below).
+4. First start with an empty `thoth-workspace` volume creates SQLite on demand; initial RAG indexing can be **slow** — allow extra time before `/ready` reports full capability.
+
+### Embedding model (one-time)
+
+If you already have `nomic-embed-text` in Ollama, export a GGUF and copy it into the volume:
+
+```bash
+# Example: download a GGUF (adjust URL/model to your environment)
+docker run --rm -v thoth_llama-models:/models curlimages/curl:8.5.0 -fL \
+  -o /models/nomic-embed-text.gguf \
+  "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf"
+```
+
+Verify the embedding server before indexing:
+
+```bash
+docker compose up -d llama-embed-server
+docker exec thoth-llama-embed-server-1 curl -sf -X POST http://127.0.0.1:8081/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nomic-embed-text","input":"thoth-embedding-probe"}' | head -c 200
+```
+
+### Re-index after embed migration
+
+Indexes built while embeddings were failing (HTTP 501 / unreachable Ollama) may store TF-IDF fallback vectors under an External/768 header. After the embed server is healthy:
+
+```bash
+./docker/seed-workspace.sh   # seeds rag/, deletes rag_index.bin, restarts engine
+# or manually: docker exec thoth-thoth-engine-1 rm -f /workspace/rag_index.bin && docker compose restart thoth-engine
+```
+
+Startup logs should show `[Thoth] embed_probe=ok … dimension=768`. No `Falling back … TfIdf` lines during indexing.
 
 Example `.env` (optional, do not commit secrets):
 
 ```bash
 THOTH_ENGINE_PUBLISH_PORT=8090
 LLAMA_CHAT_MODEL=/models/qwen2.5-3b-instruct-q4_k_m.gguf
+LLAMA_EMBED_MODEL=/models/nomic-embed-text.gguf
 OLLAMA_MODEL=chat
 OLLAMA_EMBED_MODEL=nomic-embed-text
 THOTH_LOG_CONFIG=1
@@ -104,6 +141,7 @@ Use **named local volumes** for SQLite (`memory.db`). Do not mount workspace ove
 | `THOTH_LOGS_PATH` | `/logs` |
 | `THOTH_PROJECT_ROOT` | `/workspace` (deterministic deploy override; optional when walk terminates) |
 | `THOTH_INFERENCE_BASE_URL` | `http://llama-server:8080` |
+| `THOTH_EMBED_BASE_URL` | `http://llama-embed-server:8081` |
 | `THOTH_INFERENCE_BACKEND` | `llama_cpp` |
 | `THOTH_ENGINE_BIND` | `0.0.0.0` |
 | `THOTH_ENGINE_PORT` | `8090` |
@@ -215,7 +253,7 @@ Change the published port with `THOTH_ENGINE_PUBLISH_PORT` in `.env` if `8090` i
 | Cognate side panels | Empty / unavailable in remote mode (no cognate HTTP APIs yet) |
 | Host vs container memory | Unchanged — volumes ≠ host `agent_workspace/` |
 | Explicit goals (`goal:` / `/goal`) | Routed to `/v1/goals` (not blocking `/v1/chat` on planning) |
-| HTTP timeouts | Chat default 600s; goals 1260s; override `THOTH_REMOTE_HTTP_TIMEOUT_SECONDS` |
+| HTTP timeouts | Chat default 600s; goals 1260s; override `THOTH_REMOTE_HTTP_TIMEOUT_SECONDS` (R4: failures surface in status bar; Send disabled while turn in flight). **R4 Engine verify script:** `scripts/r4_engine_verify.sh` — sanity **240s**, full multi-turn **600s** (override `R4_VERIFY_SANITY_TIMEOUT` / `R4_VERIFY_TURN_TIMEOUT`). |
 | Switch modes | Change env and **restart** the GUI (no rebuild) |
 
 Spec: [`plan_k_gui_api_client.md`](../docs/plan_k_gui_api_client.md)
@@ -238,7 +276,18 @@ Use this for manual validation when Compose or a host `thoth-engine` is availabl
 4. Stderr: `[AgentInterface] backend=remote url=http://127.0.0.1:8090`.
 5. Chat in GUI — response from remote engine (or clear `[RemoteEngine]` error if offline).
 6. Execute a goal — observe SSE-driven plan events in the UI when `/v1/events` is available.
-7. `unset THOTH_ENGINE_URL` and restart — returns to Local without rebuild.
+7. **RAG honesty (GUI Phase 1 / Restoration R1):** drop or Import Corpus a host file — status must say host-only / not sent to Engine; must **not** say “indexing…”. Slots show `(host-only)`. Engine `/workspace/rag` unchanged until **[Send to Engine]** (item 15). **`ingest` on `/ready` does not change drop behavior.**
+8. **Mode / capabilities (GUI Phase 2):** status bar field 0 shows `Backend: Engine` (never “Remote”). Strategy / Trajectories / Experiments / Graph-stats show **Unavailable with the current backend.** — not empty tables. Benchmarks menu items disabled; status line `Status: Available in Local backend`. Logs tab shows Unavailable (not host `decision_trace.jsonl`).
+9. **Cognitive diagnostics authority (GUI Phase 3 / D11):** after a remote goal, **Explain Plan** shows Engine decision summary (Phase 4) — structured fields from `GET /v1/diagnostics/latest-decision`, never host `decision_trace.jsonl`. If Engine is old and lacks the resource, capability/HTTP failure must not invent host traces. Logs remain Unavailable + why-copy until a later phase.
+10. `unset THOTH_ENGINE_URL` and restart — returns to Local without rebuild; status shows `Backend: Local`; cognate panels Empty/Populated from real data; Benchmarks enabled (`Status: Available`); Explain Plan uses Local `getLatestDecisionSummary()`; local drop may show real indexing again.
+11. **Progress discipline (GUI Phase 5 / D3a):** Engine mode drop → host-only status (same as item 7), **no** “indexing…” / strip counter from the drop itself regardless of `ingest` on `/ready`. Local drop → chrome “Added N file(s)” first; strip/counter only after INDEXING_* events. Goal send → “Goal submitted” until STATE_CHANGED/PLAN_*; never “Syncing RAG…” / invent Planning… before events. Remote goal must **not** call host `setRagFiles`.
+12. **SSE resilience (GUI Phase 6):** with Engine running, status field 1 stays quiet when `Events: Connected`. `docker compose stop thoth-engine` → field 1 shows `Events: Reconnecting` (and `Engine: …` if `/ready` fails); progress strip freezes without inventing work; agent controls disabled when Engine unhealthy. `docker compose start thoth-engine` → reconnects to `Connected` without GUI restart. GRAG panel footer shows `Last event: N s ago` when events flow.
+13. **Operation result honesty (GUI Phase 7):** with Engine stopped, Pause/Abort/goal/chat must show **one** correlated failure (e.g. `Engine unavailable — …`), never premature “paused/aborted/response received”. With Engine up, Pause succeeds → status shows success **after** backend confirms; chat failure surfaces in panel (not fake assistant success); no duplicate connection-lost spam alongside field 1 indicators.
+14. **Engine corpus listing (GUI Phase 8):** after `./docker/seed-workspace.sh`, RAG tab **Engine Corpus** lists seeded document **names** (not host paths). **Local Notes** collapsed in Engine mode. Empty volume → `Corpus is empty.` Engine down → `Corpus listing unavailable.` — never merged.
+15. **Corpus document creation (GUI Phase 9):** with Engine running and `THOTH_ENGINE_URL` set, add a host file to **Local Notes** (drop/import — no auto-ingest). **[Send to Engine]** enabled when `/ready` includes `ingest`. Click → **OperationResult** acceptance (`Document accepted: …`); indexing progress only via **INDEXING_*** SSE afterward. Created document appears in **Engine Corpus** after refresh/indexing. Engine stopped → honest failure, no fabricated indexing.
+16. **Conversation authority (GUI Phase 10):** with Engine running and `THOTH_ENGINE_URL` set, send a chat message — user bubble appears **only after** Engine accepts the turn. Restart GUI, reopen same session — history loads from Engine (**Get conversation**), not from `chat_sessions.json` messages. Failed send → **Failed to send** with no committed user bubble. `/ready` includes `conversation`.
+17. **Research resources (GUI Phase 11):** with Engine running and `THOTH_ENGINE_URL` set, open Strategies / Trajectories panels — data loads from Engine (`GET /v1/research/*`) or shows **Error** on fetch failure (never silent empty when the API failed). `/ready` includes `strategies`, `trajectories`, `episodes`. Restart GUI and refresh — panels re-fetch from Engine (no authoritative local cache).
+18. **Graph statistics (GUI Phase 12A):** with Engine running and `THOTH_ENGINE_URL` set, open Graph panel — stats load from Engine (`GET /v1/graph/stats`) or show **Error** on fetch failure (never treat failed fetch or `{}` as Empty). Valid zero-node/zero-edge snapshot → **Empty**. `/ready` includes `graph_stats`. Refresh re-fetches from Engine.
 
 **Opt-in automated live harness** (skips when unset):
 

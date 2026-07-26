@@ -7,10 +7,23 @@
  */
 
 #include "remote_agent_backend.h"
+#include "decision_summary.h"
+#include "conversation_authority.h"
+#include "corpus_create.h"
+#include "corpus_documents.h"
+#include "research_resources.h"
+#include "graph_statistics.h"
+#include "engine_connection_state.h"
+#include "operation_result.h"
 
 #include <curl/curl.h>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <thread>
 
 using json = nlohmann::json;
 using ThothRemoteHttp::buildChatRequestJson;
@@ -80,10 +93,77 @@ size_t sseWriteCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
 } // namespace
 
 RemoteAgentBackend::RemoteAgentBackend(std::string base_url)
-    : base_url_(normalizeBaseUrl(std::move(base_url))) {}
+    : base_url_(normalizeBaseUrl(std::move(base_url))) {
+    std::lock_guard<std::mutex> lock(snapshot_mutex_);
+    snapshot_.applies = true;
+    snapshot_.sse_enabled = true;
+    snapshot_.connection = Thoth::EventConnectionState::Disconnected;
+    snapshot_.engine = Thoth::EngineHealthState::Unknown;
+    snapshot_.snapshot_ms = nowMs();
+}
 
 RemoteAgentBackend::~RemoteAgentBackend() {
     stopSse();
+}
+
+int64_t RemoteAgentBackend::nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+void RemoteAgentBackend::updateConnectionState(Thoth::EventConnectionState state) {
+    std::lock_guard<std::mutex> lock(snapshot_mutex_);
+    snapshot_.connection = state;
+    publishSnapshotLocked();
+}
+
+void RemoteAgentBackend::publishSnapshotLocked() {
+    snapshot_.last_event_ms = last_event_ms_.load();
+    snapshot_.snapshot_ms = nowMs();
+}
+
+Thoth::EventStreamSnapshot RemoteAgentBackend::eventStreamSnapshot() const {
+    std::lock_guard<std::mutex> lock(snapshot_mutex_);
+    Thoth::EventStreamSnapshot copy = snapshot_;
+    copy.last_event_ms = last_event_ms_.load();
+    copy.snapshot_ms = nowMs();
+    return copy;
+}
+
+void RemoteAgentBackend::sleepInterruptibleMs(int64_t delay_ms) {
+    constexpr int64_t kSliceMs = 100;
+    int64_t remaining = delay_ms;
+    while (remaining > 0 && !sse_cancel_.load()) {
+        const int64_t slice = std::min(remaining, kSliceMs);
+        std::this_thread::sleep_for(std::chrono::milliseconds(slice));
+        remaining -= slice;
+    }
+}
+
+bool RemoteAgentBackend::probeEngineHealth(Thoth::EngineHealthState& out) {
+    out = Thoth::EngineHealthState::Unavailable;
+    if (base_url_.empty()) {
+        return false;
+    }
+
+    const HttpResult health = httpGet("/health", kHealthReadyTimeoutSec);
+    if (!health.transport_ok || health.status < 200 || health.status >= 300) {
+        out = Thoth::EngineHealthState::Unavailable;
+        return false;
+    }
+
+    const HttpResult ready = httpGet("/ready", kHealthReadyTimeoutSec);
+    if (!ready.transport_ok) {
+        out = Thoth::EngineHealthState::Starting;
+        return false;
+    }
+    if (ready.status >= 200 && ready.status < 300) {
+        out = Thoth::EngineHealthState::Ready;
+        return true;
+    }
+    out = Thoth::EngineHealthState::Starting;
+    return false;
 }
 
 void RemoteAgentBackend::setEventHandler(std::function<void(const ControllerEvent&)> handler) {
@@ -104,7 +184,7 @@ void RemoteAgentBackend::setEventHandler(std::function<void(const ControllerEven
 void RemoteAgentBackend::setSessionId(const std::string& sessionId) {
     try {
         std::lock_guard<std::mutex> lock(session_mutex_);
-        session_id_ = sessionId.empty() ? "default" : sessionId;
+        session_id_ = sessionId;
     } catch (const std::exception& ex) {
         logRemoteError("setSessionId", ex.what());
     } catch (...) {
@@ -203,6 +283,12 @@ bool RemoteAgentBackend::ensureReady(std::string& error_out) {
             ready_checked_ = true;
             ready_ok_ = false;
             events_sse_allowed_ = false;
+            ingest_allowed_ = false;
+            conversation_allowed_ = false;
+            strategies_allowed_ = false;
+            trajectories_allowed_ = false;
+            episodes_allowed_ = false;
+            graph_stats_allowed_ = false;
 
             if (base_url_.empty()) {
                 ready_error_ = "[RemoteEngine] empty base URL";
@@ -244,6 +330,17 @@ bool RemoteAgentBackend::ensureReady(std::string& error_out) {
                         return false;
                     }
                     events_sse_allowed_ = eventsCapabilityAllowsSse(body);
+                    ingest_allowed_ = Thoth::CorpusCreate::readyCapabilitiesIncludeIngest(body);
+                    conversation_allowed_ =
+                        Thoth::ConversationAuthority::readyCapabilitiesIncludeConversation(body);
+                    strategies_allowed_ =
+                        Thoth::ResearchResources::readyCapabilitiesIncludeStrategies(body);
+                    trajectories_allowed_ =
+                        Thoth::ResearchResources::readyCapabilitiesIncludeTrajectories(body);
+                    episodes_allowed_ =
+                        Thoth::ResearchResources::readyCapabilitiesIncludeEpisodes(body);
+                    graph_stats_allowed_ =
+                        Thoth::GraphStatistics::readyCapabilitiesIncludeGraphStats(body);
                     if (!events_sse_allowed_) {
                         logRemoteWarning("ensureReady",
                                          "capabilities present without \"events\"; SSE disabled");
@@ -260,6 +357,12 @@ bool RemoteAgentBackend::ensureReady(std::string& error_out) {
                 }
             } else {
                 events_sse_allowed_ = true;
+                ingest_allowed_ = false;
+                conversation_allowed_ = false;
+                strategies_allowed_ = false;
+                trajectories_allowed_ = false;
+                episodes_allowed_ = false;
+            graph_stats_allowed_ = false;
             }
 
             ready_ok_ = true;
@@ -307,6 +410,11 @@ void RemoteAgentBackend::dispatchSseFrames(std::string& buffer) {
             if (handler) {
                 handler(*ev); // serial, receive order
             }
+            last_event_ms_.store(nowMs());
+            {
+                std::lock_guard<std::mutex> lock(snapshot_mutex_);
+                publishSnapshotLocked();
+            }
         } catch (const std::exception& ex) {
             logRemoteWarning("sse", std::string("parse failure (continue): ") + ex.what());
         } catch (...) {
@@ -330,6 +438,14 @@ void RemoteAgentBackend::startSseIfNeeded() {
             events_ok = events_sse_allowed_;
         }
         if (!ready || !events_ok) {
+            if (ready && !events_ok) {
+                updateConnectionState(Thoth::EventConnectionState::Failed);
+                {
+                    std::lock_guard<std::mutex> lock(snapshot_mutex_);
+                    snapshot_.sse_enabled = false;
+                    publishSnapshotLocked();
+                }
+            }
             return;
         }
 
@@ -353,23 +469,51 @@ void RemoteAgentBackend::startSseIfNeeded() {
 }
 
 void RemoteAgentBackend::stopSse() {
-    // 1. cancel → 2. abort curl (via progress/write) → 3. exit loop → 4. join → 5. destroy
     sse_cancel_.store(true);
+    updateConnectionState(Thoth::EventConnectionState::Failed);
     if (sse_thread_.joinable()) {
         sse_thread_.join();
     }
+    sse_started_ = false;
 }
 
 void RemoteAgentBackend::sseLoop() {
-    CURL* curl = nullptr;
-    std::string buffer;
-    try {
-        curl = curl_easy_init();
-        if (!curl) {
-            logRemoteError("sse", "curl_easy_init failed (transport)");
-            return;
+    reconnect_attempt_ = 0;
+    sseReconnectLoop();
+}
+
+void RemoteAgentBackend::sseReconnectLoop() {
+    while (!sse_cancel_.load()) {
+        Thoth::EngineHealthState engine_state = Thoth::EngineHealthState::Unknown;
+        (void)probeEngineHealth(engine_state);
+        {
+            std::lock_guard<std::mutex> lock(snapshot_mutex_);
+            snapshot_.engine = engine_state;
+            publishSnapshotLocked();
         }
 
+        if (engine_state != Thoth::EngineHealthState::Ready) {
+            updateConnectionState(Thoth::EventConnectionState::Reconnecting);
+            const int64_t delay = Thoth::sseReconnectDelayMs(reconnect_attempt_++);
+            sleepInterruptibleMs(delay);
+            continue;
+        }
+
+        if (reconnect_attempt_ > 0) {
+            updateConnectionState(Thoth::EventConnectionState::Reconnecting);
+        } else {
+            updateConnectionState(Thoth::EventConnectionState::Disconnected);
+        }
+
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            logRemoteError("sse", "curl_easy_init failed (transport)");
+            updateConnectionState(Thoth::EventConnectionState::Reconnecting);
+            sleepInterruptibleMs(Thoth::sseReconnectDelayMs(reconnect_attempt_++));
+            continue;
+        }
+
+        std::string buffer;
         const std::string url = base_url_ + "/v1/events";
         SseWriteContext wctx{this, &buffer, &sse_cancel_};
 
@@ -383,19 +527,26 @@ void RemoteAgentBackend::sseLoop() {
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sseWriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &wctx);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kSseConnectTimeoutSec);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L); // until cancel
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
         curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, sseProgressCallback);
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &sse_cancel_);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 
+        updateConnectionState(Thoth::EventConnectionState::Connected);
+        reconnect_attempt_ = 0;
+
         const CURLcode code = curl_easy_perform(curl);
         curl_slist_free_all(headers);
 
         if (sse_cancel_.load()) {
-            // clean shutdown
-        } else if (code != CURLE_OK && code != CURLE_ABORTED_BY_CALLBACK
-                   && code != CURLE_WRITE_ERROR) {
+            curl_easy_cleanup(curl);
+            break;
+        }
+
+        updateConnectionState(Thoth::EventConnectionState::Disconnected);
+
+        if (code != CURLE_OK && code != CURLE_ABORTED_BY_CALLBACK && code != CURLE_WRITE_ERROR) {
             logRemoteError("sse", std::string("transport: ") + curl_easy_strerror(code));
         } else if (code == CURLE_OK) {
             long status = 0;
@@ -404,23 +555,20 @@ void RemoteAgentBackend::sseLoop() {
                 logRemoteError("sse", "transport: HTTP " + std::to_string(status));
             }
         }
-    } catch (const std::exception& ex) {
-        logRemoteError("sse", std::string("transport/loop: ") + ex.what());
-    } catch (...) {
-        logRemoteError("sse", "transport/loop: unknown");
-    }
 
-    if (curl) {
         curl_easy_cleanup(curl);
+
+        updateConnectionState(Thoth::EventConnectionState::Reconnecting);
+        sleepInterruptibleMs(Thoth::sseReconnectDelayMs(reconnect_attempt_++));
     }
 }
 
-std::optional<std::string> RemoteAgentBackend::processInput(const std::string& input) {
+Thoth::OperationResult RemoteAgentBackend::processInput(const std::string& input) {
     try {
         std::string ready_err;
         if (!ensureReady(ready_err)) {
             logRemoteError("processInput", ready_err);
-            return ready_err;
+            return Thoth::makeFailure(Thoth::kOpChat, "Chat failed", ready_err, true);
         }
 
         std::string sid;
@@ -435,12 +583,12 @@ std::optional<std::string> RemoteAgentBackend::processInput(const std::string& i
         if (!http.transport_ok) {
             const std::string msg = "[RemoteEngine] /v1/chat transport: " + http.transport_error;
             logRemoteError("processInput", msg);
-            return msg;
+            return Thoth::makeFailure(Thoth::kOpChat, "Chat failed", msg, true);
         }
         if (http.status < 200 || http.status >= 300) {
             const std::string msg = formatHttpErrorMessage(http.status, http.body);
             logRemoteError("processInput", msg);
-            return msg;
+            return Thoth::makeFailure(Thoth::kOpChat, "Chat failed", msg, false, http.status);
         }
 
         try {
@@ -448,33 +596,35 @@ std::optional<std::string> RemoteAgentBackend::processInput(const std::string& i
             const auto extracted = extractChatResponseText(body);
             if (!extracted.ok) {
                 logRemoteError("processInput", extracted.error);
-                return extracted.error;
+                return Thoth::makeFailure(Thoth::kOpChat, "Chat failed", extracted.error);
             }
             if (extracted.text.empty() && !body.contains("response")) {
                 logRemoteWarning("processInput", "missing semantic field \"response\"");
             }
-            return extracted.text;
+            return Thoth::makeSuccess(Thoth::kOpChat, "Response received", extracted.text);
         } catch (const std::exception& ex) {
             const std::string msg =
                 std::string("[RemoteEngine] chat response JSON parse failed: ") + ex.what();
             logRemoteError("processInput", msg);
-            return msg;
+            return Thoth::makeFailure(Thoth::kOpChat, "Chat failed", msg);
         }
     } catch (const std::exception& ex) {
         logRemoteError("processInput", ex.what());
-        return std::string("[RemoteEngine] processInput: ") + ex.what();
+        const std::string msg = std::string("[RemoteEngine] processInput: ") + ex.what();
+        return Thoth::makeFailure(Thoth::kOpChat, "Chat failed", msg);
     } catch (...) {
         logRemoteError("processInput", "unknown error");
-        return std::string("[RemoteEngine] processInput: unknown error");
+        return Thoth::makeFailure(Thoth::kOpChat, "Chat failed",
+                                  "[RemoteEngine] processInput: unknown error");
     }
 }
 
-void RemoteAgentBackend::executeGoal(const std::string& goal) {
+Thoth::OperationResult RemoteAgentBackend::executeGoal(const std::string& goal) {
     try {
         std::string ready_err;
         if (!ensureReady(ready_err)) {
             logRemoteError("executeGoal", ready_err);
-            return;
+            return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed", ready_err, true);
         }
 
         std::string sid;
@@ -487,13 +637,15 @@ void RemoteAgentBackend::executeGoal(const std::string& goal) {
         const long goals_timeout = resolveRemoteRequestTimeoutSec(kGoalsTimeoutSec);
         const HttpResult http = httpPostJson("/v1/goals", req.dump(), goals_timeout);
         if (!http.transport_ok) {
-            logRemoteError("executeGoal",
-                           "[RemoteEngine] /v1/goals transport: " + http.transport_error);
-            return;
+            const std::string msg =
+                "[RemoteEngine] /v1/goals transport: " + http.transport_error;
+            logRemoteError("executeGoal", msg);
+            return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed", msg, true);
         }
         if (http.status < 200 || http.status >= 300) {
-            logRemoteError("executeGoal", formatHttpErrorMessage(http.status, http.body));
-            return;
+            const std::string msg = formatHttpErrorMessage(http.status, http.body);
+            logRemoteError("executeGoal", msg);
+            return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed", msg, false, http.status);
         }
 
         if (!http.body.empty()) {
@@ -502,52 +654,90 @@ void RemoteAgentBackend::executeGoal(const std::string& goal) {
                 const auto check = checkGoalResponseBody(body);
                 if (!check.ok) {
                     logRemoteError("executeGoal", check.error);
-                } else if (!check.warning.empty()) {
+                    return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed", check.error);
+                }
+                if (!check.warning.empty()) {
                     logRemoteWarning("executeGoal", check.warning);
                 }
             } catch (const std::exception& ex) {
-                logRemoteError("executeGoal",
-                               std::string("goals response JSON parse failed: ") + ex.what());
+                const std::string msg =
+                    std::string("goals response JSON parse failed: ") + ex.what();
+                logRemoteError("executeGoal", msg);
+                return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed", msg);
             } catch (...) {
                 logRemoteError("executeGoal", "goals response JSON parse failed");
+                return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed",
+                                          "goals response JSON parse failed");
             }
         }
+        return Thoth::makeSuccess(Thoth::kOpGoal, "Goal accepted");
     } catch (const std::exception& ex) {
         logRemoteError("executeGoal", ex.what());
+        return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed", ex.what());
     } catch (...) {
         logRemoteError("executeGoal", "unknown error");
+        return Thoth::makeFailure(Thoth::kOpGoal, "Goal failed", "unknown error");
     }
 }
 
-void RemoteAgentBackend::controlPost(const char* path_suffix, const char* op_name) {
+Thoth::OperationResult RemoteAgentBackend::controlPost(const char* path_suffix,
+                                                     const char* op_name,
+                                                     const char* operation) {
+    const auto failure = [&](const std::string& detail, bool retryable = false,
+                             std::optional<long> http_status = std::nullopt) {
+        return Thoth::makeFailure(operation, Thoth::operationFailureDetail(operation), detail,
+                                  retryable, http_status);
+    };
+
     try {
         std::string ready_err;
         if (!ensureReady(ready_err)) {
             logRemoteError(op_name, ready_err);
-            return;
+            return failure(ready_err, true);
         }
 
         const std::string path = std::string("/v1/control/") + path_suffix;
         const HttpResult http = httpPostJson(path, "{}", kControlTimeoutSec);
         if (!http.transport_ok) {
-            logRemoteError(op_name, std::string("[RemoteEngine] ") + path + " transport: "
-                                        + http.transport_error);
-            return;
+            const std::string msg =
+                std::string("[RemoteEngine] ") + path + " transport: " + http.transport_error;
+            logRemoteError(op_name, msg);
+            return failure(msg, true);
         }
         if (http.status < 200 || http.status >= 300) {
-            logRemoteError(op_name, formatHttpErrorMessage(http.status, http.body));
-            return;
+            const std::string msg = formatHttpErrorMessage(http.status, http.body);
+            logRemoteError(op_name, msg);
+            return failure(msg, false, http.status);
         }
+
+        if (operation == Thoth::kOpPause) {
+            return Thoth::makeSuccess(Thoth::kOpPause, "Agent execution paused");
+        }
+        if (operation == Thoth::kOpResume) {
+            return Thoth::makeSuccess(Thoth::kOpResume, "Agent execution resumed");
+        }
+        if (operation == Thoth::kOpAbort) {
+            return Thoth::makeSuccess(Thoth::kOpAbort, "Agent execution aborted");
+        }
+        return Thoth::makeSuccess(operation, "Operation succeeded");
     } catch (const std::exception& ex) {
         logRemoteError(op_name, ex.what());
+        return failure(ex.what());
     } catch (...) {
         logRemoteError(op_name, "unknown error");
+        return failure("unknown error");
     }
 }
 
-void RemoteAgentBackend::pause() { controlPost("pause", "pause"); }
-void RemoteAgentBackend::resume() { controlPost("resume", "resume"); }
-void RemoteAgentBackend::abort() { controlPost("abort", "abort"); }
+Thoth::OperationResult RemoteAgentBackend::pause() {
+    return controlPost("pause", "pause", Thoth::kOpPause);
+}
+Thoth::OperationResult RemoteAgentBackend::resume() {
+    return controlPost("resume", "resume", Thoth::kOpResume);
+}
+Thoth::OperationResult RemoteAgentBackend::abort() {
+    return controlPost("abort", "abort", Thoth::kOpAbort);
+}
 
 void RemoteAgentBackend::setConversationMemory(
     const std::vector<std::pair<std::string, std::string>>&,
@@ -570,13 +760,450 @@ void RemoteAgentBackend::checkResumablePlan() {
     logRemoteWarning("checkResumablePlan", "unavailable in remote mode");
 }
 
-nlohmann::json RemoteAgentBackend::getStrategies() const { return json::array(); }
-nlohmann::json RemoteAgentBackend::getTrajectories() const { return json::array(); }
-nlohmann::json RemoteAgentBackend::getEpisodeSteps() const { return json::array(); }
+nlohmann::json RemoteAgentBackend::fetchResearchCollection(const char* path) const {
+    using namespace Thoth;
+    try {
+        std::string ready_err;
+        if (!const_cast<RemoteAgentBackend*>(this)->ensureReady(ready_err)) {
+            logRemoteError("fetchResearchCollection", ready_err);
+            return ResearchResources::unavailableFetchResult();
+        }
+        const HttpResult http = httpGet(path, ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok) {
+            logRemoteError("fetchResearchCollection",
+                           std::string("[RemoteEngine] transport: ") + http.transport_error);
+            return ResearchResources::unavailableFetchResult();
+        }
+        if (http.status < 200 || http.status >= 300) {
+            logRemoteError("fetchResearchCollection", formatHttpErrorMessage(http.status, http.body));
+            return ResearchResources::unavailableFetchResult();
+        }
+        try {
+            const json body = json::parse(http.body);
+            std::string err;
+            if (!ResearchResources::hasRequiredCollectionFields(body, err)) {
+                logRemoteError("fetchResearchCollection", err);
+                return ResearchResources::unavailableFetchResult();
+            }
+            return body;
+        } catch (const std::exception& ex) {
+            logRemoteError("fetchResearchCollection",
+                           std::string("JSON parse failed: ") + ex.what());
+            return ResearchResources::unavailableFetchResult();
+        }
+    } catch (const std::exception& ex) {
+        logRemoteError("fetchResearchCollection", ex.what());
+        return ResearchResources::unavailableFetchResult();
+    } catch (...) {
+        logRemoteError("fetchResearchCollection", "unknown error");
+        return ResearchResources::unavailableFetchResult();
+    }
+}
+
+nlohmann::json RemoteAgentBackend::fetchGraphStatisticsResource() const {
+    using namespace Thoth;
+    try {
+        std::string ready_err;
+        if (!const_cast<RemoteAgentBackend*>(this)->ensureReady(ready_err)) {
+            logRemoteError("fetchGraphStatisticsResource", ready_err);
+            return GraphStatistics::unavailableFetchResult();
+        }
+        const HttpResult http =
+            httpGet(GraphStatistics::kHttpPath, ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok) {
+            logRemoteError("fetchGraphStatisticsResource",
+                           std::string("[RemoteEngine] transport: ") + http.transport_error);
+            return GraphStatistics::unavailableFetchResult();
+        }
+        if (http.status < 200 || http.status >= 300) {
+            logRemoteError("fetchGraphStatisticsResource",
+                           formatHttpErrorMessage(http.status, http.body));
+            return GraphStatistics::unavailableFetchResult();
+        }
+        try {
+            const json body = json::parse(http.body);
+            std::string err;
+            if (!GraphStatistics::hasRequiredFields(body, err)) {
+                logRemoteError("fetchGraphStatisticsResource", err);
+                return GraphStatistics::unavailableFetchResult();
+            }
+            return body;
+        } catch (const std::exception& ex) {
+            logRemoteError("fetchGraphStatisticsResource",
+                           std::string("JSON parse failed: ") + ex.what());
+            return GraphStatistics::unavailableFetchResult();
+        }
+    } catch (const std::exception& ex) {
+        logRemoteError("fetchGraphStatisticsResource", ex.what());
+        return GraphStatistics::unavailableFetchResult();
+    } catch (...) {
+        logRemoteError("fetchGraphStatisticsResource", "unknown error");
+        return GraphStatistics::unavailableFetchResult();
+    }
+}
+
+nlohmann::json RemoteAgentBackend::getStrategies() const {
+    return fetchResearchCollection(Thoth::ResearchResources::kHttpPathStrategies);
+}
+
+nlohmann::json RemoteAgentBackend::getTrajectories() const {
+    return fetchResearchCollection(Thoth::ResearchResources::kHttpPathTrajectories);
+}
+
+nlohmann::json RemoteAgentBackend::getEpisodes() const {
+    return fetchResearchCollection(Thoth::ResearchResources::kHttpPathEpisodes);
+}
 nlohmann::json RemoteAgentBackend::getExperiments() const { return json::array(); }
-nlohmann::json RemoteAgentBackend::getGraphStats() const { return json::object(); }
+nlohmann::json RemoteAgentBackend::getGraphStats() const {
+    return fetchGraphStatisticsResource();
+}
 
 bool RemoteAgentBackend::saveExperiment(const nlohmann::json&) {
     logRemoteWarning("saveExperiment", "unavailable in remote mode");
     return false;
+}
+
+nlohmann::json RemoteAgentBackend::getLatestDecisionSummary() const {
+    try {
+        std::string ready_err;
+        if (!const_cast<RemoteAgentBackend*>(this)->ensureReady(ready_err)) {
+            logRemoteError("getLatestDecisionSummary", ready_err);
+            return Thoth::DecisionSummary::emptyV1Summary();
+        }
+        const HttpResult http = httpGet(Thoth::DecisionSummary::kHttpPath,
+                                        ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok) {
+            logRemoteError("getLatestDecisionSummary",
+                           "[RemoteEngine] diagnostics transport: " + http.transport_error);
+            return Thoth::DecisionSummary::emptyV1Summary();
+        }
+        if (http.status < 200 || http.status >= 300) {
+            logRemoteError("getLatestDecisionSummary",
+                           formatHttpErrorMessage(http.status, http.body));
+            return Thoth::DecisionSummary::emptyV1Summary();
+        }
+        try {
+            auto body = json::parse(http.body);
+            std::string err;
+            if (!Thoth::DecisionSummary::hasRequiredV1Fields(body, err)) {
+                logRemoteError("getLatestDecisionSummary", err);
+                return Thoth::DecisionSummary::emptyV1Summary();
+            }
+            return body;
+        } catch (const std::exception& ex) {
+            logRemoteError("getLatestDecisionSummary",
+                           std::string("JSON parse failed: ") + ex.what());
+            return Thoth::DecisionSummary::emptyV1Summary();
+        }
+    } catch (const std::exception& ex) {
+        logRemoteError("getLatestDecisionSummary", ex.what());
+        return Thoth::DecisionSummary::emptyV1Summary();
+    } catch (...) {
+        logRemoteError("getLatestDecisionSummary", "unknown error");
+        return Thoth::DecisionSummary::emptyV1Summary();
+    }
+}
+
+nlohmann::json RemoteAgentBackend::listCorpusDocuments() const {
+    try {
+        std::string ready_err;
+        if (!const_cast<RemoteAgentBackend*>(this)->ensureReady(ready_err)) {
+            logRemoteError("listCorpusDocuments", ready_err);
+            return Thoth::CorpusDocuments::unavailableFetchResult();
+        }
+        const HttpResult http = httpGet(Thoth::CorpusDocuments::kHttpPath,
+                                        ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok) {
+            logRemoteError("listCorpusDocuments",
+                           "[RemoteEngine] corpus transport: " + http.transport_error);
+            return Thoth::CorpusDocuments::unavailableFetchResult();
+        }
+        if (http.status < 200 || http.status >= 300) {
+            logRemoteError("listCorpusDocuments",
+                           formatHttpErrorMessage(http.status, http.body));
+            return Thoth::CorpusDocuments::unavailableFetchResult();
+        }
+        try {
+            auto body = json::parse(http.body);
+            std::string err;
+            if (!Thoth::CorpusDocuments::hasRequiredV1Fields(body, err)) {
+                logRemoteError("listCorpusDocuments", err);
+                return Thoth::CorpusDocuments::unavailableFetchResult();
+            }
+            return body;
+        } catch (const std::exception& ex) {
+            logRemoteError("listCorpusDocuments",
+                           std::string("JSON parse failed: ") + ex.what());
+            return Thoth::CorpusDocuments::unavailableFetchResult();
+        }
+    } catch (const std::exception& ex) {
+        logRemoteError("listCorpusDocuments", ex.what());
+        return Thoth::CorpusDocuments::unavailableFetchResult();
+    } catch (...) {
+        logRemoteError("listCorpusDocuments", "unknown error");
+        return Thoth::CorpusDocuments::unavailableFetchResult();
+    }
+}
+
+Thoth::BackendCapabilities RemoteAgentBackend::capabilities() const {
+    std::string err;
+    const_cast<RemoteAgentBackend*>(this)->ensureReady(err);
+    Thoth::BackendCapabilities caps = Thoth::engineBackendCapabilities();
+    std::lock_guard<std::mutex> lock(ready_mutex_);
+    caps.supportsIngest = ingest_allowed_;
+    caps.supportsConversation = conversation_allowed_;
+    caps.supportsStrategies = strategies_allowed_;
+    caps.supportsTrajectories = trajectories_allowed_;
+    caps.supportsEpisodes = episodes_allowed_;
+    caps.supportsGraphStats = graph_stats_allowed_;
+    return caps;
+}
+
+Thoth::OperationResult RemoteAgentBackend::createCorpusDocument(
+    const std::string& sourceFilePath) {
+    using namespace Thoth;
+    try {
+        std::string ready_err;
+        if (!ensureReady(ready_err)) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Document could not be sent to Engine",
+                               ready_err,
+                               true);
+        }
+        {
+            std::lock_guard<std::mutex> lock(ready_mutex_);
+            if (!ingest_allowed_) {
+                return makeFailure(CorpusCreate::kOperationName,
+                                   "Document ingest unavailable with the current Engine",
+                                   "ingest capability missing from /ready");
+            }
+        }
+        if (sourceFilePath.empty()) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "No Local Note selected",
+                               "empty source path");
+        }
+        std::error_code ec;
+        if (!std::filesystem::exists(sourceFilePath, ec)) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Local Note file not found",
+                               sourceFilePath);
+        }
+        std::ifstream in(sourceFilePath, std::ios::binary);
+        if (!in) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Could not read Local Note",
+                               sourceFilePath);
+        }
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        const std::string content = buffer.str();
+        if (content.empty()) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Local Note is empty",
+                               sourceFilePath);
+        }
+        const std::string suggested_name =
+            std::filesystem::path(sourceFilePath).filename().string();
+        std::string backend_session_id;
+        {
+            std::lock_guard<std::mutex> lock(session_mutex_);
+            backend_session_id = session_id_;
+        }
+        const json req = CorpusCreate::makeCreateDocumentRequestBody(
+            suggested_name, content, backend_session_id);
+        const HttpResult http = httpPostJson(CorpusCreate::kHttpPath,
+                                             req.dump(),
+                                             ThothRemoteHttp::kControlTimeoutSec);
+        if (!http.transport_ok) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Document could not be sent to Engine",
+                               "[RemoteEngine] create transport: " + http.transport_error,
+                               true);
+        }
+        if (http.status < 200 || http.status >= 300) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Document could not be sent to Engine",
+                               formatHttpErrorMessage(http.status, http.body),
+                               http.status >= 500,
+                               http.status);
+        }
+        json body;
+        try {
+            body = json::parse(http.body);
+        } catch (const std::exception& ex) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Document acceptance response invalid",
+                               ex.what());
+        }
+        std::string err;
+        if (!CorpusCreate::hasRequiredAcceptedFields(body, err)) {
+            return makeFailure(CorpusCreate::kOperationName,
+                               "Document acceptance response invalid",
+                               err);
+        }
+        const std::string doc_name = body["document"]["name"].get<std::string>();
+        const std::string doc_id = body["document"]["id"].get<std::string>();
+        auto result = makeSuccess(CorpusCreate::kOperationName,
+                                  "Document accepted: " + doc_name);
+        result.ingest_host_path = sourceFilePath;
+        result.ingest_document_id = doc_id;
+        result.ingest_document_name = doc_name;
+        return result;
+    } catch (const std::exception& ex) {
+        logRemoteError("createCorpusDocument", ex.what());
+        return makeFailure(CorpusCreate::kOperationName,
+                           "Document could not be sent to Engine",
+                           ex.what());
+    } catch (...) {
+        logRemoteError("createCorpusDocument", "unknown error");
+        return makeFailure(CorpusCreate::kOperationName,
+                           "Document could not be sent to Engine");
+    }
+}
+
+nlohmann::json RemoteAgentBackend::createConversationSession() {
+    try {
+        std::string ready_err;
+        if (!ensureReady(ready_err)) {
+            logRemoteError("createConversationSession", ready_err);
+            return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+        }
+        {
+            std::lock_guard<std::mutex> lock(ready_mutex_);
+            if (!conversation_allowed_) {
+                logRemoteError("createConversationSession",
+                               "conversation capability missing from /ready");
+                return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+            }
+        }
+        const HttpResult http = httpPostJson(Thoth::ConversationAuthority::kHttpPathSessions,
+                                             "{}",
+                                             ThothRemoteHttp::kControlTimeoutSec);
+        if (!http.transport_ok || http.status < 200 || http.status >= 300) {
+            logRemoteError("createConversationSession",
+                           http.transport_ok ? formatHttpErrorMessage(http.status, http.body)
+                                             : http.transport_error);
+            return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+        }
+        const json body = json::parse(http.body);
+        std::string err;
+        if (!Thoth::ConversationAuthority::hasRequiredCreateSessionFields(body, err)) {
+            logRemoteError("createConversationSession", err);
+            return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+        }
+        return body;
+    } catch (const std::exception& ex) {
+        logRemoteError("createConversationSession", ex.what());
+        return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+    } catch (...) {
+        logRemoteError("createConversationSession", "unknown error");
+        return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+    }
+}
+
+Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(const std::string& session_id,
+                                                                  const std::string& content) {
+    using namespace Thoth;
+    try {
+        std::string ready_err;
+        if (!ensureReady(ready_err)) {
+            return makeFailure(kOpChat, "Failed to send", ready_err, true);
+        }
+        {
+            std::lock_guard<std::mutex> lock(ready_mutex_);
+            if (!conversation_allowed_) {
+                return makeFailure(kOpChat,
+                                   "Failed to send",
+                                   "conversation capability missing from /ready");
+            }
+        }
+        if (session_id.empty() || content.empty()) {
+            return makeFailure(kOpChat, "Failed to send", "session_id and content required");
+        }
+        const json req = {{"session_id", session_id}, {"content", content}};
+        const long chat_timeout = resolveRemoteRequestTimeoutSec(kChatTimeoutSec);
+        const HttpResult http = httpPostJson(ConversationAuthority::kHttpPathTurns,
+                                             req.dump(),
+                                             chat_timeout);
+        if (!http.transport_ok) {
+            return makeFailure(kOpChat,
+                               "Failed to send",
+                               "[RemoteEngine] turn transport: " + http.transport_error,
+                               true);
+        }
+        if (http.status < 200 || http.status >= 300) {
+            return makeFailure(kOpChat,
+                               "Failed to send",
+                               formatHttpErrorMessage(http.status, http.body),
+                               http.status >= 500,
+                               http.status);
+        }
+        json body;
+        try {
+            body = json::parse(http.body);
+        } catch (const std::exception& ex) {
+            return makeFailure(kOpChat, "Failed to send", ex.what());
+        }
+        std::string err;
+        if (!ConversationAuthority::hasRequiredAppendTurnFields(body, err)) {
+            return makeFailure(kOpChat, "Failed to send", err);
+        }
+        const std::string assistant = body["assistant"]["content"].get<std::string>();
+        return makeSuccess(kOpChat, "Response received", assistant);
+    } catch (const std::exception& ex) {
+        logRemoteError("appendConversationTurn", ex.what());
+        return makeFailure(kOpChat, "Failed to send", ex.what());
+    } catch (...) {
+        logRemoteError("appendConversationTurn", "unknown error");
+        return makeFailure(kOpChat, "Failed to send");
+    }
+}
+
+nlohmann::json RemoteAgentBackend::getConversation(const std::string& session_id) const {
+    try {
+        std::string ready_err;
+        if (!const_cast<RemoteAgentBackend*>(this)->ensureReady(ready_err)) {
+            return Thoth::ConversationAuthority::emptyConversation(session_id);
+        }
+        const std::string path =
+            std::string(Thoth::ConversationAuthority::kHttpPathSessions) + "/" + session_id;
+        const HttpResult http = httpGet(path, ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok || http.status < 200 || http.status >= 300) {
+            return Thoth::ConversationAuthority::emptyConversation(session_id);
+        }
+        json body = json::parse(http.body);
+        std::string err;
+        if (!Thoth::ConversationAuthority::hasRequiredConversationFields(body, err)) {
+            logRemoteError("getConversation", err);
+            return Thoth::ConversationAuthority::emptyConversation(session_id);
+        }
+        return body;
+    } catch (...) {
+        return Thoth::ConversationAuthority::emptyConversation(session_id);
+    }
+}
+
+nlohmann::json RemoteAgentBackend::getConversationSummary(const std::string& session_id) const {
+    try {
+        std::string ready_err;
+        if (!const_cast<RemoteAgentBackend*>(this)->ensureReady(ready_err)) {
+            return Thoth::ConversationAuthority::makeSummaryResponse(session_id, "");
+        }
+        const std::string path = std::string(Thoth::ConversationAuthority::kHttpPathSessions) + "/"
+                                 + session_id + "/summary";
+        const HttpResult http = httpGet(path, ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok || http.status < 200 || http.status >= 300) {
+            return Thoth::ConversationAuthority::makeSummaryResponse(session_id, "");
+        }
+        json body = json::parse(http.body);
+        std::string err;
+        if (!Thoth::ConversationAuthority::hasRequiredSummaryFields(body, err)) {
+            logRemoteError("getConversationSummary", err);
+            return Thoth::ConversationAuthority::makeSummaryResponse(session_id, "");
+        }
+        return body;
+    } catch (...) {
+        return Thoth::ConversationAuthority::makeSummaryResponse(session_id, "");
+    }
 }

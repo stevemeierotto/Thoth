@@ -13,8 +13,14 @@
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 
+#include "backend_capabilities.h"
 #include "controller_event.h"
+#include "engine_connection_state.h"
 #include "memory.h"
+#include "operation_result.h"
+#include "corpus_documents.h"
+#include "corpus_create.h"
+#include "conversation_authority.h"
 #include "json.hpp"
 
 class IAgentBackend;
@@ -54,16 +60,49 @@ public:
     /** True when THOTH_ENGINE_URL selected RemoteAgentBackend at construction. */
     bool isRemote() const;
 
+    /** Explicit feature surface for capability-driven UI (Phase 2). */
+    Thoth::BackendCapabilities capabilities() const;
+
+    /** User-facing mode banner: "Backend: Engine" or "Backend: Local". */
+    std::string backendModeLabel() const;
+
+    /** Phase 6 — SSE connection + engine health (Local: applies=false). */
+    Thoth::EventStreamSnapshot eventStreamSnapshot() const;
+
+    /**
+     * Phase 4 — structured decision summary for Explain Plan (D12/D13).
+     * Empty object fields when none available; check capabilities() first.
+     */
+    nlohmann::json getLatestDecisionSummary() const;
+
+    /** Phase 8 — Engine-owned corpus document list. */
+    nlohmann::json listCorpusDocuments() const;
+
+    /** Phase 9 — initiate create corpus document (acceptance OperationResult). */
+    void createCorpusDocument(const std::string& sourceFilePath);
+
+    /** Phase 10 — Engine conversation authority. */
+    nlohmann::json createConversationSession() const;
+    void appendConversationTurn(const std::string& sessionId,
+                                const std::string& content,
+                                const std::string& requestId = "");
+    nlohmann::json getConversation(const std::string& sessionId) const;
+    nlohmann::json getConversationSummary(const std::string& sessionId) const;
+
+    /** R4-G5 — true if a worker task is running or others are queued (turn may wait). */
+    bool workerHasContentionBeforeEnqueue();
+
     // Cognate Memory Access (for UI panels)
     nlohmann::json getStrategies() const;
     nlohmann::json getTrajectories() const;
-    nlohmann::json getEpisodeSteps() const;
+    nlohmann::json getEpisodes() const;
     nlohmann::json getExperiments() const;
     nlohmann::json getGraphStats() const;
 
     bool saveExperiment(const nlohmann::json& experimentJson);
 
-    std::function<void(const std::string&, const std::string&)> onResponse;
+    std::function<void(const Thoth::OperationResult&, const std::string& requestId)>
+        onOperationComplete;
     std::function<void(const ControllerEvent&)> onEvent;
 private:
     void workerLoop();
@@ -76,5 +115,6 @@ private:
     std::thread workerThread;
 
     std::atomic<bool> shuttingDown{false};
+    std::atomic<bool> workerBusy{false};
     std::string activeSessionId;
 };

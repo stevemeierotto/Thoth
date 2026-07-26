@@ -283,9 +283,11 @@ Full hybrid notes: [`docker/README.md` § Hybrid development](../docker/README.m
 **Portable paths** (see Environment Variables):
 - `THOTH_WORKSPACE_PATH` — workspace (`memory.db`, `rag/`, config)
 - `THOTH_LOGS_PATH` — benchmark and metrics JSONL logs
-- `THOTH_INFERENCE_BASE_URL` — inference service origin (Ollama default `http://127.0.0.1:11434`; llama-server e.g. `http://127.0.0.1:8080`)
+- `THOTH_INFERENCE_BASE_URL` — chat/completion service (`http://127.0.0.1:8080` for host llama-server; **not** `:8090`, which is `thoth-engine`)
 - `THOTH_INFERENCE_BACKEND` — `ollama` (default) or `llama_cpp`
-- `THOTH_EMBED_BASE_URL` — optional separate embed endpoint (defaults to inference base)
+- `THOTH_EMBED_BASE_URL` — embedding service (defaults to inference base; Compose uses `http://llama-embed-server:8081`)
+- `THOTH_EMBEDDING_MODEL` / `OLLAMA_EMBED_MODEL` — override `config.embedding_model` API name
+- `THOTH_EMBED_STRICT=1` — disable silent TF-IDF fallback on embed failure (returns empty / throws in batch)
 
 **Tests on engine-only builds:** `ctest -L pr` runs the full PR suite (core unit tests + cognitive/Python tests) without wxWidgets.
 

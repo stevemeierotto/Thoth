@@ -13,6 +13,8 @@
 
 #include "file_handler.h"
 #include "logger.h"
+#include "cognitive_diagnostics_authority.h"
+#include "decision_summary.h"
 #include <json.hpp>
 
 using json = nlohmann::json;
@@ -69,6 +71,7 @@ void AgentInterface::workerLoop() {
             taskQueue.pop();
         }
 
+        workerBusy.store(true);
         if (task) {
             try {
                 task();
@@ -78,6 +81,7 @@ void AgentInterface::workerLoop() {
                 std::cerr << "[AgentInterface][Worker] Unknown task exception.\n";
             }
         }
+        workerBusy.store(false);
     }
 }
 
@@ -104,6 +108,141 @@ void AgentInterface::setSessionId(const std::string& sessionId) {
 
 bool AgentInterface::isRemote() const {
     return backend && backend->isRemote();
+}
+
+Thoth::BackendCapabilities AgentInterface::capabilities() const {
+    if (!backend) {
+        return Thoth::BackendCapabilities{};
+    }
+    return backend->capabilities();
+}
+
+std::string AgentInterface::backendModeLabel() const {
+    return Thoth::backendModeLabel(isRemote());
+}
+
+Thoth::EventStreamSnapshot AgentInterface::eventStreamSnapshot() const {
+    if (!backend) {
+        return Thoth::localEventStreamSnapshot(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    }
+    return backend->eventStreamSnapshot();
+}
+
+nlohmann::json AgentInterface::getLatestDecisionSummary() const {
+    if (!backend) {
+        return Thoth::DecisionSummary::emptyV1Summary();
+    }
+    if (!capabilities().supportsPlanDiagnostics) {
+        return Thoth::DecisionSummary::emptyV1Summary();
+    }
+    return backend->getLatestDecisionSummary();
+}
+
+nlohmann::json AgentInterface::listCorpusDocuments() const {
+    if (!backend) {
+        return Thoth::CorpusDocuments::emptyV1List();
+    }
+    if (!capabilities().supportsCorpusList) {
+        return Thoth::CorpusDocuments::emptyV1List();
+    }
+    return backend->listCorpusDocuments();
+}
+
+void AgentInterface::createCorpusDocument(const std::string& sourceFilePath) {
+    if (!backend) {
+        return;
+    }
+    std::string sessionId;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        sessionId = activeSessionId;
+        taskQueue.push([this, sourceFilePath, sessionId]() {
+            if (!backend) {
+                return;
+            }
+            backend->setSessionId(sessionId);
+            const auto result = backend->createCorpusDocument(sourceFilePath);
+            if (onOperationComplete) {
+                onOperationComplete(result, {});
+            }
+        });
+    }
+    workersCv.notify_one();
+}
+
+nlohmann::json AgentInterface::createConversationSession() const {
+    if (!backend) {
+        return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+    }
+    if (!capabilities().supportsConversation) {
+        return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
+    }
+    return backend->createConversationSession();
+}
+
+void AgentInterface::appendConversationTurn(const std::string& sessionId,
+                                            const std::string& content,
+                                            const std::string& requestId) {
+    if (!backend) {
+        return;
+    }
+    std::string resolvedRequestId = requestId;
+    if (resolvedRequestId.empty()) {
+        resolvedRequestId = "req-" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    }
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        taskQueue.push([this, sessionId, content, resolvedRequestId]() {
+            if (!backend) {
+                return;
+            }
+            const auto result = backend->appendConversationTurn(sessionId, content);
+            if (onOperationComplete) {
+                onOperationComplete(result, resolvedRequestId);
+            }
+        });
+    }
+    workersCv.notify_one();
+}
+
+bool AgentInterface::workerHasContentionBeforeEnqueue() {
+    std::lock_guard<std::mutex> lock(workersMutex);
+    return workerBusy.load() || !taskQueue.empty();
+}
+
+nlohmann::json AgentInterface::getConversation(const std::string& sessionId) const {
+    if (!backend || !capabilities().supportsConversation) {
+        return Thoth::ConversationAuthority::emptyConversation(sessionId);
+    }
+    return backend->getConversation(sessionId);
+}
+
+nlohmann::json AgentInterface::getConversationSummary(const std::string& sessionId) const {
+    if (!backend || !capabilities().supportsConversation) {
+        return Thoth::ConversationAuthority::makeSummaryResponse(sessionId, "");
+    }
+    return backend->getConversationSummary(sessionId);
+}
+
+std::string AgentInterface::getLatestDecisionTraceSummary() const {
+    // Phase 4: format Engine-authored structured summary (no host-file inventing in GUI).
+    if (!capabilities().supportsPlanDiagnostics) {
+        return Thoth::CognitiveDiagnostics::decisionTraceUnavailableSentinel();
+    }
+    const auto summary = getLatestDecisionSummary();
+    if (Thoth::DecisionSummary::isEffectivelyEmpty(summary)) {
+        return "No decision summary available.";
+    }
+    return Thoth::DecisionSummary::formatForDisplay(summary);
+}
+
+nlohmann::json AgentInterface::getStrategies() const {
+    if (!backend) return json::array();
+    return backend->getStrategies();
 }
 
 bool AgentInterface::loadConversationMemory(
@@ -165,6 +304,10 @@ bool AgentInterface::loadConversationMemorySync(
 
 void AgentInterface::setRagFiles(const std::vector<std::string>& filePaths) {
     if (!backend) return;
+    if (isRemote()) {
+        std::cerr << "[AgentInterface] setRagFiles ignored (remote backend; use Send to Engine)\n";
+        return;
+    }
 
     {
         std::lock_guard<std::mutex> lock(workersMutex);
@@ -191,7 +334,11 @@ void AgentInterface::pause() {
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this]() {
-            if (backend) backend->pause();
+            if (!backend) return;
+            const auto result = backend->pause();
+            if (onOperationComplete) {
+                onOperationComplete(result, {});
+            }
         });
     }
     workersCv.notify_one();
@@ -202,7 +349,11 @@ void AgentInterface::resume() {
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this]() {
-            if (backend) backend->resume();
+            if (!backend) return;
+            const auto result = backend->resume();
+            if (onOperationComplete) {
+                onOperationComplete(result, {});
+            }
         });
     }
     workersCv.notify_one();
@@ -213,7 +364,11 @@ void AgentInterface::abort() {
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this]() {
-            if (backend) backend->abort();
+            if (!backend) return;
+            const auto result = backend->abort();
+            if (onOperationComplete) {
+                onOperationComplete(result, {});
+            }
         });
     }
     workersCv.notify_one();
@@ -224,7 +379,11 @@ void AgentInterface::executeGoal(const std::string& goal) {
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this, goal]() {
-            if (backend) backend->executeGoal(goal);
+            if (!backend) return;
+            const auto result = backend->executeGoal(goal);
+            if (onOperationComplete) {
+                onOperationComplete(result, {});
+            }
         });
     }
     workersCv.notify_one();
@@ -243,46 +402,13 @@ void AgentInterface::processUserInput(const std::string& input, const std::strin
         std::lock_guard<std::mutex> lock(workersMutex);
         taskQueue.push([this, input, resolvedRequestId]() {
             if (!backend) return;
-            auto reply = backend->processInput(input);
-            if (!reply.has_value()) return;
-            if (onResponse) onResponse(*reply, resolvedRequestId);
+            const auto result = backend->processInput(input);
+            if (onOperationComplete) {
+                onOperationComplete(result, resolvedRequestId);
+            }
         });
     }
     workersCv.notify_one();
-}
-
-std::string AgentInterface::getLatestDecisionTraceSummary() const {
-    FileHandler fh;
-    std::string path = fh.getAgentWorkspacePath("decision_trace.jsonl");
-    if (!std::filesystem::exists(path)) return "No trace available.";
-
-    std::ifstream in(path);
-    std::string line, lastLine;
-    while (std::getline(in, line)) {
-        if (!line.empty()) lastLine = line;
-    }
-
-    if (lastLine.empty()) return "Trace empty.";
-
-    try {
-        auto j = json::parse(lastLine);
-        std::ostringstream out;
-        out << "Latest Event: " << j.value("trace_type", "unknown") << "\n";
-        if (j.contains("stages") && j["stages"].is_array() && !j["stages"].empty()) {
-            auto lastStage = j["stages"].back();
-            out << "Status: " << lastStage.value("name", "none")
-                << " (" << (lastStage.value("success", false) ? "OK" : "Failed") << ")\n";
-            out << "Summary: " << lastStage.value("summary", "none");
-        }
-        return out.str();
-    } catch (...) {
-        return "Failed to parse latest trace.";
-    }
-}
-
-nlohmann::json AgentInterface::getStrategies() const {
-    if (!backend) return json::array();
-    return backend->getStrategies();
 }
 
 nlohmann::json AgentInterface::getTrajectories() const {
@@ -290,9 +416,9 @@ nlohmann::json AgentInterface::getTrajectories() const {
     return backend->getTrajectories();
 }
 
-nlohmann::json AgentInterface::getEpisodeSteps() const {
-    if (!backend) return json::array();
-    return backend->getEpisodeSteps();
+nlohmann::json AgentInterface::getEpisodes() const {
+    if (!backend) return json::object();
+    return backend->getEpisodes();
 }
 
 nlohmann::json AgentInterface::getExperiments() const {

@@ -41,10 +41,11 @@ wait_engine_healthy() {
 wait_full_healthy() {
   local deadline=$((SECONDS + TIMEOUT_HEALTH))
   while [ "$SECONDS" -lt "$deadline" ]; do
-    local llama_status engine_status
+    local llama_status embed_status engine_status
     llama_status="$(compose ps --format '{{.Service}} {{.Health}}' | awk '$1=="llama-server"{print $2}')"
+    embed_status="$(compose ps --format '{{.Service}} {{.Health}}' | awk '$1=="llama-embed-server"{print $2}')"
     engine_status="$(compose ps --format '{{.Service}} {{.Health}}' | awk '$1=="thoth-engine"{print $2}')"
-    if [ "$llama_status" = "healthy" ] && [ "$engine_status" = "healthy" ]; then
+    if [ "$llama_status" = "healthy" ] && [ "$embed_status" = "healthy" ] && [ "$engine_status" = "healthy" ]; then
       compose ps
       return 0
     fi

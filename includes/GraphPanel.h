@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "panel_presentation_state.h"
 #include <wx/wx.h>
 #include <json.hpp>
 #include <map>
@@ -14,11 +15,15 @@ class GraphPanel : public wxPanel {
 public:
     GraphPanel(wxWindow* parent);
 
+    void SetPresentationState(Thoth::PanelPresentationState state,
+                              const wxString& message = wxEmptyString);
     void UpdateGraphStats(const nlohmann::json& statsJson);
     void UpdateControllerState(const std::string& state);
     void ResetNodes();
 
 private:
+    wxStaticText* m_statusLabel = nullptr;
+    wxWindow* m_statsGrid = nullptr;
     wxStaticText* m_nodesValue = nullptr;
     wxStaticText* m_edgesValue = nullptr;
     wxStaticText* m_avgWeightValue = nullptr;

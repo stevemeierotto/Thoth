@@ -1,6 +1,6 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-19 (G1e Phase 4 ✅ KEEP@−0.05 in production; magnitude tuning paused not dropped)
+Last updated: 2026-07-25 (llama.cpp dedicated embed server ✅; GUI Phase 12A ✅ graph statistics; Phase 1–11 ✅ · 12A ✅; Phase 0–12A 🔒; B1 Phase 1 Candidate `b1_v1`; G1e Phase 4 ✅ KEEP@−0.05)
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
@@ -8,6 +8,23 @@ Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries ma
 
 | Track | What shipped | Status |
 |-------|----------------|--------|
+| **Embedding — llama.cpp** | Dedicated `llama-embed-server`; startup embed probe; compose/docs Phase C–D | ✅ 2026-07-25 — see entry below · `docker/README.md` |
+| **GUI Restoration R2** | Engine indexing honesty: COMPLETE metadata, corpus `failed`, minimal GUI | ✅ 2026-07-21 — `docs/GUI_RESTORATION_PROTOCOL.md` · `docs/ENGINE_EVENTS.md` |
+| **GUI Phase 12A** | Graph statistics resource API (singleton) | ✅ 2026-07-21 |
+| **GUI Phase 11** | Research resource read APIs (Strategies, Trajectories, Episodes) | ✅ 2026-07-21 |
+| **GUI Phase 10** | Conversation / session authority (Engine owns conversation) | ✅ 2026-07-20 |
+| **GUI Phase 9** | Corpus document creation (Send to Engine) | ✅ 2026-07-20 |
+| **GUI Phase 8** | Engine corpus listing (corpus document model) | ✅ 2026-07-20 |
+| **GUI Phase 7** | Operation result honesty (one-outcome rule) | ✅ 2026-07-20 |
+| **GUI Phase 6** | SSE resilience (reconnect state machine) | ✅ 2026-07-20 |
+| **GUI Phase 5** | Progress reporting discipline (backend signals only) | ✅ 2026-07-19 |
+| **GUI Phase 4** | Decision summary resource (Explain Plan only) | ✅ 2026-07-19 |
+| **GUI Phase 3** | Backend authority for cognitive diagnostics (D11) | ✅ 2026-07-19 |
+| **GUI Phase 2** | Mode banner · `BackendCapabilities` · panel presentation states | ✅ 2026-07-19 |
+| **GUI Phase 1** | Remote RAG honesty (Option A; no fake indexing) | ✅ 2026-07-19 |
+| **GUI Phase 0** | Client/server ownership freeze (`GUI_integration.md`) | 🔒 2026-07-19 |
+| **B1 Phase 1** | Candidate `b1_v1` membership + Selection Audit + Corpus Manifest | ✅ Candidate 2026-07-19 (not frozen) |
+| **B1 Phase 0** | Publication benchmark protocol lock | 🔒 2026-07-19 (superseded methodology → v1.1) |
 | **G1e Phase 4** | KEEP@−0.05 → production `trajectory: -0.05`; tuning paused open | ✅ 2026-07-19 |
 | **G1e Phase 3b** | `−0.30` magnitude probe + win-rate early-stop | ✅ 2026-07-19 |
 | **G1e Phase 3** | Authoritative polarity runs `{−0.05,−0.10,−0.20}` | ✅ 2026-07-18 |
@@ -35,6 +52,295 @@ Commits (parent): `f005e25` … `e08341e`. Submodule: Plan N `405c144`; M4 `99c5
 Detail entries below remain the chronological source of truth; this table is the operator index.
 
 ---
+
+---
+
+---
+
+### Embedding — llama.cpp dedicated embed server ✅ (2026-07-25)
+
+**Context:** Compose stack had chat-only `llama-server` (HTTP 501 on `/v1/embeddings`); embeddings silently fell back to TfIdf during indexing. LLM already on `llama_cpp`; embeddings needed a separate llama.cpp service per Plan H adapter design.
+
+**Delivered (Phase A — ops):**
+
+| Item | Work |
+|------|------|
+| **Compose** | `llama-embed-server` — `-m` embedding GGUF, `--embeddings`, port **8081** |
+| **Engine env** | `THOTH_EMBED_BASE_URL=http://llama-embed-server:8081`; `depends_on` both llama services |
+| **Model** | `LLAMA_EMBED_MODEL` path (default `/models/nomic-embed-text.gguf`) on shared `llama-models` volume |
+| **Re-index** | `./docker/seed-workspace.sh` documented; indexes built during embed failure must be rebuilt |
+
+**Delivered (Phase C — observability, no GRAG/retrieval changes):**
+
+| Item | Work |
+|------|------|
+| **Startup probe** | `logEmbeddingStartupProbe()` — `[Thoth] embed_probe=ok\|failed … dimension=768` |
+| **Embed logging** | `embedExternal()` failures logged (parity with `embedBatch`) |
+| **Strict mode** | `THOTH_EMBED_STRICT=1` — no silent TfIdf fallback (batch throws; single returns empty) |
+| **Dimension guard** | Reject/warn when external vector size ≠ `getDimension()` (768) |
+| **Config env** | `OLLAMA_EMBED_MODEL` / `THOTH_EMBEDDING_MODEL` → `config.embedding_model`; `OLLAMA_MODEL` → `llm_model` |
+| **Tests** | `testConfigEnvironmentOverrides` |
+
+**Delivered (Phase D — docs):**
+
+| Item | Work |
+|------|------|
+| **docker/README.md** | Dual-server topology, GGUF setup, embed verify curl, re-index checklist, env table |
+| **GETTING_STARTED.md** | Port map (`8090` engine vs `8080`/`8081` inference), embed env vars, strict mode |
+| **docker/smoke.sh** | `wait_full_healthy` includes `llama-embed-server` |
+
+**Explicitly unchanged:** GRAG scoring, retrieval algorithms, `EmbeddingEngine` method enum / architecture; **Ollama client retained** for transitional/host-native use.
+
+**Key files:** `docker-compose.yml`, `docker/README.md`, `docker/smoke.sh`, `external/basic_agent/src/runtime_bootstrap.cpp`, `external/basic_agent/src/embedding_engine.cpp`, `external/basic_agent/src/config.cpp`, `tests/unit_tests.cpp`
+
+**Verification:** `docker compose up -d --build thoth-engine` → `embed_probe=ok backend=llama_cpp … dimension=768`; embed POST to `:8081/v1/embeddings` returns 768-float vector; indexing without `Falling back … TfIdf` in logs; `thoth-core-tests` green.
+
+---
+
+### GUI — Phase 12A implemented ✅ (2026-07-21)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 12A — Graph Statistics Resource API.
+
+**Delivered:** `graph_statistics.h` · singleton resource (`schema_version`, Engine-assigned `generated_at`, optional advisory `session_id`, `statistics` payload) · `GET /v1/graph/stats` · `graph_stats` on `/ready` · `getGraphStatisticsResource` on plugin/runtime · Remote `fetchGraphStatisticsResource` · MainFrame/GraphPanel D14 four-state refresh · Empty = valid zero nodes/edges · `testGuiPhase12AGraphStatistics` · `testEngineHttpGraphStatsEndpoint` · docker smoke item 18.
+
+**Next:** Phase 12B placeholder — own Analyze → Refine → Lock cycle.
+
+### GUI — Phase 12A locked 🔒 (2026-07-21)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 12A — Graph Statistics Resource API.
+
+**Locked:** **Engine owns graph state and statistics** — singleton resource (not collection) · `schema_version` · **Engine-assigned** `generated_at` · optional advisory `session_id` · **`supportsGraphStats`** · D14 four states when live · **Empty** = valid resource, no meaningful graph data (≠ Error, ≠ `{}`) · GUI never caches or reconstructs locally · **12B independence** — Phase 12A assumptions do not constrain 12B.
+
+**Next:** ✅ implemented 2026-07-21 — see entry above.
+
+### GUI — Phase 11 implemented ✅ (2026-07-21)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 11 — Research Resource Read APIs.
+
+**Delivered:** `research_resources.h` · collection envelope (`schema_version`, `items`, opaque `next_page`, `total_items`) · `GET /v1/research/strategies` · `/trajectories` · `/episodes` · `/ready` tokens · `supportsStrategies`/`supportsTrajectories`/`supportsEpisodes` from Remote `/ready` · `listStrategies/listTrajectories/listEpisodes` on plugin/runtime · Remote `fetchResearchCollection` (errors → Error, not `[]`) · **`getEpisodes()`** rename · MainFrame D14 four-state refresh · no authoritative GUI research cache · `testGuiPhase11ResearchResources` · `testEngineHttpResearchEndpoints` · docker smoke item 17.
+
+**Next:** Phase 12A ✅ — see entry above.
+
+### GUI — Phase 11 locked 🔒 (2026-07-21)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 11 — Research Resource Read APIs.
+
+**Locked:** **Engine owns research knowledge** — GUI presents via stable versioned resources · mandatory collection envelope (`schema_version`, `items`, opaque `next_page`, `total_items`) · immutable `strategy_id` / `trajectory_id` / `episode_id` · **`getEpisodes()`** (rename from `getEpisodeSteps`) · granular **`supportsStrategies` / `supportsTrajectories` / `supportsEpisodes`** · **D14** four states (Loading/Populated/Empty/Error) when capability live · no authoritative GUI research cache · no SQLite in contract · **not** dependent on Phase 10.
+
+**Next:** ✅ implemented 2026-07-21 — see entry above.
+
+### GUI — Phase 10 implemented ✅ (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 10 — Conversation / Session Authority.
+
+**Delivered:** `conversation_authority.h` · `POST /v1/conversation/sessions` · `POST /v1/conversation/turns` · `GET /v1/conversation/sessions/{id}` · `GET .../summary` · `Memory::getTimedMessages`/`getSummaryForSession` · `conversation` on `/ready` · `supportsConversation` from Remote `/ready` · `createConversationSession`/`appendConversationTurn`/`getConversation`/`getConversationSummary` on Local/Remote/`AgentInterface` · MainFrame Engine-mode send (no optimistic user bubble) · `RefreshSessionConversationFromEngine` · cache-only `chat_sessions.json` in Engine mode · Phase 7 uncommitted failure on append · `testGuiPhase10ConversationAuthority` · `testEngineHttpConversationEndpoints` · docker smoke item 16.
+
+**Next:** Phase 11 🔒 — see entry above.
+
+### GUI — Phase 10 locked 🔒 (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 10 — Conversation / Session Authority.
+
+**Locked:** **Engine owns conversation** — GUI display/navigation only · append user turn (not sync/replace) · assistant turn Engine-internal · create session · get conversation · get summary · **no replace-conversation** · failed send uncommitted (Phase 7) · restart via Engine get · `chat_sessions.json` cache not truth · **`supportsConversation`** via `/ready`.
+
+**Next:** ✅ implemented 2026-07-20 — see entry above.
+
+### GUI — Phase 9 implemented ✅ (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 9 — Corpus Document Creation.
+
+**Delivered:** `corpus_create.h` · `POST /v1/rag/documents` · `IndexManager::createCorpusDocument` (atomic write + async INDEXING_*) · `ingest` on `/ready` · `supportsIngest` from Remote `/ready` · `createCorpusDocument()` → `OperationResult` on Local/Remote/`AgentInterface` · MainFrame **[Send to Engine]** (explicit; no auto-ingest on drop) · acceptance ≠ SSE indexing · corpus refresh on accept · `testGuiPhase9CorpusCreate` · `testIndexManagerCreateCorpusDocumentAtomic` · `testEngineHttpCreateDocumentEndpoint` · docker smoke item 15.
+
+**Next:** Phase 10 ✅ — see entry above.
+
+### GUI — Phase 9 locked 🔒 (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 9 — Corpus Document Creation.
+
+**Locked:** **Create corpus document** (not upload/multipart contract) · add only — no delete · explicit **[Send to Engine]** · Engine owns id/filename/storage/chunking/atomicity · **OperationResult** acceptance · **SSE** indexing (separate) · **`supportsIngest`** via `/ready` · document lifecycle: Local Note → Accepted → Indexing → Indexed/Failed → Available.
+
+**Next:** ✅ implemented 2026-07-20 — see entry above.
+
+### GUI — Phase 8 implemented ✅ (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 8 — Engine Corpus Listing.
+
+**Delivered:** `corpus_documents.h` · `GET /v1/rag/corpus` · `IndexManager::listCorpusDocuments` · `supportsCorpusList` · `listCorpusDocuments()` on backends + `AgentInterface` · MainFrame **Engine Corpus** + collapsed **Local Notes** · Loading/Empty/Unavailable · `testGuiPhase8CorpusDocuments` · `testEngineHttpCorpusEndpoint` · docker smoke item 14.
+
+**Next:** Phase 9 ✅ — see entry above.
+
+### GUI — Phase 8 locked 🔒 (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 8 — Engine Corpus Listing.
+
+**Locked:** Corpus **document model** (not filesystem listing) · normative: Engine owns corpus model; GUI presents; GUI never derives from local fs · `id`/`name`/`indexed_at`/`status`/optional `chunk_count` · **`supportsCorpusList`** · Engine Corpus + collapsed Local Notes · Loading / Empty / Unavailable distinct · Phase 4 resource pattern.
+
+**Next:** ✅ implemented 2026-07-20 — see entry above.
+
+### GUI — Phase 7 implemented ✅ (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 7 — Operation Result Honesty.
+
+**Delivered:** Transport-agnostic `OperationResult` on all user-initiated ops (chat, goal, pause, resume, abort) · Local + Remote backends · `AgentInterface::onOperationComplete` · MainFrame `HandleOperationComplete` with Phase 6 correlation + UI severity (status bar / panel / modal) · removed premature pause/resume/abort success chrome · `testGuiPhase7OperationResultHonesty` · docker smoke item 13.
+
+**Next:** Phase 8 ✅ — see entry above.
+
+### GUI — Phase 7 locked 🔒 (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 7 — Operation Result Honesty.
+
+**Locked:** Transport-agnostic **OperationResult** · one-outcome rule (success or failure; never neither/both) · no success before backend confirmation · UI severity (status bar / panel / modal) · Phase 6 correlation (root cause once) · pause/resume/abort/goal/chat on same path.
+
+**Next:** ✅ implemented 2026-07-20 — see implemented entry above.
+
+### GUI — Phase 6 implemented ✅ (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 6 — SSE Resilience (Reconnect).
+
+**Shipped:** `engine_connection_state.h`; `RemoteAgentBackend::sseReconnectLoop` with exponential backoff, `/ready` probes, indefinite Reconnecting until intentional stop; `IAgentBackend::eventStreamSnapshot()`; MainFrame 3-field status + poll timer + degraded controls; GRAG `Last event` footer; `testGuiPhase6EventStreamResilience`; docker smoke item 12.
+
+**Next:** Phase 7 ✅ — see entry above.
+
+### GUI — Phase 6 locked 🔒 (2026-07-20)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 6 — SSE Resilience (Reconnect).
+
+**Locked:** Connection state machine · connection ≠ engine health · simple v1 reconnect · last-event-age · long-outage UX · stale-live invariant.
+
+**Implemented:** see entry above (same day).
+
+### GUI — Phase 5 implemented ✅ (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 5 — Progress Reporting Discipline.
+
+**Shipped:** `includes/progress_source.h` (`ProgressSource`, `mayApplyWorkProgress` / `mayApplyIndexingProgress`, grep checklist); MainFrame removes optimistic Planning… / Syncing… / drop indexing claims; work UI gated via `ApplyWorkActivity` / `ApplyWorkStatus`; host drop never claims indexing (Local waits for INDEXING_*); IndexManager pairs INDEXING_COMPLETED after STARTED on all exits; event→UI map in roadmap; unit test `testGuiPhase5ProgressReportingDiscipline`; docker smoke item 11.
+
+**Next:** Phase 6 ✅ — see entry above. Phase 7 locked 2026-07-20.
+
+### GUI — Phase 5 locked 🔒 (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 5 — Progress Reporting Discipline.
+
+**Locked:** **D3a** — GUI reflects backend-reported work only; never predicts/simulates/infers progress. Engine → SSE + API responses; Local → Local backend events. Audit all work-implying UI (not indexing alone). Prefer internal `ProgressSource`. Last-event-age deferred to Phase 6. Documented grep regression guard.
+
+**Implemented:** see entry above (same day).
+
+### GUI — Phase 4 implemented ✅ (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 4 — Engine Decision Summary Resource (Explain Plan only).
+
+**Shipped:** `GET /v1/diagnostics/latest-decision`; `diagnostics` on `/ready` capabilities; `decision_summary.h` (`schema_version` v1); `IAgentBackend::getLatestDecisionSummary()` on Local + Remote; Engine `supportsPlanDiagnostics=true`; Explain Plan renders structured Engine fields (D12/D13); Logs still Unavailable under Engine; unit tests `testGuiPhase4DecisionSummary`, `testEngineHttpDiagnosticsEndpoint`.
+
+**Next:** Phase 5 locked separately — implement Phase 5 on approval.
+
+### GUI — Phase 4 locked 🔒 (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 4 — Engine Decision Summary Resource (Explain Plan only).
+
+**Locked:** Explain-only (no Logs/activity). `getLatestDecisionSummary()` on Local+Remote. Resource-oriented HTTP (not file/tail). Structured JSON with mandatory `schema_version`. D12/D13 — Engine produces diagnostics and owns the presentation model; GUI renders only. Flip `supportsPlanDiagnostics` when live.
+
+**Implemented:** see entry above (same day).
+
+### GUI — Phase 3 implemented ✅ (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 3 — Backend Authority for Cognitive Diagnostics (D11).
+
+**Shipped:** `supportsPlanDiagnostics` on `BackendCapabilities`; `includes/cognitive_diagnostics_authority.h`; `AgentInterface::getLatestDecisionTraceSummary` returns locked Unavailable sentinel when Engine (no host `decision_trace` bytes); Explain Plan dialog title/body with why; Logs tab capability-specific why-copy; unit test `testGuiPhase3CognitiveDiagnosticsAuthority`; docker smoke item 9.
+
+**Audit outcomes (D11):**
+
+| Surface | Outcome |
+|---------|---------|
+| `decision_trace.jsonl` / Explain Plan | **Gated** — Unavailable + why |
+| Logs tab / decision_trace tail | **Gated** (Phase 2 + Phase 3 why-copy) |
+| `app_log` | No GUI cognitive view presenting it as Engine truth |
+| Executive / plan UI | Event/SSE driven — compliant |
+| GRAG diagnostics | Event metadata — compliant (no host-file fallback) |
+| Benchmarks | Phase 2 `supportsBenchmarks` — compliant |
+| Cached explanations | No separate cache path found |
+| `chat_sessions.json` | UI chrome only — not claimed as Engine memory |
+
+**Next:** Phase 4 ✅ (same day).
+
+### GUI — Phase 3 locked 🔒 (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 3 — Backend Authority for Cognitive Diagnostics.
+
+**Locked:** **D11** — GUI may only present cognitive information obtained from the active backend. Explain Plan Unavailable with why (“does not expose plan diagnostics”). Expanded cognitive-diagnostics audit list. Phase 4 stays separate (honesty before Engine read APIs). `GetDecisionTrace()` unification is future direction only.
+
+**Implemented:** see entry above (same day).
+
+### GUI — Phase 2 implemented ✅ (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 2 — Mode banner, capabilities & panel presentation states.
+
+**Shipped:** Persistent `Backend: Engine` / `Backend: Local` status-bar mode field; `BackendCapabilities` v1 on backends + `AgentInterface::capabilities()`; `SetPresentationState` on Strategy / Trajectory / Experiment / Graph panels; `RefreshAllPanels` D10 gating; Benchmarks menu disabled with in-menu availability status when Engine; Logs Unavailable when `!supportsLogs`; unit test `testGuiPhase2BackendCapabilitiesAndPresentation`; docker smoke checklist items 8–9.
+
+**Next:** Phase 3 ✅ (same day).
+
+### GUI — Phase 2 locked 🔒 (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 2 — Mode banner, capabilities & panel presentation states.
+
+**Locked:** User-facing `Backend: Engine` / `Backend: Local` (not “Remote”); `BackendCapabilities` v1 matrix; five-state `SetPresentationState` (Loading · Empty · Populated · Unavailable · Error); D10 no capability inference from empty data; Benchmarks menu disabled with in-menu “Available in Local backend”; Unavailable copy without Plan K / roadmap codenames.
+
+**Implemented:** see entry above (same day).
+
+### GUI — Phase 1 implemented ✅ (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 1 — Option A.
+
+**Shipped:** Remote mode keeps host RAG slots as session notes with `(host-only)` labels; never claims Engine indexing; skips `setRagFiles` on drop/import/delete when remote. Helper `includes/remote_rag_honesty.h`; wired in `MainFrame.cpp`; unit test `testGuiPhase1RemoteRagHonestyPolicy`; smoke checklist line in `docker/README.md`. Local indexing path unchanged.
+
+**Next:** Phase 2 ✅ (same day).
+
+### GUI — Phase 1 locked 🔒 (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) Phase 1 — Remote honesty: stop fabricating indexing.
+
+**Locked:** **Option A** — keep RAG slots as host-only session notes; never claim Engine indexing; skip `setRagFiles` when remote; host-only labels; locked status strings. Call sites: `HandleFileDrop` / Import Corpus, slot delete, `RefreshRagPanel`. Local indexing UX unchanged. No ingest API.
+
+**Implemented:** see entry above (same day).
+
+### GUI — Phase 0 locked 🔒 (2026-07-19)
+
+**Roadmap:** [`GUI_integration.md`](GUI_integration.md) — client/server completion (GUI as presentation client).
+
+**Locked (docs only):** Ownership freeze for thin-client transition — D0 Single Source of Truth; GUI may Display/Request/Cache UI only (may not chunk/retrieve/ground/store/simulate/invent); D5 No Duplicate Logic; Unavailable vs Empty; Ownership Matrix; Appendix A capability matrix; Appendix D quick ownership table. No code. Honesty-first phase order retained.
+
+**Next:** Phase 1 locked separately — implement Phase 1 on approval.
+
+### B1 — Phase 1 Candidate membership ✅ (2026-07-19) — awaiting freeze
+
+**Protocol:** [`B1_PROTOCOL.md`](B1_PROTOCOL.md) **B1 v1.1**.  
+**Artifact:** [`baselines/b1_v1_membership_candidate.md`](baselines/b1_v1_membership_candidate.md) (+ [`.json`](baselines/b1_v1_membership_candidate.json)).
+
+**Produced:** Deterministic §6.5 selection → **Candidate b1_v1 Membership** (30 IDs), Selection Audit, Corpus Manifest (SHA-256), summary stats, metadata (`lifecycle=candidate`).
+
+| Check | Result |
+|-------|--------|
+| Pool → eligible | 100 → 80 (20 removed: non-U/G/T types) |
+| Dedup removals | 0 |
+| Lex cutoff | 50 |
+| Selected | **30** |
+| Gap cells | **0** |
+| Structure | 5 papers × 6 = 30; 10 U + 10 G + 10 T |
+
+**Selected IDs (lex first-2 per cell):** `U1,U11,G15,G21,T15,T20` (rag); `U13,U18,G12,G14,T13,T18` (react); `U14,U19,G13,G19,T1,T10` (genagents); `U12,U17,G1,G11,T11,T19` (memgpt); `U10,U15,G10,G17,T17,T25` (cot).
+
+**Commits at selection:** Thoth `86f71bb`; basic_agent `df13c98`.
+
+**Not done:** Owner freeze → Frozen membership; Phase 2 wiring; E1 authoritative run; Zenodo.
+
+**Next:** Owner confirms freeze (e.g. “freeze b1_v1”). Until then: candidate only — not citable as frozen suite content.
+
+### B1 — Phase 0 locked 🔒 (2026-07-19)
+
+**Protocol:** [`B1_PROTOCOL.md`](B1_PROTOCOL.md) **B1 v1.0** (methodology later extended to **v1.1** in Phase 1).
+
+**Locked:** Methodology for the **30-case publication benchmark** (structure, objective selection algorithm, freeze/versioning, E1 authority, integrity vs reported metrics, reproducibility). Suite id structure `b1_v1`.
+
+**Superseded for membership status:** Phase 1 Candidate materialized 2026-07-19 — see entry above.
 
 ### G1e — Phase 4 ✅ KEEP @ −0.05 (2026-07-19)
 

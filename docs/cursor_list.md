@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-19 (G1e Phase 4 ✅ production `w_t=-0.05`; magnitude tuning paused open)  
+**Last updated:** 2026-07-19 (B1 Phase 1 Candidate `b1_v1` ready; awaiting freeze; G1e KEEP@−0.05)  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
@@ -4000,7 +4000,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
-| **B1** | Research-paper corpus: 30 hardened cases | 📋 | `new_corpus_tests.md`; feeds **V3** Zenodo |
+| **B1** | 30-case publication benchmark | 🔶 | Phase 1 **Candidate** [`b1_v1_membership_candidate.md`](baselines/b1_v1_membership_candidate.md); protocol [`B1_PROTOCOL.md`](B1_PROTOCOL.md) v1.1; **awaiting freeze**; feeds **V3** Zenodo |
 | **B2** | Automate critical manual suite signals | ✅ | `run_test_suite.cpp` + `check_baseline.py` (2026-06-27); **C5** extends coverage |
 | **B3** | Reduce test log noise | 📋 | Repeated embedding migration log per fixture |
 | **B4** | Compiler warnings (~14 on debug build) | 📋 | Unused params in stubs/GUI |
@@ -4105,7 +4105,7 @@ The third tier does not exist yet. It is the missing bridge between "it works" a
 | **2b** | **G1e** — Trajectory polarity | 🔶 | KEEP@−0.05 in production; magnitude lane paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) |
 | **3** | **E3** — SCR in CI | 📋 | Strategy promotion as regression signal |
 | **4** | **C6 Phase 3** — Accumulated multi-session analysis | ✅ | C6.3-01–06 ✅; operator guide [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md); fixture catalog [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md) |
-| **5** | **B1** — 30 hardened corpus cases | 📋 | Required before generalization / V3 Zenodo |
+| **5** | **B1** — 30-case publication benchmark | 🔶 | Phase 1 Candidate ready; owner freeze next — [`B1_PROTOCOL.md`](B1_PROTOCOL.md) v1.1 |
 | **6** | **V3** — Zenodo re-upload | ⏸️ | Only after B1 + pinned-env runs; scoped Phase E numbers only |
 | **7** | **F-series** — Chosen by evidence | 📋 | Promote per [`improvements.md`](improvements.md) § C6.3-04 (mandatory gates + owner approval) |
 
@@ -4175,10 +4175,12 @@ Done    **G1e** Phase 2 execute preflight (`run-1784407500480`) ✅ 2026-07-18
 Done    **G1e** Phase 3 polarity runs — KEEP@−0.05 candidate ✅ 2026-07-18
 Done    **G1e** Phase 3b `−0.30` — win rate flat vs −0.20; pause before −0.40 ✅ 2026-07-19
 Done    **G1e** Phase 4 — KEEP@−0.05 production ✅ 2026-07-19
-Next 1  **B1** — 30-case hardened corpus (required before V3 Zenodo)
+Done    **B1** Phase 0 — publication benchmark protocol lock ✅ 2026-07-19
+Next 1  **B1** Phase 1 — deterministic `b1_v1` membership (separate approval)
 Next 2  **E3** — SCR harness
-Next 3  **G2** / **M5** — as scheduled; G1e magnitude resume (e.g. −0.40) on owner request
+Next 3  **G2** / **M5** — as scheduled; G1e magnitude resume on owner request
 Later   **G1e** resume magnitude probes when ready
+Later   Zenodo V3 — after B1 close-out + pinned-env runs
 Later   F3/F1 — when eval identifies bottleneck (§ Reflection)
 Later   Tier 6 UI polish
 Last    Tier 7 self-building / apply_diff (owner discretion)

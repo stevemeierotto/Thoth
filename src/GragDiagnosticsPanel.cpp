@@ -6,6 +6,7 @@
 
 #include "GragDiagnosticsPanel.h"
 #include "grag_diagnostics_display.h"
+#include "retrieval_verification_display.h"
 #include <wx/sizer.h>
 #include <wx/statline.h>
 #include <iomanip>
@@ -22,6 +23,22 @@ GragDiagnosticsPanel::GragDiagnosticsPanel(wxWindow* parent)
 
 void GragDiagnosticsPanel::InitializeUI() {
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
+
+    m_layerHintLabel = new wxStaticText(
+        this, wxID_ANY,
+        wxString::FromUTF8("GRAG panel layers: Scope · Candidate · Grounded (see labels below)"));
+    m_layerHintLabel->SetForegroundColour(wxColour(80, 80, 80));
+    mainSizer->Add(m_layerHintLabel, 0, wxALL, 5);
+
+    m_scopeLabel = new wxStaticText(this, wxID_ANY, "Scope layer — —");
+    mainSizer->Add(m_scopeLabel, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
+
+    m_requestIdLabel = new wxStaticText(this, wxID_ANY, "request_id: —");
+    m_requestIdLabel->SetForegroundColour(wxColour(100, 100, 100));
+    mainSizer->Add(m_requestIdLabel, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
+
+    m_groundedLabel = new wxStaticText(this, wxID_ANY, "Grounded layer — —");
+    mainSizer->Add(m_groundedLabel, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
 
     // Alpha (Directional Strength)
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Directional Strength (Alpha):"), 0, wxALL, 5);
@@ -46,13 +63,25 @@ void GragDiagnosticsPanel::InitializeUI() {
     mainSizer->Add(new wxStaticLine(this), 0, wxEXPAND | wxALL, 5);
 
     // Chunks List
-    mainSizer->Add(new wxStaticText(this, wxID_ANY, "Retrieved Chunks:"), 0, wxALL, 5);
+    mainSizer->Add(new wxStaticText(
+                       this, wxID_ANY,
+                       wxString::FromUTF8(Thoth::RetrievalVerificationDisplay::kCandidateLayerTitle)),
+                   0, wxALL, 5);
     m_chunksList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
     m_chunksList->SetMinSize(wxSize(-1, 60));
     m_chunksList->AppendTextColumn("Final Score", wxDATAVIEW_CELL_INERT, 100);
     m_chunksList->AppendTextColumn("File", wxDATAVIEW_CELL_INERT, 150);
     m_chunksList->AppendTextColumn("Symbol", wxDATAVIEW_CELL_INERT, 150);
     mainSizer->Add(m_chunksList, 1, wxEXPAND | wxALL, 5);
+
+    m_warmMemoryNote = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    m_warmMemoryNote->SetForegroundColour(wxColour(120, 90, 0));
+    mainSizer->Add(m_warmMemoryNote, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
+
+    mainSizer->Add(new wxStaticLine(this), 0, wxEXPAND | wxALL, 5);
+    m_lastEventLabel = new wxStaticText(this, wxID_ANY, "Last event: —");
+    m_lastEventLabel->SetForegroundColour(wxColour(100, 100, 100));
+    mainSizer->Add(m_lastEventLabel, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
 
     SetSizer(mainSizer);
 }
@@ -72,22 +101,7 @@ static std::optional<float> ExtractFinalScore(const nlohmann::json& chunk) {
 }
 
 static nlohmann::json ExtractDiagnosticsPayload(const nlohmann::json& metadata) {
-    try {
-        if (!metadata.is_object()) return metadata;
-
-        if (metadata.contains("diagnostics") && metadata["diagnostics"].is_object()) {
-            return metadata["diagnostics"];
-        }
-
-        if (metadata.contains("result") && metadata["result"].is_object()) {
-            const auto& result = metadata["result"];
-            if (result.contains("diagnostics") && result["diagnostics"].is_object()) {
-                return result["diagnostics"];
-            }
-        }
-    } catch (...) {}
-
-    return metadata;
+    return Thoth::RetrievalVerificationDisplay::extractDiagnosticsPayload(metadata);
 }
 
 void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
@@ -97,6 +111,31 @@ void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
 
     try {
         const nlohmann::json diagnostics = ExtractDiagnosticsPayload(metadata);
+
+        if (m_scopeLabel) {
+            const std::string skipped =
+                Thoth::RetrievalVerificationDisplay::formatRetrievalSkippedLabel(diagnostics);
+            if (!skipped.empty()) {
+                m_scopeLabel->SetLabel(wxString::FromUTF8(skipped));
+            } else {
+                const nlohmann::json scope =
+                    Thoth::RetrievalVerificationDisplay::scopeFromDiagnostics(diagnostics);
+                m_scopeLabel->SetLabel(wxString::FromUTF8(
+                    Thoth::RetrievalVerificationDisplay::formatScopeLayerSummary(scope)));
+            }
+        }
+        if (m_requestIdLabel) {
+            m_requestIdLabel->SetLabel(wxString::FromUTF8(
+                Thoth::RetrievalVerificationDisplay::formatRequestIdLine(metadata, diagnostics)));
+        }
+        if (m_groundedLabel) {
+            const nlohmann::json trace =
+                Thoth::RetrievalVerificationDisplay::embeddedRetrievalTrace(diagnostics);
+            const nlohmann::json grounding =
+                trace.value("grounding", nlohmann::json::object());
+            m_groundedLabel->SetLabel(wxString::FromUTF8(
+                Thoth::RetrievalVerificationDisplay::formatGroundedLayerSummary(grounding)));
+        }
         
         if (diagnostics.is_object()) {
             std::string scoringType;
@@ -156,6 +195,15 @@ void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
                     if (chunk.contains("symbol") && chunk["symbol"].is_string()) {
                         symbol = chunk["symbol"].get<std::string>();
                     }
+                    if (chunk.contains("source_node_id") && chunk["source_node_id"].is_string()) {
+                        const std::string node = chunk["source_node_id"].get<std::string>();
+                        if (!node.empty()) {
+                            if (!symbol.empty()) {
+                                symbol += " · ";
+                            }
+                            symbol += node;
+                        }
+                    }
                     if (symbol.size() > 256) symbol = symbol.substr(0, 253) + "...";
                     data.push_back(wxVariant(wxString::FromUTF8(symbol)));
                     
@@ -186,6 +234,15 @@ void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
                 }
             }
         }
+
+        if (m_warmMemoryNote) {
+            if (Thoth::RetrievalVerificationDisplay::breakdownsIncludeWarmMemory(diagnostics)) {
+                m_warmMemoryNote->SetLabel(
+                    wxString::FromUTF8(Thoth::RetrievalVerificationDisplay::kWarmMemoryFootnote));
+            } else {
+                m_warmMemoryNote->SetLabel(wxEmptyString);
+            }
+        }
     } catch (const std::exception& e) {
         std::cerr << "[GragDiagnosticsPanel] Exception in UpdateDiagnostics: " << e.what() << "\n";
     } catch (...) {
@@ -193,4 +250,10 @@ void GragDiagnosticsPanel::UpdateDiagnostics(const nlohmann::json& metadata) {
     }
 
     Layout();
+}
+
+void GragDiagnosticsPanel::UpdateLastEventAgeLabel(const wxString& label) {
+    if (m_lastEventLabel) {
+        m_lastEventLabel->SetLabel(label);
+    }
 }

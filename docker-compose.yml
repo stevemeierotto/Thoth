@@ -1,5 +1,5 @@
 # Thoth Docker Compose v1 (Plan I)
-# Default profile: thoth-engine + llama-server (llama_cpp backend).
+# Default profile: thoth-engine + llama-server (chat) + llama-embed-server (embeddings).
 # Optional Ollama sidecar: docker compose -f docker-compose.yml -f docker-compose.ollama.yml --profile ollama up -d
 
 name: thoth
@@ -22,9 +22,33 @@ services:
       - --port
       - "8080"
       - -c
-      - "4096"
+      - "2048"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  llama-embed-server:
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:823b6f019cafbee8878dfdd0d4750eae4f81dfafb60dc1fbefb66794a59903c8
+    restart: unless-stopped
+    networks:
+      - thoth-net
+    volumes:
+      - llama-models:/models:ro
+    command:
+      - -m
+      - ${LLAMA_EMBED_MODEL:-/models/nomic-embed-text.gguf}
+      - --embeddings
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8081"
+      - -c
+      - "512"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8081/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -41,6 +65,8 @@ services:
     depends_on:
       llama-server:
         condition: service_healthy
+      llama-embed-server:
+        condition: service_healthy
     networks:
       - thoth-net
     ports:
@@ -50,6 +76,7 @@ services:
       THOTH_LOGS_PATH: /logs
       THOTH_PROJECT_ROOT: /workspace
       THOTH_INFERENCE_BASE_URL: http://llama-server:8080
+      THOTH_EMBED_BASE_URL: http://llama-embed-server:8081
       THOTH_INFERENCE_BACKEND: llama_cpp
       THOTH_ENGINE_BIND: "0.0.0.0"
       THOTH_ENGINE_PORT: "8090"

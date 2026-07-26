@@ -5,6 +5,7 @@
  */
 
 #include "ExperimentLabPanel.h"
+#include "backend_capabilities.h"
 #include <wx/sizer.h>
 #include <iomanip>
 #include <sstream>
@@ -19,6 +20,10 @@ void ExperimentLabPanel::InitializeUI() {
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
 
     mainSizer->Add(new wxStaticText(this, wxID_ANY, "Scientific Experiments:"), 0, wxALL, 5);
+
+    m_statusLabel = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    m_statusLabel->Hide();
+    mainSizer->Add(m_statusLabel, 0, wxALL, 5);
     
     m_experimentList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
     m_experimentList->SetMinSize(wxSize(-1, 60));
@@ -29,7 +34,7 @@ void ExperimentLabPanel::InitializeUI() {
     
     mainSizer->Add(m_experimentList, 1, wxEXPAND | wxALL, 5);
 
-    wxBoxSizer* btnSizer = new wxBoxSizer(wxHORIZONTAL);
+    auto* btnSizer = new wxBoxSizer(wxHORIZONTAL);
     btnSizer->Add(new wxButton(this, wxID_ANY, "New Experiment"), 0, wxALL, 5);
     btnSizer->Add(new wxButton(this, wxID_ANY, "Run Benchmark"), 0, wxALL, 5);
     mainSizer->Add(btnSizer, 0, wxALIGN_RIGHT);
@@ -37,10 +42,56 @@ void ExperimentLabPanel::InitializeUI() {
     SetSizer(mainSizer);
 }
 
+void ExperimentLabPanel::SetPresentationState(Thoth::PanelPresentationState state,
+                                              const wxString& message) {
+    using Thoth::PanelPresentationState;
+    wxString text = message;
+    switch (state) {
+    case PanelPresentationState::Loading:
+        if (text.empty()) text = "Loading…";
+        m_experimentList->Hide();
+        m_experimentList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Unavailable:
+        if (text.empty()) {
+            text = wxString::FromUTF8(Thoth::kUnavailableWithCurrentBackend);
+        }
+        m_experimentList->Hide();
+        m_experimentList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Error:
+        if (text.empty()) text = "Error loading experiments.";
+        m_experimentList->Hide();
+        m_experimentList->DeleteAllItems();
+        m_statusLabel->SetLabel(text);
+        m_statusLabel->Show();
+        break;
+    case PanelPresentationState::Empty:
+        m_statusLabel->Hide();
+        m_experimentList->DeleteAllItems();
+        m_experimentList->Show();
+        break;
+    case PanelPresentationState::Populated:
+        m_statusLabel->Hide();
+        m_experimentList->Show();
+        break;
+    }
+    Layout();
+}
+
 void ExperimentLabPanel::UpdateExperiments(const nlohmann::json& experimentsJson) {
     m_experimentList->DeleteAllItems();
 
-    if (!experimentsJson.is_array()) return;
+    if (!experimentsJson.is_array() || experimentsJson.empty()) {
+        SetPresentationState(Thoth::PanelPresentationState::Empty);
+        return;
+    }
+
+    SetPresentationState(Thoth::PanelPresentationState::Populated);
 
     for (const auto& exp : experimentsJson) {
         wxVector<wxVariant> data;

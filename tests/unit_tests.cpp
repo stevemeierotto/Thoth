@@ -42,6 +42,7 @@
 #include "controller_event.h"
 #include "env_loader.h"
 #include "index_manager.h"
+#include "agent_context_retrieval.h"
 #include "llm_interface.h"
 #include "logger.h"
 #include "memory.h"
@@ -73,6 +74,22 @@
 #include "chat_generation_safety.h"
 #include "robustness_mock_responses.h"
 #include "grag_diagnostics_display.h"
+#include "remote_rag_honesty.h"
+#include "ChatSessionTypes.h"
+#include "local_note_engine_sync.h"
+#include "backend_capabilities.h"
+#include "panel_presentation_state.h"
+#include "cognitive_diagnostics_authority.h"
+#include "decision_summary.h"
+#include "progress_source.h"
+#include "engine_connection_state.h"
+#include "operation_result.h"
+#include "corpus_documents.h"
+#include "retrieval_verification_display.h"
+#include "corpus_create.h"
+#include "conversation_authority.h"
+#include "research_resources.h"
+#include "graph_statistics.h"
 #include "prompt_factory.h"
 #include "llama_server_client.h"
 #include "ollama_client.h"
@@ -833,6 +850,36 @@ static bool testRuntimeBootstrapDiagnosticsDisabledByDefault() {
     return !Thoth::runtimeConfigDiagnosticsEnabled(nullptr);
 }
 
+static bool testConfigEnvironmentOverrides() {
+    Config cfg;
+    cfg.llm_model = "from-default";
+    cfg.embedding_model = "from-default";
+
+    {
+        ScopedEnvVar llm("OLLAMA_MODEL", "compose-chat");
+        ScopedEnvVar embed("OLLAMA_EMBED_MODEL", "nomic-embed-text");
+        ScopedEnvVar unsetThothEmbed("THOTH_EMBEDDING_MODEL", nullptr);
+        cfg.applyEnvironmentOverrides();
+        if (cfg.llm_model != "compose-chat" || cfg.embedding_model != "nomic-embed-text") {
+            std::cerr << "testConfigEnvironmentOverrides: OLLAMA_* override failed\n";
+            return false;
+        }
+    }
+
+    {
+        ScopedEnvVar llm("OLLAMA_MODEL", nullptr);
+        ScopedEnvVar embed("OLLAMA_EMBED_MODEL", nullptr);
+        ScopedEnvVar thothEmbed("THOTH_EMBEDDING_MODEL", "custom-embed");
+        cfg.applyEnvironmentOverrides();
+        if (cfg.embedding_model != "custom-embed") {
+            std::cerr << "testConfigEnvironmentOverrides: THOTH_EMBEDDING_MODEL override failed\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static bool testEngineErrorSchema() {
     const Thoth::EngineError invalid =
         Thoth::EngineError::invalidRequest("Goal cannot be empty.");
@@ -1014,6 +1061,119 @@ static bool testRemoteChatGoalMappingOffline() {
     return true;
 }
 
+/** R3 — goal POST session_id must match tab after SyncBackendSessionIdentity (pure wire). */
+static bool testGuiR3GoalSessionWire() {
+    using namespace ThothRemoteHttp;
+
+    const auto req = buildGoalRequestJson("Run unit tests", "tab-session-xyz");
+    if (req.value("goal", "") != "Run unit tests"
+        || req.value("session_id", "") != "tab-session-xyz") {
+        std::cerr << "testGuiR3GoalSessionWire: buildGoalRequestJson session wire failed\n";
+        return false;
+    }
+    return true;
+}
+
+/** R4-G1 — Engine conversation chat failures must surface (not silent Panel path). */
+static bool testGuiR4ChatFailureSurfaces() {
+    using namespace Thoth;
+
+    const OperationResult ok =
+        makeSuccess(kOpChat, "Response received", "hello");
+    if (engineConversationChatFailureNeedsStatusBar(ok, true)) {
+        std::cerr << "testGuiR4ChatFailureSurfaces: success should not need status\n";
+        return false;
+    }
+
+    const OperationResult fail =
+        makeFailure(kOpChat, "Failed to send", "[RemoteEngine] turn transport: Timeout was reached",
+                    true);
+    if (!engineConversationChatFailureNeedsStatusBar(fail, true)) {
+        std::cerr << "testGuiR4ChatFailureSurfaces: engine failure should need status\n";
+        return false;
+    }
+    if (engineConversationChatFailureNeedsStatusBar(fail, false)) {
+        std::cerr << "testGuiR4ChatFailureSurfaces: local path should not use engine rule\n";
+        return false;
+    }
+    if (uiSeverityForFailure(fail, EventStreamSnapshot{}) != OperationUiSeverity::Panel) {
+        std::cerr << "testGuiR4ChatFailureSurfaces: expected Panel severity for connected chat\n";
+        return false;
+    }
+    return true;
+}
+
+/** R4-G4 — conversation turn wire uses explicit session_id (Phase 10). */
+static bool testGuiR4ConversationTurnSessionWire() {
+    nlohmann::json req = {{"session_id", "session-tab-abc"}, {"content", "ping"}};
+    if (req.value("session_id", "") != "session-tab-abc"
+        || req.value("content", "") != "ping") {
+        std::cerr << "testGuiR4ConversationTurnSessionWire: turn JSON wire failed\n";
+        return false;
+    }
+    return true;
+}
+
+/** R5-G5 — RETRIEVAL_DIAGNOSTICS session gate when session_id is set. */
+static bool testGuiR5RetrievalSessionGate() {
+    using namespace Thoth::RetrievalVerificationDisplay;
+    if (!retrievalDiagnosticsTargetsSession("tab-a", "tab-a")) {
+        std::cerr << "testGuiR5RetrievalSessionGate: same session should match\n";
+        return false;
+    }
+    if (retrievalDiagnosticsTargetsSession("tab-a", "tab-b")) {
+        std::cerr << "testGuiR5RetrievalSessionGate: cross-tab must not match\n";
+        return false;
+    }
+    if (!retrievalDiagnosticsTargetsSession("", "tab-b")) {
+        std::cerr << "testGuiR5RetrievalSessionGate: legacy empty event session must match\n";
+        return false;
+    }
+    return true;
+}
+
+/** R5-G1/G2/G3/G8 — scope, grounded, and skip labels (pure). */
+static bool testGuiR5ScopeGroundingDisplay() {
+    using namespace Thoth::RetrievalVerificationDisplay;
+
+    const nlohmann::json scope = {{"active_context_key", "sess-1"},
+                                  {"allowed_tiers", nlohmann::json::array({"session_attachment"})},
+                                  {"selected_documents", nlohmann::json::array({"a.md", "b.md"})}};
+    const std::string scopeLine = formatScopeLayerSummary(scope);
+    if (scopeLine.find("sess-1") == std::string::npos
+        || scopeLine.find("Scope layer") == std::string::npos) {
+        std::cerr << "testGuiR5ScopeGroundingDisplay: scope line wrong\n";
+        return false;
+    }
+
+    const nlohmann::json grounding = {{"grounded", true},
+                                      {"grounding_mode", "retrieved_context"},
+                                      {"documents", nlohmann::json::array({"probe.md"})}};
+    const std::string groundedLine = formatGroundedLayerSummary(grounding);
+    if (groundedLine.find("Grounded layer") == std::string::npos
+        || groundedLine.find("probe.md") == std::string::npos) {
+        std::cerr << "testGuiR5ScopeGroundingDisplay: grounded line wrong\n";
+        return false;
+    }
+
+    const nlohmann::json skipDiag = {{"scoring_type", "no_index"}};
+    if (formatRetrievalSkippedLabel(skipDiag).empty()) {
+        std::cerr << "testGuiR5ScopeGroundingDisplay: skip label missing\n";
+        return false;
+    }
+    return true;
+}
+
+/** R5-G4 — corpus inventory label is explicitly unscoped. */
+static bool testGuiR5CorpusInventoryLabel() {
+    if (std::string(Thoth::CorpusDocuments::kInventoryPopulatedLabel).find("unscoped")
+        == std::string::npos) {
+        std::cerr << "testGuiR5CorpusInventoryLabel: inventory label must say unscoped\n";
+        return false;
+    }
+    return true;
+}
+
 /** Plan K4 — pure env selection only (no wx / Docker / engine / plugin). */
 static bool testThothEngineUrlSelectionOffline() {
     using namespace ThothRemoteHttp;
@@ -1123,17 +1283,21 @@ static bool testRemoteAgentBackendEmptyUrlOffline() {
         RemoteAgentBackend remote("");
         remote.setEventHandler([](const ControllerEvent&) {});
         auto reply = remote.processInput("hello");
-        if (!reply.has_value()) {
-            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: expected engaged error string\n";
+        if (reply.success) {
+            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: expected failure OperationResult\n";
             return false;
         }
-        if (reply->find("[RemoteEngine]") == std::string::npos) {
-            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: unexpected reply: " << *reply
-                      << "\n";
+        if (reply.operation != Thoth::kOpChat) {
+            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: wrong operation tag\n";
             return false;
         }
-        // Cognate empties match MainFrame shapes.
-        if (!remote.getStrategies().is_array() || !remote.getGraphStats().is_object()) {
+        if (reply.technical_details.find("[RemoteEngine]") == std::string::npos) {
+            std::cerr << "testRemoteAgentBackendEmptyUrlOffline: unexpected details: "
+                      << reply.technical_details << "\n";
+            return false;
+        }
+        // Cognate / graph shapes are objects (collection envelope or fetch sentinel).
+        if (!remote.getStrategies().is_object() || !remote.getGraphStats().is_object()) {
             std::cerr << "testRemoteAgentBackendEmptyUrlOffline: cognate shape mismatch\n";
             return false;
         }
@@ -1172,18 +1336,19 @@ static bool testRemoteAgentBackendLiveOptIn() {
         }
         remote.setSessionId("k3-live-test");
         auto reply = remote.processInput("/help");
-        if (!reply.has_value()) {
-            std::cerr << "testRemoteAgentBackendLiveOptIn: nullopt from processInput\n";
+        if (!reply.success) {
+            std::cerr << "testRemoteAgentBackendLiveOptIn: engine error: "
+                      << reply.technical_details << "\n";
             return false;
         }
-        if (reply->find("[RemoteEngine]") == 0) {
-            std::cerr << "testRemoteAgentBackendLiveOptIn: engine error: " << *reply << "\n";
+        if (reply.response_text.empty()) {
+            std::cerr << "testRemoteAgentBackendLiveOptIn: empty chat response\n";
             return false;
         }
         // Allow SSE connect; lifecycle events come mainly from goals.
         remote.executeGoal("K3 live smoke: no-op goal for events");
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-        std::cout << "testRemoteAgentBackendLiveOptIn: chat OK (" << reply->size()
+        std::cout << "testRemoteAgentBackendLiveOptIn: chat OK (" << reply.response_text.size()
                   << " bytes), sse_events=" << event_count.load() << "\n";
         // Do not require events>0 (engine/LLM dependent); shutdown must not hang (dtor).
         return true;
@@ -6360,6 +6525,2116 @@ static bool testPlanN5UnknownScoringMode() {
         return false;
     }
     return true;
+}
+
+// GUI Phase 1 — remote RAG honesty (+ Phase 5: never claim indexing on drop).
+static bool testGuiPhase1RemoteRagHonestyPolicy() {
+    using namespace Thoth::RemoteRagHonesty;
+    if (shouldSyncRagFilesToBackend(true) || shouldClaimIndexingOnHostDrop(true)) {
+        std::cerr << "testGuiPhase1RemoteRagHonestyPolicy: remote must not sync/claim indexing\n";
+        return false;
+    }
+    // Phase 5 D3a: Local also must not claim indexing on drop — wait for INDEXING_* events.
+    if (!shouldSyncRagFilesToBackend(false) || shouldClaimIndexingOnHostDrop(false)) {
+        std::cerr << "testGuiPhase1RemoteRagHonestyPolicy: local must sync setRagFiles but not claim indexing on drop\n";
+        return false;
+    }
+    const std::string status = formatHostOnlyAddStatus(2);
+    if (status != "Added 2 file(s) — host-only; not sent to Engine") {
+        std::cerr << "testGuiPhase1RemoteRagHonestyPolicy: bad status '" << status << "'\n";
+        return false;
+    }
+    if (status.find("indexing") != std::string::npos) {
+        std::cerr << "testGuiPhase1RemoteRagHonestyPolicy: status must not claim indexing\n";
+        return false;
+    }
+    const std::string label = formatHostOnlySlotLabel("notes.md");
+    if (label != "notes.md (host-only)") {
+        std::cerr << "testGuiPhase1RemoteRagHonestyPolicy: bad label '" << label << "'\n";
+        return false;
+    }
+    return true;
+}
+
+// GUI Restoration R1 — remote + ingest: Local Notes stay host-side; no setRagFiles sync.
+static bool testGuiR1RemoteIngestHostOnlyPresentation() {
+    using namespace Thoth::RemoteRagHonesty;
+
+    constexpr bool kIsRemote = true;
+    constexpr bool kSupportsIngest = true;
+
+    if (!localNotesAreHostSideOnly(kIsRemote)) {
+        std::cerr << "testGuiR1: remote Local Notes must be host-side only\n";
+        return false;
+    }
+    if (localNotesAreHostSideOnly(false)) {
+        std::cerr << "testGuiR1: local mode must not use host-only note semantics\n";
+        return false;
+    }
+    if (shouldSyncRagFilesToBackend(kIsRemote)) {
+        std::cerr << "testGuiR1: remote must not sync setRagFiles even when ingest enabled\n";
+        return false;
+    }
+    (void)kSupportsIngest;
+    if (!shouldSyncRagFilesToBackend(false)) {
+        std::cerr << "testGuiR1: local must still sync setRagFiles\n";
+        return false;
+    }
+
+    const std::string status = formatHostOnlyAddStatus(1);
+    if (status.find("host-only") == std::string::npos) {
+        std::cerr << "testGuiR1: remote drop status must remain host-only copy\n";
+        return false;
+    }
+    const std::string label = formatHostOnlySlotLabel("doc.md");
+    if (label != "doc.md (host-only)") {
+        std::cerr << "testGuiR1: slot label must stay host-only when isRemote\n";
+        return false;
+    }
+
+    const std::string sent = formatLocalNoteEngineSlotLabel(
+        "doc.md", "doc-abc", 3, false, false);
+    if (sent != "doc.md · id=doc-abc · 3 chunks") {
+        std::cerr << "testGuiR1: engine slot label wrong: '" << sent << "'\n";
+        return false;
+    }
+
+    using namespace Thoth;
+    if (progressSourceForBackendEvent(true) != ProgressSource::EngineEvent
+        || progressSourceForBackendEvent(false) != ProgressSource::LocalBackendEvent) {
+        std::cerr << "testGuiR1: progress source must follow isRemote not supportsIngest\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testLocalNoteEngineCorpusSync() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    ChatSession session;
+    session.ragFilePaths.push_back("/host/notes.md");
+    session.localNoteEngine["/host/notes.md"] = LocalNoteEngineInfo{
+        "doc-abc", "notes_1.md", -1, true, false};
+
+    const auto corpus = CorpusDocuments::makeDocument(
+        "doc-abc", "notes_1.md", "failed", std::nullopt, std::nullopt, "empty_document");
+    const nlohmann::json body = {
+        {"schema_version", CorpusDocuments::kSchemaVersion},
+        {"documents", nlohmann::json::array({corpus})},
+    };
+
+    if (!syncSessionFromCorpusList(session, body)) {
+        std::cerr << "testLocalNoteEngineCorpusSync: expected change\n";
+        return false;
+    }
+    const auto& info = session.localNoteEngine.at("/host/notes.md");
+    if (info.indexing || !info.failed) {
+        std::cerr << "testLocalNoteEngineCorpusSync: failed status not applied\n";
+        return false;
+    }
+
+    session.localNoteEngine["/host/notes.md"].indexing = true;
+    session.localNoteEngine["/host/notes.md"].failed = false;
+    const auto indexed = CorpusDocuments::makeDocument(
+        "doc-abc", "notes_1.md", "indexed", "2026-01-01T00:00:00Z", 4, std::nullopt);
+    const nlohmann::json indexed_body = {
+        {"schema_version", CorpusDocuments::kSchemaVersion},
+        {"documents", nlohmann::json::array({indexed})},
+    };
+    if (!syncSessionFromCorpusList(session, indexed_body)) {
+        std::cerr << "testLocalNoteEngineCorpusSync: indexed update expected\n";
+        return false;
+    }
+    const auto& done = session.localNoteEngine.at("/host/notes.md");
+    if (done.indexing || done.failed || done.chunk_count != 4) {
+        std::cerr << "testLocalNoteEngineCorpusSync: indexed status wrong\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testLocalNoteSendSelectionFilter() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    ChatSession session;
+    session.ragFilePaths = {"/host/a.md", "/host/b.md", "/host/c.md", "/host/d.md"};
+    session.localNoteEngine["/host/b.md"] = LocalNoteEngineInfo{
+        "doc-b", "b.md", 12, false, false};
+    session.localNoteEngine["/host/c.md"] = LocalNoteEngineInfo{
+        "doc-c", "c.md", -1, true, false};
+    session.localNoteEngine["/host/d.md"] = LocalNoteEngineInfo{
+        "doc-d", "d.md", -1, false, true};
+
+    if (localNoteAlreadySent(session, "/host/a.md")) {
+        std::cerr << "testLocalNoteSendSelectionFilter: host-only must not count as sent\n";
+        return false;
+    }
+    if (!localNoteAlreadySent(session, "/host/b.md")
+        || !localNoteAlreadySent(session, "/host/c.md")
+        || !localNoteAlreadySent(session, "/host/d.md")) {
+        std::cerr << "testLocalNoteSendSelectionFilter: accepted notes must count as sent\n";
+        return false;
+    }
+
+    const auto unsent = collectUnsentLocalNotePaths(session);
+    if (unsent.size() != 1 || unsent.front() != "/host/a.md") {
+        std::cerr << "testLocalNoteSendSelectionFilter: expected only /host/a.md unsent\n";
+        return false;
+    }
+
+    return true;
+}
+
+// GUI Phase 2 — BackendCapabilities matrix, mode labels, D10 disposition, Unavailable copy.
+static bool testGuiPhase2BackendCapabilitiesAndPresentation() {
+    using namespace Thoth;
+
+    const auto local = localBackendCapabilities();
+    const auto engine = engineBackendCapabilities();
+    if (!local.supportsStrategies || !local.supportsTrajectories || !local.supportsEpisodes
+        || !local.supportsExperiments
+        || !local.supportsGraphStats || !local.supportsBenchmarks || !local.supportsLogs
+        || !local.supportsIngest || !local.supportsPlanDiagnostics) {
+        std::cerr << "testGuiPhase2: Local matrix incomplete\n";
+        return false;
+    }
+    if (engine.supportsStrategies || engine.supportsTrajectories || engine.supportsEpisodes
+        || engine.supportsExperiments
+        || engine.supportsGraphStats || engine.supportsBenchmarks || engine.supportsLogs
+        || engine.supportsIngest) {
+        std::cerr << "testGuiPhase2: Engine matrix must keep cognate/logs/ingest false\n";
+        return false;
+    }
+    // Phase 4: Engine advertises plan diagnostics (decision summary resource).
+    if (!engine.supportsPlanDiagnostics) {
+        std::cerr << "testGuiPhase2: Engine must support plan diagnostics after Phase 4\n";
+        return false;
+    }
+    if (!local.supportsCorpusList || !engine.supportsCorpusList) {
+        std::cerr << "testGuiPhase2: Phase 8 supportsCorpusList must be true for Local and Engine\n";
+        return false;
+    }
+    if (capabilitiesForRemoteFlag(false).supportsIngest != true
+        || capabilitiesForRemoteFlag(true).supportsIngest != false) {
+        std::cerr << "testGuiPhase2: capabilitiesForRemoteFlag mismatch\n";
+        return false;
+    }
+    if (std::string(backendModeLabel(false)) != kBackendModeLocal
+        || std::string(backendModeLabel(true)) != kBackendModeEngine) {
+        std::cerr << "testGuiPhase2: mode labels must be Backend: Local / Backend: Engine\n";
+        return false;
+    }
+    if (std::string(backendModeLabel(true)).find("Remote") != std::string::npos) {
+        std::cerr << "testGuiPhase2: mode label must not say Remote\n";
+        return false;
+    }
+    const std::string unavailable = kUnavailableWithCurrentBackend;
+    if (unavailable.find("Plan K") != std::string::npos) {
+        std::cerr << "testGuiPhase2: Unavailable copy must not mention Plan K\n";
+        return false;
+    }
+    // D10: empty data with capability → Empty; without capability → Unavailable
+    if (disposePanelData(false, true) != PanelDataDisposition::Unavailable
+        || disposePanelData(false, false) != PanelDataDisposition::Unavailable) {
+        std::cerr << "testGuiPhase2: D10 missing capability must be Unavailable\n";
+        return false;
+    }
+    if (disposePanelData(true, true) != PanelDataDisposition::Empty) {
+        std::cerr << "testGuiPhase2: D10 empty data with capability must be Empty\n";
+        return false;
+    }
+    if (disposePanelData(true, false) != PanelDataDisposition::Populated) {
+        std::cerr << "testGuiPhase2: D10 non-empty with capability must be Populated\n";
+        return false;
+    }
+    return true;
+}
+
+// GUI Phase 3 — D11 cognitive diagnostics authority; Explain Plan unavailable sentinel.
+static bool testGuiPhase3CognitiveDiagnosticsAuthority() {
+    using namespace Thoth;
+    using namespace Thoth::CognitiveDiagnostics;
+
+    const auto local = localBackendCapabilities();
+    const auto engine = engineBackendCapabilities();
+
+    if (!mayReadHostDecisionTrace(local) || !mayReadHostLogs(local)) {
+        std::cerr << "testGuiPhase3: Local must allow host decision_trace/logs\n";
+        return false;
+    }
+    // Phase 4: Engine supports plan diagnostics via resource API (not host files).
+    if (!mayReadHostDecisionTrace(engine)) {
+        std::cerr << "testGuiPhase3: Engine supportsPlanDiagnostics should be true after Phase 4\n";
+        return false;
+    }
+    if (mayReadHostLogs(engine)) {
+        std::cerr << "testGuiPhase3: Engine must not claim host logs\n";
+        return false;
+    }
+
+    const std::string body = formatExplainPlanUnavailableBody();
+    if (body != "Unavailable\n\nThe current backend does not expose plan diagnostics.") {
+        std::cerr << "testGuiPhase3: bad Explain Plan body '" << body << "'\n";
+        return false;
+    }
+    if (body.find("Plan K") != std::string::npos) {
+        std::cerr << "testGuiPhase3: Explain Plan copy must not mention Plan K\n";
+        return false;
+    }
+    if (!isDecisionTraceUnavailableSentinel(decisionTraceUnavailableSentinel())) {
+        std::cerr << "testGuiPhase3: sentinel mismatch\n";
+        return false;
+    }
+    if (isDecisionTraceUnavailableSentinel("Latest Event: foo")) {
+        std::cerr << "testGuiPhase3: real trace must not match sentinel\n";
+        return false;
+    }
+
+    // D11 disposition: capability false → unavailable regardless of whether a host file exists.
+    BackendCapabilities no_plan;
+    no_plan.supportsPlanDiagnostics = false;
+    if (disposePanelData(no_plan.supportsPlanDiagnostics, false)
+        != PanelDataDisposition::Unavailable) {
+        std::cerr << "testGuiPhase3: missing plan diagnostics must be Unavailable\n";
+        return false;
+    }
+    if (disposePanelData(local.supportsPlanDiagnostics, true)
+        != PanelDataDisposition::Empty) {
+        std::cerr << "testGuiPhase3: Local empty plan data is Empty not Unavailable\n";
+        return false;
+    }
+    if (disposePanelData(engine.supportsPlanDiagnostics, false)
+        != PanelDataDisposition::Populated) {
+        std::cerr << "testGuiPhase3: Engine with capability + non-empty → Populated disposition\n";
+        return false;
+    }
+
+    const std::string logsWhy = std::string("Unavailable\n\n") + kLogsNotExposedWhy;
+    if (logsWhy.find("Plan K") != std::string::npos
+        || logsWhy.find("expose logs") == std::string::npos) {
+        std::cerr << "testGuiPhase3: logs why-copy invalid\n";
+        return false;
+    }
+    return true;
+}
+
+// GUI Phase 6 — SSE reconnect policy + connection/engine separation.
+static bool testGuiPhase6EventStreamResilience() {
+    using namespace Thoth;
+
+    if (sseReconnectDelayMs(0) != kSseReconnectInitialMs
+        || sseReconnectDelayMs(1) != kSseReconnectInitialMs * 2
+        || sseReconnectDelayMs(10) != kSseReconnectMaxMs) {
+        std::cerr << "testGuiPhase6: backoff helper wrong\n";
+        return false;
+    }
+
+    if (formatEventsStatusLine(EventConnectionState::Reconnecting) != "Events: Reconnecting"
+        || formatEngineStatusLine(EngineHealthState::Starting) != "Engine: Starting") {
+        std::cerr << "testGuiPhase6: status lines must be distinct Connection vs Engine\n";
+        return false;
+    }
+
+    if (formatEventsStatusLine(EventConnectionState::Connected).find("Engine:") != std::string::npos) {
+        std::cerr << "testGuiPhase6: events line must not mention Engine\n";
+        return false;
+    }
+
+    EventStreamSnapshot live{};
+    live.applies = true;
+    live.connection = EventConnectionState::Connected;
+    live.engine = EngineHealthState::Ready;
+    if (shouldShowConnectionIndicator(live) || shouldShowEngineIndicator(live)) {
+        std::cerr << "testGuiPhase6: calm when Connected+Ready\n";
+        return false;
+    }
+
+    EventStreamSnapshot reconnect{};
+    reconnect.applies = true;
+    reconnect.connection = EventConnectionState::Reconnecting;
+    reconnect.engine = EngineHealthState::Ready;
+    if (!shouldShowConnectionIndicator(reconnect) || shouldShowEngineIndicator(reconnect)) {
+        std::cerr << "testGuiPhase6: show connection not engine when SSE down\n";
+        return false;
+    }
+
+    EventStreamSnapshot engine_down{};
+    engine_down.applies = true;
+    engine_down.connection = EventConnectionState::Reconnecting;
+    engine_down.engine = EngineHealthState::Starting;
+    if (!shouldShowConnectionIndicator(engine_down) || !shouldShowEngineIndicator(engine_down)) {
+        std::cerr << "testGuiPhase6: both axes visible on long outage\n";
+        return false;
+    }
+
+    if (!engineHttpUsable(EngineHealthState::Ready)
+        || engineHttpUsable(EngineHealthState::Starting)) {
+        std::cerr << "testGuiPhase6: engineHttpUsable wrong\n";
+        return false;
+    }
+
+    const auto local = localEventStreamSnapshot(1000);
+    if (local.applies || local.connection != EventConnectionState::Connected) {
+        std::cerr << "testGuiPhase6: Local must not show SSE chrome\n";
+        return false;
+    }
+
+    if (formatLastEventAgeLabel(0, 5000) != "Last event: —"
+        || formatLastEventAgeLabel(2000, 5000) != "Last event: 3 s ago") {
+        std::cerr << "testGuiPhase6: last-event-age formatting wrong\n";
+        return false;
+    }
+
+#if THOTH_HAS_GUI
+    RemoteAgentBackend remote("");
+    const auto snap = remote.eventStreamSnapshot();
+    if (!snap.applies) {
+        std::cerr << "testGuiPhase6: remote snapshot must apply\n";
+        return false;
+    }
+#endif
+
+    return true;
+}
+
+// GUI Phase 7 — operation result honesty + Phase 6 correlation.
+static bool testGuiPhase7OperationResultHonesty() {
+    using namespace Thoth;
+
+    const auto ok = makeSuccess(kOpChat, "Response received", "hello");
+    if (!ok.success || ok.response_text != "hello" || ok.operation != kOpChat) {
+        std::cerr << "testGuiPhase7: makeSuccess chat wrong\n";
+        return false;
+    }
+
+    const auto fail = makeFailure(kOpAbort, "Abort failed", "[RemoteEngine] transport", true);
+    if (fail.success || fail.operation != kOpAbort || !fail.retryable) {
+        std::cerr << "testGuiPhase7: makeFailure wrong\n";
+        return false;
+    }
+
+    EventStreamSnapshot unavailable{};
+    unavailable.applies = true;
+    unavailable.connection = EventConnectionState::Reconnecting;
+    unavailable.engine = EngineHealthState::Ready;
+
+    const auto abort_fail = makeFailure(kOpAbort, "Abort request could not be delivered",
+                                        "transport reset", true);
+    const std::string correlated =
+        formatCorrelatedUserMessage(unavailable, abort_fail);
+    if (correlated.find("Engine unavailable") == std::string::npos
+        || correlated.find("Abort request could not be delivered") == std::string::npos) {
+        std::cerr << "testGuiPhase7: correlation wrong: " << correlated << "\n";
+        return false;
+    }
+    if (correlated.find("Engine unavailable — Engine unavailable") != std::string::npos) {
+        std::cerr << "testGuiPhase7: duplicate root cause\n";
+        return false;
+    }
+
+    if (uiSeverityForFailure(abort_fail, unavailable) != OperationUiSeverity::StatusBar) {
+        std::cerr << "testGuiPhase7: engine-down must route to status bar\n";
+        return false;
+    }
+
+    EventStreamSnapshot healthy{};
+    healthy.applies = true;
+    healthy.connection = EventConnectionState::Connected;
+    healthy.engine = EngineHealthState::Ready;
+    const auto chat_fail = makeFailure(kOpChat, "Chat failed", "HTTP 500", false, 500);
+    if (uiSeverityForFailure(chat_fail, healthy) != OperationUiSeverity::Panel) {
+        std::cerr << "testGuiPhase7: chat failure must route to panel when engine up\n";
+        return false;
+    }
+
+#if THOTH_HAS_GUI
+    RemoteAgentBackend remote("");
+    const auto chat = remote.processInput("ping");
+    if (chat.success) {
+        std::cerr << "testGuiPhase7: empty URL chat must fail\n";
+        return false;
+    }
+    const auto pause = remote.pause();
+    if (pause.success) {
+        std::cerr << "testGuiPhase7: empty URL pause must fail\n";
+        return false;
+    }
+    if (pause.operation != kOpPause) {
+        std::cerr << "testGuiPhase7: pause operation tag wrong\n";
+        return false;
+    }
+#endif
+
+    return true;
+}
+
+static bool testGuiPhase4DecisionSummary() {
+    using namespace Thoth::DecisionSummary;
+
+    nlohmann::json trace = {
+        {"trace_type", "goal_execution"},
+        {"result_summary", "Goal completed"},
+        {"duration_ms", 1234},
+        {"session_id", "s1"},
+        {"stages", nlohmann::json::array({
+            {{"name", "PLANNING"}, {"success", true}, {"summary", "Built 3-step plan"},
+             {"metadata", {{"goal", "Summarize GRAG"}}}},
+            {{"name", "EXECUTING_STEP"}, {"success", true}, {"summary", "Ran tools"},
+             {"metadata", nlohmann::json::object()}},
+        })},
+    };
+
+    const auto summary = fromDecisionTraceObject(trace);
+    std::string err;
+    if (!hasRequiredV1Fields(summary, err)) {
+        std::cerr << "testGuiPhase4DecisionSummary: " << err << "\n";
+        return false;
+    }
+    if (summary["schema_version"].get<int>() != kSchemaVersion) {
+        std::cerr << "testGuiPhase4DecisionSummary: bad schema_version\n";
+        return false;
+    }
+    if (summary.value("goal", "") != "Summarize GRAG") {
+        std::cerr << "testGuiPhase4DecisionSummary: goal mapping failed\n";
+        return false;
+    }
+    if (summary.value("executive_summary", "") != "Goal completed") {
+        std::cerr << "testGuiPhase4DecisionSummary: executive_summary mapping failed\n";
+        return false;
+    }
+    if (summary.value("planner_summary", "").find("3-step") == std::string::npos) {
+        std::cerr << "testGuiPhase4DecisionSummary: planner_summary mapping failed\n";
+        return false;
+    }
+    if (summary.value("execution_time_ms", 0) != 1234) {
+        std::cerr << "testGuiPhase4DecisionSummary: execution_time_ms mapping failed\n";
+        return false;
+    }
+    if (std::string(kHttpPath) != "/v1/diagnostics/latest-decision") {
+        std::cerr << "testGuiPhase4DecisionSummary: unexpected HTTP path\n";
+        return false;
+    }
+    if (std::string(kHttpPath).find("logs") != std::string::npos
+        || std::string(kHttpPath).find("tail") != std::string::npos) {
+        std::cerr << "testGuiPhase4DecisionSummary: path must not be file/tail oriented\n";
+        return false;
+    }
+
+    const std::string display = formatForDisplay(summary);
+    if (display.find("Goal:") == std::string::npos
+        || display.find("Executive summary:") == std::string::npos) {
+        std::cerr << "testGuiPhase4DecisionSummary: display format missing labels\n";
+        return false;
+    }
+    if (isEffectivelyEmpty(summary) || !isEffectivelyEmpty(emptyV1Summary())) {
+        std::cerr << "testGuiPhase4DecisionSummary: empty detection wrong\n";
+        return false;
+    }
+
+    // Engine capabilities advertise diagnostics after Phase 4
+    if (!Thoth::engineBackendCapabilities().supportsPlanDiagnostics) {
+        std::cerr << "testGuiPhase4DecisionSummary: Engine must advertise supportsPlanDiagnostics\n";
+        return false;
+    }
+    if (Thoth::engineBackendCapabilities().supportsLogs) {
+        std::cerr << "testGuiPhase4DecisionSummary: Logs still out of Phase 4 scope\n";
+        return false;
+    }
+    return true;
+}
+
+// GUI Phase 5 — D3a progress provenance: UserAction must not claim work.
+static bool testGuiPhase5ProgressReportingDiscipline() {
+    using namespace Thoth;
+
+    if (!mayApplyWorkProgress(ProgressSource::EngineEvent)
+        || !mayApplyWorkProgress(ProgressSource::LocalBackendEvent)
+        || !mayApplyWorkProgress(ProgressSource::EngineApiResponse)) {
+        std::cerr << "testGuiPhase5: backend signals must allow work progress\n";
+        return false;
+    }
+    if (mayApplyWorkProgress(ProgressSource::UserAction)
+        || mayApplyWorkProgress(ProgressSource::Unknown)) {
+        std::cerr << "testGuiPhase5: UserAction/Unknown must not apply work progress\n";
+        return false;
+    }
+    if (!mayApplyIndexingProgress(ProgressSource::EngineEvent)
+        || !mayApplyIndexingProgress(ProgressSource::LocalBackendEvent)) {
+        std::cerr << "testGuiPhase5: indexing must accept backend events\n";
+        return false;
+    }
+    if (mayApplyIndexingProgress(ProgressSource::UserAction)
+        || mayApplyIndexingProgress(ProgressSource::EngineApiResponse)
+        || mayApplyIndexingProgress(ProgressSource::Unknown)) {
+        std::cerr << "testGuiPhase5: indexing must reject UserAction/API/Unknown\n";
+        return false;
+    }
+    if (progressSourceForBackendEvent(true) != ProgressSource::EngineEvent
+        || progressSourceForBackendEvent(false) != ProgressSource::LocalBackendEvent) {
+        std::cerr << "testGuiPhase5: progressSourceForBackendEvent mapping wrong\n";
+        return false;
+    }
+    const std::string chrome = formatFilesAddedChromeStatus(3);
+    if (chrome != "Added 3 file(s)" || chrome.find("indexing") != std::string::npos) {
+        std::cerr << "testGuiPhase5: local add chrome must not claim indexing\n";
+        return false;
+    }
+    if (std::string(kGoalSubmittedChrome).find("Planning") != std::string::npos
+        || std::string(kMessageSubmittedChrome).find("Syncing") != std::string::npos) {
+        std::cerr << "testGuiPhase5: chrome strings must not invent work\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testGuiPhase8CorpusDocuments() {
+    using namespace Thoth::CorpusDocuments;
+
+    const auto doc = makeDocument("doc-a", "GRAG.md", "indexed", "2026-07-20T12:00:00Z", 42);
+    if (doc.value("id", "") != "doc-a" || doc.value("name", "") != "GRAG.md") {
+        std::cerr << "testGuiPhase8: makeDocument wrong\n";
+        return false;
+    }
+    if (!doc["chunk_count"].is_number_integer() || doc["chunk_count"].get<int>() != 42) {
+        std::cerr << "testGuiPhase8: chunk_count wrong\n";
+        return false;
+    }
+
+    const auto sparse = makeDocument("doc-b", "HOWTO.md", "pending");
+    if (!sparse["chunk_count"].is_null() || !sparse["indexed_at"].is_null()) {
+        std::cerr << "testGuiPhase8: optional fields must be null\n";
+        return false;
+    }
+
+    const std::string id1 = stableDocumentId("GRAG.md");
+    const std::string id2 = stableDocumentId("GRAG.md");
+    if (id1.empty() || id1 != id2 || id1.find("doc-") != 0) {
+        std::cerr << "testGuiPhase8: stableDocumentId wrong\n";
+        return false;
+    }
+
+    nlohmann::json body = emptyV1List();
+    body["documents"].push_back(doc);
+    std::string err;
+    if (!hasRequiredV1Fields(body, err)) {
+        std::cerr << "testGuiPhase8: valid body rejected: " << err << "\n";
+        return false;
+    }
+    if (isEffectivelyEmpty(body)) {
+        std::cerr << "testGuiPhase8: populated body must not be empty\n";
+        return false;
+    }
+    if (!isEffectivelyEmpty(emptyV1List())) {
+        std::cerr << "testGuiPhase8: empty list wrong\n";
+        return false;
+    }
+    if (hasRequiredV1Fields(unavailableFetchResult(), err)) {
+        std::cerr << "testGuiPhase8: unavailable fetch must fail validation\n";
+        return false;
+    }
+
+    if (std::string(kHttpPath) != "/v1/rag/corpus"
+        || std::string(kReadyCapability) != "corpus") {
+        std::cerr << "testGuiPhase8: path/capability tokens wrong\n";
+        return false;
+    }
+
+    if (std::string(kLoadingLabel).empty() || std::string(kEmptyLabel).empty()
+        || std::string(kUnavailableLabel).empty()) {
+        std::cerr << "testGuiPhase8: presentation labels missing\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testGuiR2CorpusFailedDocument() {
+    using namespace Thoth::CorpusDocuments;
+
+    const auto doc = makeDocument(
+        "doc-f", "ws.md", "failed", std::nullopt, std::nullopt, "empty_document");
+    if (doc.value("status", "") != "failed"
+        || doc.value("reason", "") != "empty_document") {
+        std::cerr << "testGuiR2CorpusFailedDocument: makeDocument wrong\n";
+        return false;
+    }
+    nlohmann::json body = emptyV1List();
+    body["documents"].push_back(doc);
+    std::string err;
+    if (!hasRequiredV1Fields(body, err)) {
+        std::cerr << "testGuiR2CorpusFailedDocument: validation: " << err << "\n";
+        return false;
+    }
+    if (!isAllowedDocumentStatus("failed") || isAllowedDocumentStatus("queued")) {
+        std::cerr << "testGuiR2CorpusFailedDocument: status guard wrong\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testTcb2ScopeBeatsSimilarity() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    const std::string session = "tcb-x1-session";
+    const std::string attachPath = "/tmp/thoth_tcb_x1_attachment.md";
+    const std::string benchPath = "/workspace/docker/seed_rag/GRAG.md";
+
+    const std::string query = "THOTH_TCB_X1_UNIQUE_ALPHA_BETA_GAMMA";
+
+    CodeChunk bench;
+    bench.fileName = benchPath;
+    bench.code = query + " benchmark corpus dominant content";
+    bench.embedding = engine->embed(bench.code);
+    bench.keyword_score = 1.0f;
+
+    CodeChunk attach;
+    attach.fileName = attachPath;
+    attach.code = "unrelated filler text";
+    attach.embedding = engine->embed(attach.code);
+    attach.keyword_score = 0.1f;
+
+    idx.registerAttachmentOwner(attachPath, session);
+    idx.addChunkToIndex(std::move(bench));
+    idx.addChunkToIndex(std::move(attach));
+
+    Thoth::RetrievalScope scope = Thoth::resolveAgentContextRetrievalScope(session, &idx);
+    const auto results = idx.retrieveChunks(query, 5, &scope);
+    if (results.empty()) {
+        std::cerr << "testTcb2ScopeBeatsSimilarity: expected in-scope attachment hit\n";
+        return false;
+    }
+    for (const auto& entry : results) {
+        const CodeChunk* chunk = idx.getChunkByCode(entry.first);
+        if (!chunk) {
+            continue;
+        }
+        if (chunk->corpus_tier == "benchmark" || chunk->corpus_tier == "system_reference") {
+            std::cerr << "testTcb2ScopeBeatsSimilarity: excluded tier leaked: "
+                      << chunk->corpus_tier << "\n";
+            return false;
+        }
+        if (chunk->corpus_tier != "session_attachment" ||
+            chunk->owner_context_id != session) {
+            std::cerr << "testTcb2ScopeBeatsSimilarity: unexpected tier/owner\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool testTcb2CrossContextIsolation() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    const std::string pathA = "/tmp/thoth_tcb_x2_a.md";
+    const std::string pathB = "/tmp/thoth_tcb_x2_b.md";
+
+    CodeChunk chunkA;
+    chunkA.fileName = pathA;
+    chunkA.code = "session A secret token TCBX2A";
+    chunkA.embedding = engine->embed(chunkA.code);
+
+    idx.registerAttachmentOwner(pathA, "session-a");
+    idx.addChunkToIndex(std::move(chunkA));
+
+    Thoth::RetrievalScope scopeB = Thoth::resolveAgentContextRetrievalScope("session-b", &idx);
+    const auto results = idx.retrieveChunks("TCBX2A secret", 5, &scopeB);
+    if (!results.empty()) {
+        std::cerr << "testTcb2CrossContextIsolation: context B retrieved context A material\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testTcb2RetrievalTraceParity() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    const std::string session = "tcb-x3";
+    const std::string path = "/tmp/thoth_tcb_x3.md";
+    CodeChunk chunk;
+    chunk.fileName = path;
+    chunk.code = "trace parity unique phrase TCBX3";
+    chunk.embedding = engine->embed(chunk.code);
+    idx.registerAttachmentOwner(path, session);
+    idx.addChunkToIndex(std::move(chunk));
+
+    RAGPipeline rag(std::move(engine), &idx, &cfg);
+
+    nlohmann::json diagTrace;
+    rag.setEventCallback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::RETRIEVAL_DIAGNOSTICS) {
+            diagTrace = ev.metadata.value("retrieval_trace", nlohmann::json{});
+        }
+    });
+
+    Thoth::RetrievalScope scope = Thoth::resolveAgentContextRetrievalScope(session, &idx);
+    Thoth::RetrievalTrace traceOut;
+    GragDiagnostics diagnostics;
+    rag.retrieveRelevant("TCBX3 unique phrase", {}, 3, "req-tcb-x3", {}, {}, {}, {}, {},
+                         &diagnostics, &scope, &traceOut);
+
+    const nlohmann::json chatScope = traceOut.toJson().value("retrieval_scope", nlohmann::json{});
+    const nlohmann::json diagScope = diagTrace.value("retrieval_scope", nlohmann::json{});
+    if (chatScope.empty() || diagScope.empty()) {
+        std::cerr << "testTcb2RetrievalTraceParity: missing retrieval_scope\n";
+        return false;
+    }
+    if (chatScope.value("context_policy_version", 0) != Thoth::kContextPolicyVersionV1) {
+        std::cerr << "testTcb2RetrievalTraceParity: wrong policy version\n";
+        return false;
+    }
+    if (chatScope != diagScope) {
+        std::cerr << "testTcb2RetrievalTraceParity: scope mismatch across sinks\n";
+        return false;
+    }
+    if (diagnostics.retrieval_trace.value("retrieval_scope", nlohmann::json{}) != chatScope) {
+        std::cerr << "testTcb2RetrievalTraceParity: diagnostics trace mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testTcb3IngestBindAndCrossContext() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "tcb3_x4_bind";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "tcb3_x4_attachment.md";
+    if (fs::exists(doc)) {
+        fs::remove(doc);
+    }
+
+    const std::string session_a = "tcb3-session-a";
+    const std::string session_b = "tcb3-session-b";
+    const std::string body_text = "TCB3_X4 secret bind token alpha";
+
+    const auto outcome = idx.createCorpusDocument(
+        rag_dir.string(), "tcb3_x4_attachment.md", body_text, session_a);
+    if (!outcome.ok) {
+        std::cerr << "testTcb3IngestBindAndCrossContext: create failed: " << outcome.error
+                  << "\n";
+        return false;
+    }
+    idx.indexFile(doc.string());
+
+    Thoth::RetrievalScope scopeA = Thoth::resolveAgentContextRetrievalScope(session_a, &idx);
+    const auto hitsA = idx.retrieveChunks("TCB3_X4 secret", 5, &scopeA);
+    if (hitsA.empty()) {
+        std::cerr << "testTcb3IngestBindAndCrossContext: expected bind for session A\n";
+        return false;
+    }
+
+    Thoth::RetrievalScope scopeB = Thoth::resolveAgentContextRetrievalScope(session_b, &idx);
+    const auto hitsB = idx.retrieveChunks("TCB3_X4 secret", 5, &scopeB);
+    if (!hitsB.empty()) {
+        std::cerr << "testTcb3IngestBindAndCrossContext: session B must not see A attachment\n";
+        return false;
+    }
+
+    bool saw_attachment = false;
+    for (const auto& c : idx.getChunks()) {
+        if (c.corpus_tier == "session_attachment" && c.owner_context_id == session_a) {
+            saw_attachment = true;
+            break;
+        }
+    }
+    if (!saw_attachment) {
+        std::cerr << "testTcb3IngestBindAndCrossContext: chunk tier/owner wrong\n";
+        return false;
+    }
+
+    fs::remove(doc);
+    return true;
+}
+
+static bool testTcb3IngestOmitSessionUnbound() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "tcb3_omit";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "tcb3_orphan.md";
+    if (fs::exists(doc)) {
+        fs::remove(doc);
+    }
+
+    const auto outcome = idx.createCorpusDocument(
+        rag_dir.string(), "tcb3_orphan.md", "TCB3 orphan doc unique OMit", "");
+    if (!outcome.ok) {
+        std::cerr << "testTcb3IngestOmitSessionUnbound: " << outcome.error << "\n";
+        return false;
+    }
+    idx.indexFile(doc.string());
+
+    Thoth::RetrievalScope scope =
+        Thoth::resolveAgentContextRetrievalScope("any-session", &idx);
+    const auto hits = idx.retrieveChunks("TCB3 orphan unique OMit", 5, &scope);
+    if (!hits.empty()) {
+        std::cerr << "testTcb3IngestOmitSessionUnbound: unbound doc must not enter default scope\n";
+        return false;
+    }
+
+    fs::remove(doc);
+    return true;
+}
+
+static bool testTcb3AttachmentRegistryPersistence() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "tcb3_registry";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "tcb3_registry.md";
+    if (fs::exists(doc)) {
+        fs::remove(doc);
+    }
+
+    const std::string session = "tcb3-registry-session";
+    std::string stored_path;
+    {
+        IndexManager idx(engine.get());
+        const auto outcome = idx.createCorpusDocument(
+            rag_dir.string(), "tcb3_registry.md", "registry persistence TCB3REG", session);
+        if (!outcome.ok) {
+            std::cerr << "testTcb3AttachmentRegistryPersistence: create " << outcome.error << "\n";
+            return false;
+        }
+        stored_path = doc.lexically_normal().string();
+        try {
+            stored_path = fs::absolute(doc).lexically_normal().string();
+        } catch (...) {
+        }
+    }
+
+    IndexManager reloaded(engine.get());
+    reloaded.init("");
+
+    CodeChunk chunk;
+    chunk.fileName = stored_path;
+    chunk.code = "registry persistence TCB3REG";
+    chunk.embedding = engine->embed(chunk.code);
+    reloaded.addChunkToIndex(std::move(chunk));
+
+    Thoth::RetrievalScope scope = Thoth::resolveAgentContextRetrievalScope(session, &reloaded);
+    const auto hits = reloaded.retrieveChunks("TCB3REG persistence", 5, &scope);
+    if (hits.empty()) {
+        std::cerr << "testTcb3AttachmentRegistryPersistence: reloaded registry did not bind path\n";
+        return false;
+    }
+
+    fs::remove(doc);
+    return true;
+}
+
+static bool testR2IndexManagerIndexingHonesty() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    ControllerEvent last_complete;
+    bool got_complete = false;
+    idx.setEventCallback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::INDEXING_COMPLETED) {
+            last_complete = ev;
+            got_complete = true;
+        }
+    });
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "r2_honesty_test";
+    fs::create_directories(rag_dir);
+    const fs::path ws_file = rag_dir / "whitespace_only.md";
+    {
+        std::ofstream out(ws_file);
+        out << "   \n\t";
+    }
+
+    idx.indexFile(ws_file.string());
+    if (!got_complete) {
+        std::cerr << "testR2IndexManagerIndexingHonesty: missing COMPLETE\n";
+        return false;
+    }
+    if (last_complete.metadata.value("success", true)) {
+        std::cerr << "testR2IndexManagerIndexingHonesty: whitespace must fail\n";
+        return false;
+    }
+    if (last_complete.metadata.value("reason", "") != "empty_document") {
+        std::cerr << "testR2IndexManagerIndexingHonesty: wrong failure reason\n";
+        return false;
+    }
+
+    const auto list = idx.listCorpusDocuments(rag_dir.string());
+    std::string err;
+    if (!Thoth::CorpusDocuments::hasRequiredV1Fields(list, err)) {
+        std::cerr << "testR2IndexManagerIndexingHonesty: list: " << err << "\n";
+        return false;
+    }
+    bool found_failed = false;
+    for (const auto& doc : list["documents"]) {
+        if (doc.value("name", "") == "whitespace_only.md") {
+            if (doc.value("status", "") != "failed") {
+                std::cerr << "testR2IndexManagerIndexingHonesty: expected failed\n";
+                return false;
+            }
+            found_failed = true;
+        }
+    }
+    if (!found_failed) {
+        std::cerr << "testR2IndexManagerIndexingHonesty: missing failed doc\n";
+        return false;
+    }
+
+    got_complete = false;
+    const fs::path ok_file = rag_dir / "ok.md";
+    {
+        std::ofstream out(ok_file);
+        out << "# ok\nEnough text for indexing honesty success path.\n";
+    }
+    idx.indexFile(ok_file.string());
+    if (!got_complete || !last_complete.metadata.value("success", false)) {
+        std::cerr << "testR2IndexManagerIndexingHonesty: success path\n";
+        return false;
+    }
+    if (last_complete.metadata.value("chunk_count", 0) <= 0) {
+        std::cerr << "testR2IndexManagerIndexingHonesty: chunk_count\n";
+        return false;
+    }
+
+    fs::remove(ws_file);
+    fs::remove(ok_file);
+    return true;
+}
+
+static bool testIndexManagerWholeFileFallbackAfterShortParagraphs() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    ControllerEvent last_complete;
+    bool got_complete = false;
+    idx.setEventCallback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::INDEXING_COMPLETED) {
+            last_complete = ev;
+            got_complete = true;
+        }
+    });
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "whole_file_fallback_test";
+    fs::create_directories(rag_dir);
+    const fs::path md_file = rag_dir / "short_lines.md";
+    {
+        std::ofstream out(md_file);
+        out << "A\n\nB\n\nC\n\n";
+        out << "This paragraph has enough words to embed as a whole-document fallback.\n";
+    }
+
+    idx.indexFile(md_file.string());
+    if (!got_complete || !last_complete.metadata.value("success", false)) {
+        std::cerr << "testIndexManagerWholeFileFallback: expected success\n";
+        return false;
+    }
+    if (last_complete.metadata.value("chunk_count", 0) <= 0) {
+        std::cerr << "testIndexManagerWholeFileFallback: chunk_count\n";
+        return false;
+    }
+
+    fs::remove(md_file);
+    return true;
+}
+
+static bool testSessionScopedReplaceOnResend() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "session_replace_test";
+    fs::create_directories(rag_dir);
+    const fs::path target = rag_dir / "note.md";
+    if (fs::exists(target)) {
+        fs::remove(target);
+    }
+    for (const char* suffix : {"note_1.md", "note_2.md"}) {
+        const fs::path orphan = rag_dir / suffix;
+        if (fs::exists(orphan)) {
+            fs::remove(orphan);
+        }
+    }
+
+    const std::string body1 =
+        "# First send\nEnough content for indexing in session replace test one.\n";
+    const std::string body2 =
+        "# Second send\nEnough content for indexing in session replace test two.\n";
+
+    const auto first = idx.createCorpusDocument(
+        rag_dir.string(), "note.md", body1, "sess-replace-a");
+    if (!first.ok || first.document_name != "note.md") {
+        std::cerr << "testSessionScopedReplaceOnResend: first send failed\n";
+        return false;
+    }
+
+    const auto second = idx.createCorpusDocument(
+        rag_dir.string(), "note.md", body2, "sess-replace-a");
+    if (!second.ok || second.document_name != "note.md") {
+        std::cerr << "testSessionScopedReplaceOnResend: second send must keep canonical name\n";
+        return false;
+    }
+    if (second.document_id != first.document_id) {
+        std::cerr << "testSessionScopedReplaceOnResend: document_id must be stable on resend\n";
+        return false;
+    }
+    if (fs::exists(rag_dir / "note_1.md") || fs::exists(rag_dir / "note_2.md")) {
+        std::cerr << "testSessionScopedReplaceOnResend: must not create suffixed duplicates\n";
+        return false;
+    }
+
+    const auto other = idx.createCorpusDocument(
+        rag_dir.string(), "note.md", body1, "sess-replace-b");
+    if (!other.ok || other.document_name != "note_1.md") {
+        std::cerr << "testSessionScopedReplaceOnResend: other session must suffix\n";
+        return false;
+    }
+
+    fs::remove(target);
+    fs::remove(rag_dir / "note_1.md");
+    return true;
+}
+
+static bool testSessionReclaimDefaultOwnedOnResend() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "default_reclaim_test";
+    fs::create_directories(rag_dir);
+    const fs::path target = rag_dir / "note.md";
+    if (fs::exists(target)) {
+        fs::remove(target);
+    }
+    if (fs::exists(rag_dir / "note_1.md")) {
+        fs::remove(rag_dir / "note_1.md");
+    }
+
+    const std::string body1 =
+        "# Legacy default bind\nEnough content for default reclaim test one.\n";
+    const std::string body2 =
+        "# Real session resend\nEnough content for default reclaim test two.\n";
+
+    const auto legacy = idx.createCorpusDocument(
+        rag_dir.string(), "note.md", body1, "default");
+    if (!legacy.ok || legacy.document_name != "note.md") {
+        std::cerr << "testSessionReclaimDefaultOwnedOnResend: legacy send failed\n";
+        return false;
+    }
+
+    const auto reclaimed = idx.createCorpusDocument(
+        rag_dir.string(), "note.md", body2, "sess-reclaim-a");
+    if (!reclaimed.ok || reclaimed.document_name != "note.md") {
+        std::cerr << "testSessionReclaimDefaultOwnedOnResend: must replace default-owned file\n";
+        return false;
+    }
+    if (reclaimed.document_id != legacy.document_id) {
+        std::cerr << "testSessionReclaimDefaultOwnedOnResend: document_id must stay stable\n";
+        return false;
+    }
+    if (fs::exists(rag_dir / "note_1.md")) {
+        std::cerr << "testSessionReclaimDefaultOwnedOnResend: must not create suffix copy\n";
+        return false;
+    }
+
+    fs::remove(target);
+    return true;
+}
+
+static bool testLargeDocumentUsesSizeFallbackNotSingleChunk() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    ControllerEvent last_complete;
+    bool got_complete = false;
+    idx.setEventCallback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::INDEXING_COMPLETED) {
+            last_complete = ev;
+            got_complete = true;
+        }
+    });
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "size_fallback_test";
+    fs::create_directories(rag_dir);
+    const fs::path md_file = rag_dir / "large_short_lines.md";
+
+    std::string content;
+    content.reserve(7000);
+    for (int i = 0; i < 1800; ++i) {
+        content += "Z\n\n";
+    }
+
+    {
+        std::ofstream out(md_file);
+        out << content;
+    }
+
+    idx.indexFile(md_file.string());
+
+    for (int i = 0; i < 200 && idx.isIndexing(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+
+    if (!got_complete || !last_complete.metadata.value("success", false)) {
+        std::cerr << "testLargeDocumentUsesSizeFallbackNotSingleChunk: indexing failed\n";
+        return false;
+    }
+    const int chunks = last_complete.metadata.value("chunk_count", 0);
+    if (chunks <= 1) {
+        std::cerr << "testLargeDocumentUsesSizeFallbackNotSingleChunk: expected >1 chunks got "
+                  << chunks << "\n";
+        return false;
+    }
+
+    fs::remove(md_file);
+    return true;
+}
+
+static bool testEngineHttpCorpusEndpoint() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpCorpusEndpoint: runtime not ready\n";
+        return false;
+    }
+
+    const auto caps = runtime->capabilities();
+        const bool has_corpus =
+        std::find(caps.begin(), caps.end(), "corpus") != caps.end();
+    const bool has_ingest =
+        std::find(caps.begin(), caps.end(), "ingest") != caps.end();
+    if (!has_corpus || !has_ingest) {
+        std::cerr << "testEngineHttpCorpusEndpoint: ready capabilities missing corpus/ingest\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28097;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    try {
+        httplib::Client client("127.0.0.1", 28097);
+        client.set_connection_timeout(5, 0);
+        client.set_read_timeout(30, 0);
+
+        const auto ready = client.Get("/ready");
+        if (!ready || ready->status != 200) {
+            std::cerr << "testEngineHttpCorpusEndpoint: /ready failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto ready_body = nlohmann::json::parse(ready->body);
+        bool found = false;
+        for (const auto& c : ready_body["capabilities"]) {
+            if (c.is_string() && c.get<std::string>() == "corpus") {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            std::cerr << "testEngineHttpCorpusEndpoint: /ready JSON missing corpus\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto ok = client.Get("/v1/rag/corpus");
+        if (!ok || ok->status != 200) {
+            std::cerr << "testEngineHttpCorpusEndpoint: GET failed status="
+                      << (ok ? ok->status : 0) << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto body = nlohmann::json::parse(ok->body);
+        std::string err;
+        if (!Thoth::CorpusDocuments::hasRequiredV1Fields(body, err)) {
+            std::cerr << "testEngineHttpCorpusEndpoint: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto direct = runtime->listCorpusDocuments();
+        if (body["schema_version"] != direct["schema_version"]) {
+            std::cerr << "testEngineHttpCorpusEndpoint: schema_version mismatch vs runtime\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpCorpusEndpoint: exception: " << e.what() << '\n';
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+}
+
+static bool testGuiPhase9CorpusCreate() {
+    using namespace Thoth::CorpusCreate;
+
+    const auto accepted = makeAcceptedResponse("doc-abc", "notes.md");
+    std::string err;
+    if (!hasRequiredAcceptedFields(accepted, err)) {
+        std::cerr << "testGuiPhase9: accepted response rejected: " << err << "\n";
+        return false;
+    }
+    if (accepted["document"]["id"].get<std::string>() != "doc-abc") {
+        std::cerr << "testGuiPhase9: document id wrong\n";
+        return false;
+    }
+
+    nlohmann::json bad = accepted;
+    bad["status"] = "pending";
+    if (hasRequiredAcceptedFields(bad, err)) {
+        std::cerr << "testGuiPhase9: non-accepted status must fail\n";
+        return false;
+    }
+
+    if (sanitizeSuggestedFilename("/tmp/evil/../notes.md") != "notes.md") {
+        std::cerr << "testGuiPhase9: sanitizeSuggestedFilename path strip wrong\n";
+        return false;
+    }
+    if (sanitizeSuggestedFilename("   ") != "document.txt") {
+        std::cerr << "testGuiPhase9: sanitizeSuggestedFilename empty wrong\n";
+        return false;
+    }
+
+    const nlohmann::json ready = nlohmann::json{
+        {"capabilities", nlohmann::json::array({"chat", "ingest", "corpus"})}};
+    if (!readyCapabilitiesIncludeIngest(ready)) {
+        std::cerr << "testGuiPhase9: ingest capability not detected\n";
+        return false;
+    }
+    const nlohmann::json no_ingest = nlohmann::json{
+        {"capabilities", nlohmann::json::array({"chat", "corpus"})}};
+    if (readyCapabilitiesIncludeIngest(no_ingest)) {
+        std::cerr << "testGuiPhase9: ingest must be absent when not advertised\n";
+        return false;
+    }
+
+    if (std::string(kHttpPath) != "/v1/rag/documents"
+        || std::string(kReadyCapability) != "ingest"
+        || std::string(kOperationName) != "create_document") {
+        std::cerr << "testGuiPhase9: contract tokens wrong\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testTcb4CreateDocumentRequestSessionId() {
+    using namespace Thoth::CorpusCreate;
+
+    const auto with_session =
+        makeCreateDocumentRequestBody("note.txt", "body", "sess-abc");
+    if (!with_session.contains("session_id")
+        || with_session["session_id"].get<std::string>() != "sess-abc") {
+        std::cerr << "testTcb4CreateDocumentRequestSessionId: session_id missing\n";
+        return false;
+    }
+    if (with_session["name"].get<std::string>() != "note.txt"
+        || with_session["content"].get<std::string>() != "body") {
+        std::cerr << "testTcb4CreateDocumentRequestSessionId: name/content wrong\n";
+        return false;
+    }
+
+    const auto trimmed =
+        makeCreateDocumentRequestBody("n", "c", "  tab-session  ");
+    if (trimmed["session_id"].get<std::string>() != "tab-session") {
+        std::cerr << "testTcb4CreateDocumentRequestSessionId: trim failed\n";
+        return false;
+    }
+
+    const auto omit = makeCreateDocumentRequestBody("n", "c", "   ");
+    if (omit.contains("session_id")) {
+        std::cerr << "testTcb4CreateDocumentRequestSessionId: blank session must omit\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testIndexManagerCreateCorpusDocumentAtomic() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir = fs::path(fh.getAgentWorkspacePath()) / "rag" / "phase9_create_test";
+    fs::create_directories(rag_dir);
+    const fs::path probe = rag_dir / "phase9_probe.md";
+    if (fs::exists(probe)) {
+        fs::remove(probe);
+    }
+
+    const auto outcome = idx.createCorpusDocument(
+        rag_dir.string(), "phase9_probe.md", "# Phase 9 create test\n");
+    if (!outcome.ok) {
+        std::cerr << "testIndexManagerCreateCorpusDocumentAtomic: " << outcome.error << "\n";
+        return false;
+    }
+    if (!fs::exists(probe)) {
+        std::cerr << "testIndexManagerCreateCorpusDocumentAtomic: file not written\n";
+        return false;
+    }
+    if (outcome.document_id.empty() || outcome.document_name != "phase9_probe.md") {
+        std::cerr << "testIndexManagerCreateCorpusDocumentAtomic: metadata wrong\n";
+        return false;
+    }
+
+    const auto list = idx.listCorpusDocuments(rag_dir.string());
+    std::string err;
+    if (!Thoth::CorpusDocuments::hasRequiredV1Fields(list, err)) {
+        std::cerr << "testIndexManagerCreateCorpusDocumentAtomic: list invalid: " << err << "\n";
+        return false;
+    }
+    bool found = false;
+    for (const auto& doc : list["documents"]) {
+        if (doc.value("id", "") == outcome.document_id) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        std::cerr << "testIndexManagerCreateCorpusDocumentAtomic: document missing from list\n";
+        return false;
+    }
+
+    fs::remove(probe);
+    return true;
+}
+
+static bool testEngineHttpCreateDocumentEndpoint() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpCreateDocumentEndpoint: runtime not ready\n";
+        return false;
+    }
+
+    const auto caps = runtime->capabilities();
+    const bool has_ingest =
+        std::find(caps.begin(), caps.end(), "ingest") != caps.end();
+    if (!has_ingest) {
+        std::cerr << "testEngineHttpCreateDocumentEndpoint: capabilities missing ingest\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28098;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    try {
+        httplib::Client client("127.0.0.1", 28098);
+        client.set_connection_timeout(5, 0);
+        client.set_read_timeout(30, 0);
+
+        const auto ready = client.Get("/ready");
+        if (!ready || ready->status != 200) {
+            std::cerr << "testEngineHttpCreateDocumentEndpoint: /ready failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto ready_body = nlohmann::json::parse(ready->body);
+        if (!Thoth::CorpusCreate::readyCapabilitiesIncludeIngest(ready_body)) {
+            std::cerr << "testEngineHttpCreateDocumentEndpoint: /ready missing ingest\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const nlohmann::json req = {
+            {"name", "phase9_http_test.md"},
+            {"content", "# HTTP create test\n"},
+        };
+        const auto post = client.Post("/v1/rag/documents",
+                                      req.dump(),
+                                      "application/json");
+        if (!post || post->status != 200) {
+            std::cerr << "testEngineHttpCreateDocumentEndpoint: POST failed status="
+                      << (post ? post->status : 0) << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto accepted = nlohmann::json::parse(post->body);
+        std::string err;
+        if (!Thoth::CorpusCreate::hasRequiredAcceptedFields(accepted, err)) {
+            std::cerr << "testEngineHttpCreateDocumentEndpoint: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto corpus = client.Get("/v1/rag/corpus");
+        if (!corpus || corpus->status != 200) {
+            std::cerr << "testEngineHttpCreateDocumentEndpoint: corpus GET failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto corpus_body = nlohmann::json::parse(corpus->body);
+        const std::string created_id = accepted["document"]["id"].get<std::string>();
+        bool listed = false;
+        for (const auto& doc : corpus_body["documents"]) {
+            if (doc.value("id", "") == created_id) {
+                listed = true;
+                break;
+            }
+        }
+        if (!listed) {
+            std::cerr << "testEngineHttpCreateDocumentEndpoint: created doc not listed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpCreateDocumentEndpoint: exception: " << e.what() << '\n';
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+}
+
+static bool testGuiPhase10ConversationAuthority() {
+    using namespace Thoth::ConversationAuthority;
+
+    const auto created = makeCreateSessionResponse("session-test-1");
+    std::string err;
+    if (!hasRequiredCreateSessionFields(created, err)) {
+        std::cerr << "testGuiPhase10: create session rejected: " << err << "\n";
+        return false;
+    }
+
+    const auto assistant = makeMessage("assistant", "hello", 1000);
+    const auto turn = makeAppendTurnResponse("session-test-1", assistant);
+    if (!hasRequiredAppendTurnFields(turn, err)) {
+        std::cerr << "testGuiPhase10: append turn rejected: " << err << "\n";
+        return false;
+    }
+
+    nlohmann::json messages = nlohmann::json::array();
+    messages.push_back(makeMessage("user", "hi", 900));
+    messages.push_back(assistant);
+    const auto convo = makeConversationResponse("session-test-1", messages);
+    if (!hasRequiredConversationFields(convo, err)) {
+        std::cerr << "testGuiPhase10: conversation rejected: " << err << "\n";
+        return false;
+    }
+
+    const auto summary = makeSummaryResponse("session-test-1", "rolling summary");
+    if (!hasRequiredSummaryFields(summary, err)) {
+        std::cerr << "testGuiPhase10: summary rejected: " << err << "\n";
+        return false;
+    }
+
+    const nlohmann::json ready = nlohmann::json{
+        {"capabilities", nlohmann::json::array({"conversation", "chat"})}};
+    if (!readyCapabilitiesIncludeConversation(ready)) {
+        std::cerr << "testGuiPhase10: conversation capability not detected\n";
+        return false;
+    }
+
+    if (std::string(kHttpPathSessions) != "/v1/conversation/sessions"
+        || std::string(kHttpPathTurns) != "/v1/conversation/turns"
+        || std::string(kReadyCapability) != "conversation") {
+        std::cerr << "testGuiPhase10: contract tokens wrong\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testEngineHttpConversationEndpoints() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpConversationEndpoints: runtime not ready\n";
+        return false;
+    }
+
+    const auto caps = runtime->capabilities();
+    const bool has_conversation =
+        std::find(caps.begin(), caps.end(), "conversation") != caps.end();
+    if (!has_conversation) {
+        std::cerr << "testEngineHttpConversationEndpoints: missing conversation capability\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28099;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    try {
+        httplib::Client client("127.0.0.1", 28099);
+        client.set_connection_timeout(5, 0);
+        client.set_read_timeout(120, 0);
+
+        const auto ready = client.Get("/ready");
+        if (!ready || ready->status != 200) {
+            std::cerr << "testEngineHttpConversationEndpoints: /ready failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto ready_body = nlohmann::json::parse(ready->body);
+        if (!Thoth::ConversationAuthority::readyCapabilitiesIncludeConversation(ready_body)) {
+            std::cerr << "testEngineHttpConversationEndpoints: /ready missing conversation\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto created = client.Post("/v1/conversation/sessions", "{}", "application/json");
+        if (!created || created->status != 200) {
+            std::cerr << "testEngineHttpConversationEndpoints: create session failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto created_body = nlohmann::json::parse(created->body);
+        std::string err;
+        if (!Thoth::ConversationAuthority::hasRequiredCreateSessionFields(created_body, err)) {
+            std::cerr << "testEngineHttpConversationEndpoints: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const std::string session_id = created_body["session_id"].get<std::string>();
+
+        const nlohmann::json turn_req = {{"session_id", session_id}, {"content", "hello phase10"}};
+        const auto turn = client.Post("/v1/conversation/turns",
+                                      turn_req.dump(),
+                                      "application/json");
+        if (!turn || turn->status != 200) {
+            std::cerr << "testEngineHttpConversationEndpoints: append turn failed status="
+                      << (turn ? turn->status : 0) << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto turn_body = nlohmann::json::parse(turn->body);
+        if (!Thoth::ConversationAuthority::hasRequiredAppendTurnFields(turn_body, err)) {
+            std::cerr << "testEngineHttpConversationEndpoints: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto convo = client.Get("/v1/conversation/sessions/" + session_id);
+        if (!convo || convo->status != 200) {
+            std::cerr << "testEngineHttpConversationEndpoints: get conversation failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto convo_body = nlohmann::json::parse(convo->body);
+        if (!Thoth::ConversationAuthority::hasRequiredConversationFields(convo_body, err)) {
+            std::cerr << "testEngineHttpConversationEndpoints: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        if (convo_body["messages"].empty()) {
+            std::cerr << "testEngineHttpConversationEndpoints: expected messages after turn\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto summary = client.Get("/v1/conversation/sessions/" + session_id + "/summary");
+        if (!summary || summary->status != 200) {
+            std::cerr << "testEngineHttpConversationEndpoints: get summary failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto summary_body = nlohmann::json::parse(summary->body);
+        if (!Thoth::ConversationAuthority::hasRequiredSummaryFields(summary_body, err)) {
+            std::cerr << "testEngineHttpConversationEndpoints: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpConversationEndpoints: exception: " << e.what() << '\n';
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+}
+
+static bool testGuiPhase11ResearchResources() {
+    using namespace Thoth::ResearchResources;
+
+    nlohmann::json items = nlohmann::json::array();
+    items.push_back({
+        {"strategy_id", "strat-1"},
+        {"description", "test"},
+        {"step_pattern", nlohmann::json::array({"A"})},
+        {"success_rate", 0.9},
+        {"created_at", 1000},
+    });
+    const auto collection = makeCollection(items, nullptr, 1);
+    std::string err;
+    if (!hasRequiredCollectionFields(collection, err)) {
+        std::cerr << "testGuiPhase11: collection rejected: " << err << "\n";
+        return false;
+    }
+    if (isEffectivelyEmpty(collection)) {
+        std::cerr << "testGuiPhase11: populated collection must not be empty\n";
+        return false;
+    }
+    if (!hasRequiredStrategyItemFields(items[0], err)) {
+        std::cerr << "testGuiPhase11: strategy item rejected: " << err << "\n";
+        return false;
+    }
+
+    const auto empty = emptyCollection();
+    if (!hasRequiredCollectionFields(empty, err) || !isEffectivelyEmpty(empty)) {
+        std::cerr << "testGuiPhase11: empty collection wrong\n";
+        return false;
+    }
+
+    if (!isFetchError(unavailableFetchResult())
+        || hasRequiredCollectionFields(unavailableFetchResult(), err)) {
+        std::cerr << "testGuiPhase11: unavailable fetch must be fetch error\n";
+        return false;
+    }
+
+    const nlohmann::json ready = nlohmann::json{
+        {"capabilities",
+         nlohmann::json::array({"strategies", "trajectories", "episodes"})}};
+    if (!readyCapabilitiesIncludeStrategies(ready)
+        || !readyCapabilitiesIncludeTrajectories(ready)
+        || !readyCapabilitiesIncludeEpisodes(ready)) {
+        std::cerr << "testGuiPhase11: ready capability detection failed\n";
+        return false;
+    }
+
+    if (std::string(kHttpPathStrategies) != "/v1/research/strategies"
+        || std::string(kHttpPathTrajectories) != "/v1/research/trajectories"
+        || std::string(kHttpPathEpisodes) != "/v1/research/episodes") {
+        std::cerr << "testGuiPhase11: HTTP path tokens wrong\n";
+        return false;
+    }
+
+    nlohmann::json trajItem = {{"trajectory_id", "traj-1"}};
+    nlohmann::json epItem = {{"episode_id", "ep-1"}};
+    if (!hasRequiredTrajectoryItemFields(trajItem, err)
+        || !hasRequiredEpisodeItemFields(epItem, err)) {
+        std::cerr << "testGuiPhase11: id validators failed\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testEngineHttpResearchEndpoints() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpResearchEndpoints: runtime not ready\n";
+        return false;
+    }
+
+    const auto caps = runtime->capabilities();
+    for (const char* token : {"strategies", "trajectories", "episodes"}) {
+        if (std::find(caps.begin(), caps.end(), token) == caps.end()) {
+            std::cerr << "testEngineHttpResearchEndpoints: missing capability " << token << "\n";
+            runtime->shutdown();
+            return false;
+        }
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28100;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    auto validateCollection = [](const httplib::Result& resp, const char* label) -> bool {
+        if (!resp || resp->status != 200) {
+            std::cerr << "testEngineHttpResearchEndpoints: " << label << " HTTP failed\n";
+            return false;
+        }
+        try {
+            const auto body = nlohmann::json::parse(resp->body);
+            std::string err;
+            if (!Thoth::ResearchResources::hasRequiredCollectionFields(body, err)) {
+                std::cerr << "testEngineHttpResearchEndpoints: " << label << " " << err << "\n";
+                return false;
+            }
+            if (!body.contains("next_page")) {
+                std::cerr << "testEngineHttpResearchEndpoints: " << label << " missing next_page\n";
+                return false;
+            }
+            return true;
+        } catch (const std::exception& ex) {
+            std::cerr << "testEngineHttpResearchEndpoints: " << label << " parse: " << ex.what()
+                      << "\n";
+            return false;
+        }
+    };
+
+    try {
+        httplib::Client client("127.0.0.1", 28100);
+        client.set_connection_timeout(5, 0);
+        client.set_read_timeout(30, 0);
+
+        const auto ready = client.Get("/ready");
+        if (!ready || ready->status != 200) {
+            std::cerr << "testEngineHttpResearchEndpoints: /ready failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto ready_body = nlohmann::json::parse(ready->body);
+        if (!Thoth::ResearchResources::readyCapabilitiesIncludeStrategies(ready_body)
+            || !Thoth::ResearchResources::readyCapabilitiesIncludeTrajectories(ready_body)
+            || !Thoth::ResearchResources::readyCapabilitiesIncludeEpisodes(ready_body)) {
+            std::cerr << "testEngineHttpResearchEndpoints: /ready missing research capabilities\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        if (!validateCollection(
+                client.Get(Thoth::ResearchResources::kHttpPathStrategies), "strategies")
+            || !validateCollection(
+                client.Get(Thoth::ResearchResources::kHttpPathTrajectories), "trajectories")
+            || !validateCollection(
+                client.Get(Thoth::ResearchResources::kHttpPathEpisodes), "episodes")) {
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpResearchEndpoints: exception: " << e.what() << '\n';
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+}
+
+static bool testGuiPhase12AGraphStatistics() {
+    using namespace Thoth::GraphStatistics;
+
+    const auto stats = makeStatisticsPayload(3, 5, 0.5f, 1.0f, 0.1f, 4, 1);
+    const auto response = makeResponse(stats, 1000, "session-abc");
+    std::string err;
+    if (!hasRequiredFields(response, err)) {
+        std::cerr << "testGuiPhase12A: valid response rejected: " << err << "\n";
+        return false;
+    }
+    if (isEffectivelyEmpty(response)) {
+        std::cerr << "testGuiPhase12A: populated response must not be empty\n";
+        return false;
+    }
+
+    const auto empty = emptyResponse(2000);
+    if (!hasRequiredFields(empty, err) || !isEffectivelyEmpty(empty)) {
+        std::cerr << "testGuiPhase12A: empty response wrong\n";
+        return false;
+    }
+
+    if (!isFetchError(unavailableFetchResult())
+        || hasRequiredFields(unavailableFetchResult(), err)) {
+        std::cerr << "testGuiPhase12A: unavailable fetch must be fetch error\n";
+        return false;
+    }
+
+    const nlohmann::json ready = nlohmann::json{
+        {"capabilities", nlohmann::json::array({"graph_stats"})}};
+    if (!readyCapabilitiesIncludeGraphStats(ready)) {
+        std::cerr << "testGuiPhase12A: ready capability not detected\n";
+        return false;
+    }
+
+    if (std::string(kHttpPath) != "/v1/graph/stats"
+        || std::string(kReadyCapability) != "graph_stats") {
+        std::cerr << "testGuiPhase12A: contract tokens wrong\n";
+        return false;
+    }
+
+    if (statisticsPayload(response).value("total_nodes", 0) != 3) {
+        std::cerr << "testGuiPhase12A: statisticsPayload wrong\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testEngineHttpGraphStatsEndpoint() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpGraphStatsEndpoint: runtime not ready\n";
+        return false;
+    }
+
+    const auto caps = runtime->capabilities();
+    if (std::find(caps.begin(), caps.end(), "graph_stats") == caps.end()) {
+        std::cerr << "testEngineHttpGraphStatsEndpoint: missing graph_stats capability\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28101;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    try {
+        httplib::Client client("127.0.0.1", 28101);
+        client.set_connection_timeout(5, 0);
+        client.set_read_timeout(30, 0);
+
+        const auto ready = client.Get("/ready");
+        if (!ready || ready->status != 200) {
+            std::cerr << "testEngineHttpGraphStatsEndpoint: /ready failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto ready_body = nlohmann::json::parse(ready->body);
+        if (!Thoth::GraphStatistics::readyCapabilitiesIncludeGraphStats(ready_body)) {
+            std::cerr << "testEngineHttpGraphStatsEndpoint: /ready missing graph_stats\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto stats = client.Get(Thoth::GraphStatistics::kHttpPath);
+        if (!stats || stats->status != 200) {
+            std::cerr << "testEngineHttpGraphStatsEndpoint: GET failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto body = nlohmann::json::parse(stats->body);
+        std::string err;
+        if (!Thoth::GraphStatistics::hasRequiredFields(body, err)) {
+            std::cerr << "testEngineHttpGraphStatsEndpoint: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpGraphStatsEndpoint: exception: " << e.what() << '\n';
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+}
+
+static bool testEngineHttpDiagnosticsEndpoint() {
+    auto runtime = Thoth::EngineRuntime::create();
+    if (!runtime || !runtime->isReady()) {
+        std::cerr << "testEngineHttpDiagnosticsEndpoint: runtime not ready\n";
+        return false;
+    }
+
+    const auto caps = runtime->capabilities();
+    const bool has_diagnostics =
+        std::find(caps.begin(), caps.end(), "diagnostics") != caps.end();
+    if (!has_diagnostics) {
+        std::cerr << "testEngineHttpDiagnosticsEndpoint: ready capabilities missing diagnostics\n";
+        runtime->shutdown();
+        return false;
+    }
+
+    Thoth::EngineHttpConfig config;
+    config.bind_host = "127.0.0.1";
+    config.port = 28096;
+
+    Thoth::EngineHttpTransport transport(*runtime, config);
+    std::thread server_thread([&]() { transport.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    try {
+        httplib::Client client("127.0.0.1", 28096);
+        client.set_connection_timeout(5, 0);
+        client.set_read_timeout(30, 0);
+
+        const auto ready = client.Get("/ready");
+        if (!ready || ready->status != 200) {
+            std::cerr << "testEngineHttpDiagnosticsEndpoint: /ready failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto ready_body = nlohmann::json::parse(ready->body);
+        bool found = false;
+        for (const auto& c : ready_body["capabilities"]) {
+            if (c.is_string() && c.get<std::string>() == "diagnostics") {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            std::cerr << "testEngineHttpDiagnosticsEndpoint: /ready JSON missing diagnostics\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto ok = client.Get("/v1/diagnostics/latest-decision");
+        if (!ok) {
+            std::cerr << "testEngineHttpDiagnosticsEndpoint: GET failed\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        if (ok->status != 200) {
+            std::cerr << "testEngineHttpDiagnosticsEndpoint: status=" << ok->status
+                      << " body=" << ok->body << '\n';
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+        const auto body = nlohmann::json::parse(ok->body);
+        std::string err;
+        if (!Thoth::DecisionSummary::hasRequiredV1Fields(body, err)) {
+            std::cerr << "testEngineHttpDiagnosticsEndpoint: " << err << "\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        const auto direct = runtime->getLatestDecisionSummary();
+        if (body["schema_version"] != direct["schema_version"]) {
+            std::cerr << "testEngineHttpDiagnosticsEndpoint: schema_version mismatch vs runtime\n";
+            transport.requestStop();
+            server_thread.join();
+            runtime->shutdown();
+            return false;
+        }
+
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "testEngineHttpDiagnosticsEndpoint: exception: " << e.what() << '\n';
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
 }
 
 // Plan N N1 / N-T1 — transcript loop truncation; mid-sentence + JSON preserved.
@@ -13970,12 +16245,19 @@ int main() {
             if (!testEngineSessionNormalization()) failures++;
             if (!testRemoteHttpUtilsOffline()) failures++;
             if (!testRemoteChatGoalMappingOffline()) failures++;
+            if (!testGuiR3GoalSessionWire()) failures++;
+            if (!testGuiR4ChatFailureSurfaces()) failures++;
+            if (!testGuiR4ConversationTurnSessionWire()) failures++;
+            if (!testGuiR5RetrievalSessionGate()) failures++;
+            if (!testGuiR5ScopeGroundingDisplay()) failures++;
+            if (!testGuiR5CorpusInventoryLabel()) failures++;
             if (!testThothEngineUrlSelectionOffline()) failures++;
             if (!testRemoteSseUtilsOffline()) failures++;
             if (!testEngineRuntimeValidation()) failures++;
             if (!testEngineEventBus()) failures++;
             if (!testEngineEventIntegration()) failures++;
             if (!testEngineHttpChatEndpoint()) failures++;
+            if (!testEngineHttpDiagnosticsEndpoint()) failures++;
             if (!testEngineHttpGoalsAndControl()) failures++;
             if (!testEngineSseSessionDelivery()) failures++;
             if (!testEngineSseMultiClient()) failures++;
@@ -14266,10 +16548,17 @@ int main() {
     if (!testRuntimeBootstrapRespectsExistingEnv()) failures++;
     if (!testRuntimeBootstrapIdempotent()) failures++;
     if (!testRuntimeBootstrapDiagnosticsDisabledByDefault()) failures++;
+    if (!testConfigEnvironmentOverrides()) failures++;
     if (!testEngineErrorSchema()) failures++;
     if (!testEngineSessionNormalization()) failures++;
     if (!testRemoteHttpUtilsOffline()) failures++;
     if (!testRemoteChatGoalMappingOffline()) failures++;
+    if (!testGuiR3GoalSessionWire()) failures++;
+    if (!testGuiR4ChatFailureSurfaces()) failures++;
+    if (!testGuiR4ConversationTurnSessionWire()) failures++;
+    if (!testGuiR5RetrievalSessionGate()) failures++;
+    if (!testGuiR5ScopeGroundingDisplay()) failures++;
+    if (!testGuiR5CorpusInventoryLabel()) failures++;
     if (!testThothEngineUrlSelectionOffline()) failures++;
     if (!testRemoteSseUtilsOffline()) failures++;
     if (!testEngineRuntimeValidation()) failures++;
@@ -14277,6 +16566,7 @@ int main() {
     if (!testEngineEventBus()) failures++;
     if (!testEngineEventIntegration()) failures++;
     if (!testEngineHttpChatEndpoint()) failures++;
+    if (!testEngineHttpDiagnosticsEndpoint()) failures++;
     if (!testEngineHttpGoalsAndControl()) failures++;
     if (!testEngineSseSessionDelivery()) failures++;
     if (!testEngineSseMultiClient()) failures++;
@@ -14405,6 +16695,40 @@ int main() {
     if (!testPlanN5FormatFinalScoreMissing()) failures++;
     if (!testPlanN5ConversationalAlphaMode()) failures++;
     if (!testPlanN5UnknownScoringMode()) failures++;
+    if (!testGuiPhase1RemoteRagHonestyPolicy()) failures++;
+    if (!testGuiR1RemoteIngestHostOnlyPresentation()) failures++;
+    if (!testLocalNoteEngineCorpusSync()) failures++;
+    if (!testLocalNoteSendSelectionFilter()) failures++;
+    if (!testGuiPhase2BackendCapabilitiesAndPresentation()) failures++;
+    if (!testGuiPhase3CognitiveDiagnosticsAuthority()) failures++;
+    if (!testGuiPhase4DecisionSummary()) failures++;
+    if (!testGuiPhase5ProgressReportingDiscipline()) failures++;
+    if (!testGuiPhase6EventStreamResilience()) failures++;
+    if (!testGuiPhase7OperationResultHonesty()) failures++;
+    if (!testGuiPhase8CorpusDocuments()) failures++;
+    if (!testGuiR2CorpusFailedDocument()) failures++;
+    if (!testTcb2ScopeBeatsSimilarity()) failures++;
+    if (!testTcb2CrossContextIsolation()) failures++;
+    if (!testTcb2RetrievalTraceParity()) failures++;
+    if (!testTcb3IngestBindAndCrossContext()) failures++;
+    if (!testTcb3IngestOmitSessionUnbound()) failures++;
+    if (!testTcb3AttachmentRegistryPersistence()) failures++;
+    if (!testR2IndexManagerIndexingHonesty()) failures++;
+    if (!testIndexManagerWholeFileFallbackAfterShortParagraphs()) failures++;
+    if (!testSessionScopedReplaceOnResend()) failures++;
+    if (!testSessionReclaimDefaultOwnedOnResend()) failures++;
+    if (!testLargeDocumentUsesSizeFallbackNotSingleChunk()) failures++;
+    if (!testGuiPhase9CorpusCreate()) failures++;
+    if (!testTcb4CreateDocumentRequestSessionId()) failures++;
+    if (!testGuiPhase10ConversationAuthority()) failures++;
+    if (!testGuiPhase11ResearchResources()) failures++;
+    if (!testGuiPhase12AGraphStatistics()) failures++;
+    if (!testIndexManagerCreateCorpusDocumentAtomic()) failures++;
+    if (!testEngineHttpCorpusEndpoint()) failures++;
+    if (!testEngineHttpCreateDocumentEndpoint()) failures++;
+    if (!testEngineHttpConversationEndpoints()) failures++;
+    if (!testEngineHttpResearchEndpoints()) failures++;
+    if (!testEngineHttpGraphStatsEndpoint()) failures++;
     if (!testPlanNSanitizeTranscriptLoop()) failures++;
     if (!testPlanNSanitizeUserHelpScaffold()) failures++;
     if (!testPlanNSanitizeLeadingScaffoldStrip()) failures++;

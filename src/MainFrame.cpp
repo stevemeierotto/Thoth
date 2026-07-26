@@ -13,12 +13,28 @@
 #include "BenchmarkWindow.h"
 #include "ExecutiveStateStrip.h"
 #include "file_handler.h"
+#include "remote_rag_honesty.h"
+#include "backend_capabilities.h"
+#include "panel_presentation_state.h"
+#include "cognitive_diagnostics_authority.h"
+#include "progress_source.h"
+#include "engine_connection_state.h"
+#include "operation_result.h"
+#include "corpus_documents.h"
+#include "retrieval_verification_display.h"
+#include "corpus_create.h"
+#include "local_note_engine_sync.h"
+#include "conversation_authority.h"
+#include "research_resources.h"
+#include "graph_statistics.h"
 #include "../external/basic_agent/include/memory_pruning_config.h"
+#include "../external/basic_agent/include/decision_summary.h"
 
 #include <json.hpp>
 #include <wx/notebook.h>
 #include <wx/clipbrd.h>
 #include <wx/aboutdlg.h>
+#include <wx/timer.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -28,7 +44,9 @@
 #include <wx/stattext.h>
 #include <wx/stc/stc.h> // For wxStyledTextCtrl
 #include <wx/filename.h> // For wxFileName
+#include <wx/choicdlg.h>
 #include <wx/filedlg.h>
+#include <wx/splitter.h>
 #include <thread>
 #include <chrono>
 
@@ -51,6 +69,53 @@ void TrimSessionMessagesForPersistence(Thoth::ChatSession& session) {
     const std::size_t dropCount = session.messages.size() - maxHot;
     session.messages.erase(session.messages.begin(),
                            session.messages.begin() + static_cast<std::ptrdiff_t>(dropCount));
+}
+
+/** R1.5 — SSE file_path may be engine-absolute; Local Note slots use basenames. */
+std::string ragEventBasename(const std::string& file_path) {
+    if (file_path.empty()) {
+        return {};
+    }
+    return std::filesystem::path(file_path).filename().string();
+}
+
+std::string findSessionRagPathByBasename(const Thoth::ChatSession& session,
+                                         const std::string& basename) {
+    if (basename.empty()) {
+        return {};
+    }
+    for (const auto& path : session.ragFilePaths) {
+        if (ragEventBasename(path) == basename) {
+            return path;
+        }
+    }
+    return {};
+}
+
+std::string findSessionRagPathForIndexingEvent(const Thoth::ChatSession& session,
+                                               const std::string& engine_file_path) {
+    const std::string event_base = ragEventBasename(engine_file_path);
+    if (const std::string by_host = findSessionRagPathByBasename(session, event_base);
+        !by_host.empty()) {
+        return by_host;
+    }
+    for (const auto& entry : session.localNoteEngine) {
+        if (!entry.second.document_name.empty()
+            && entry.second.document_name == event_base) {
+            return entry.first;
+        }
+    }
+    std::string lone;
+    for (const auto& entry : session.localNoteEngine) {
+        if (!entry.second.indexing) {
+            continue;
+        }
+        if (!lone.empty()) {
+            return {};
+        }
+        lone = entry.first;
+    }
+    return lone;
 }
 
 std::string TrimGoalForDisplay(const std::string& goal) {
@@ -192,6 +257,23 @@ void MainFrame::LoadChatSessions() {
                 }
             }
 
+            if (item.contains("local_note_engine") && item["local_note_engine"].is_object()) {
+                for (auto it = item["local_note_engine"].begin();
+                     it != item["local_note_engine"].end();
+                     ++it) {
+                    if (!it.value().is_object()) {
+                        continue;
+                    }
+                    Thoth::LocalNoteEngineInfo info;
+                    info.document_id = it.value().value("document_id", "");
+                    info.document_name = it.value().value("document_name", "");
+                    info.chunk_count = it.value().value("chunk_count", -1);
+                    info.indexing = it.value().value("indexing", false);
+                    info.failed = it.value().value("failed", false);
+                    session.localNoteEngine[it.key()] = std::move(info);
+                }
+            }
+
             if (session.id.empty()) {
                 continue;
             }
@@ -236,6 +318,8 @@ void MainFrame::SaveChatSessions() {
     root["version"] = 1;
     root["sessions"] = json::array();
 
+    const bool cacheOnly = agent && agent->capabilities().supportsConversation;
+
     for (const auto& session : m_sessions) {
         json sessionJson;
         sessionJson["id"] = session.id;
@@ -244,14 +328,28 @@ void MainFrame::SaveChatSessions() {
         sessionJson["updated_at_ms"] = session.updatedAtMs;
         sessionJson["rag_files"] = session.ragFilePaths;
         sessionJson["active_goal"] = session.activeGoal;
-        sessionJson["messages"] = json::array();
-
-        for (const auto& message : session.messages) {
-            sessionJson["messages"].push_back({
-                {"role", message.role},
-                {"content", message.content},
-                {"timestamp_ms", message.timestampMs}
-            });
+        if (!session.localNoteEngine.empty()) {
+            json engineJson = json::object();
+            for (const auto& entry : session.localNoteEngine) {
+                engineJson[entry.first] = {
+                    {"document_id", entry.second.document_id},
+                    {"document_name", entry.second.document_name},
+                    {"chunk_count", entry.second.chunk_count},
+                    {"indexing", entry.second.indexing},
+                    {"failed", entry.second.failed},
+                };
+            }
+            sessionJson["local_note_engine"] = std::move(engineJson);
+        }
+        if (!cacheOnly) {
+            sessionJson["messages"] = json::array();
+            for (const auto& message : session.messages) {
+                sessionJson["messages"].push_back({
+                    {"role", message.role},
+                    {"content", message.content},
+                    {"timestamp_ms", message.timestampMs}
+                });
+            }
         }
 
         root["sessions"].push_back(std::move(sessionJson));
@@ -266,11 +364,50 @@ void MainFrame::SaveChatSessions() {
 void MainFrame::CreateNewSession(const std::string& title) {
     const std::int64_t nowMs = NowMs();
     Thoth::ChatSession session;
-    session.id = "session-" + std::to_string(nowMs);
+    if (agent && agent->capabilities().supportsConversation) {
+        const nlohmann::json created = agent->createConversationSession();
+        session.id = created.value("session_id", "session-" + std::to_string(nowMs));
+    } else {
+        session.id = "session-" + std::to_string(nowMs);
+    }
     session.title = title;
     session.createdAtMs = nowMs;
     session.updatedAtMs = nowMs;
     m_sessions.push_back(std::move(session));
+}
+
+void MainFrame::RefreshSessionConversationFromEngine(const std::string& sessionId) {
+    if (!agent || !agent->capabilities().supportsConversation || sessionId.empty()) {
+        return;
+    }
+
+    const nlohmann::json body = agent->getConversation(sessionId);
+    std::string err;
+    if (!Thoth::ConversationAuthority::hasRequiredConversationFields(body, err)) {
+        return;
+    }
+
+    auto it = std::find_if(m_sessions.begin(), m_sessions.end(),
+                           [&sessionId](const Thoth::ChatSession& session) {
+                               return session.id == sessionId;
+                           });
+    if (it == m_sessions.end()) {
+        return;
+    }
+
+    it->messages.clear();
+    for (const auto& msg : body["messages"]) {
+        Thoth::ChatMessage message;
+        message.role = msg.value("role", "assistant");
+        message.content = msg.value("content", "");
+        message.timestampMs = msg.value("timestamp_ms", 0LL);
+        it->messages.push_back(std::move(message));
+    }
+    it->updatedAtMs = NowMs();
+
+    if (m_sessionId == sessionId && m_activeSessionIndex >= 0) {
+        RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
+    }
 }
 
 void MainFrame::RefreshChatList() {
@@ -309,15 +446,65 @@ void MainFrame::RefreshChatList() {
     }
 }
 
+void MainFrame::RefreshRagTabLayout() {
+    if (m_ragTab) {
+        m_ragTab->Layout();
+    }
+    if (m_bottomNotebook) {
+        m_bottomNotebook->Layout();
+    }
+    m_auiManager.Update();
+}
+
 void MainFrame::RefreshRagPanel() {
-    auto setSlot = [this](wxStaticText* slot, wxButton* btn, const std::string& path, int index) {
+    const bool hostOnlyNotes =
+        agent && Thoth::RemoteRagHonesty::localNotesAreHostSideOnly(agent->isRemote());
+
+    auto setSlot = [this, hostOnlyNotes](wxStaticText* slot, wxButton* btn, const std::string& path, int index) {
         if (!slot || !btn) return;
         if (path.empty()) {
             slot->SetLabel(wxString::Format("Empty Slot %d", index));
+            slot->UnsetToolTip();
             btn->Hide();
         } else {
-            wxFileName fn(path);
-            slot->SetLabel(fn.GetFullName());
+            wxFileName fn(wxString::FromUTF8(path));
+            const std::string base = fn.GetFullName().ToStdString();
+            if (hostOnlyNotes) {
+                const Thoth::LocalNoteEngineInfo* engineInfo = nullptr;
+                if (m_activeSessionIndex >= 0
+                    && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+                    const auto& session =
+                        m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+                    const auto it = session.localNoteEngine.find(path);
+                    if (it != session.localNoteEngine.end()) {
+                        engineInfo = &it->second;
+                    }
+                }
+                if (engineInfo
+                    && (!engineInfo->document_id.empty() || engineInfo->indexing
+                        || engineInfo->failed || engineInfo->chunk_count >= 0)) {
+                    slot->SetLabel(wxString::FromUTF8(
+                        Thoth::RemoteRagHonesty::formatLocalNoteEngineSlotLabel(
+                            base,
+                            engineInfo->document_id,
+                            engineInfo->chunk_count,
+                            engineInfo->indexing,
+                            engineInfo->failed)));
+                    slot->SetToolTip(wxString::FromUTF8(
+                        Thoth::RemoteRagHonesty::formatLocalNoteEngineTooltip(
+                            engineInfo->document_id,
+                            engineInfo->chunk_count,
+                            engineInfo->indexing,
+                            engineInfo->failed)));
+                } else {
+                    slot->SetLabel(wxString::FromUTF8(
+                        Thoth::RemoteRagHonesty::formatHostOnlySlotLabel(base)));
+                    slot->SetToolTip(wxString::FromUTF8(Thoth::RemoteRagHonesty::kHostOnlyTooltip));
+                }
+            } else {
+                slot->SetLabel(fn.GetFullName());
+                slot->UnsetToolTip();
+            }
             btn->Show();
         }
     };
@@ -327,7 +514,9 @@ void MainFrame::RefreshRagPanel() {
         setSlot(m_ragFileSlot2, m_ragDeleteBtn2, "", 2);
         setSlot(m_ragFileSlot3, m_ragDeleteBtn3, "", 3);
         setSlot(m_ragFileSlot4, m_ragDeleteBtn4, "", 4);
-        m_auiManager.Update();
+        ApplyIngestControls(agent ? agent->eventStreamSnapshot()
+                                  : Thoth::localEventStreamSnapshot(NowMs()));
+        RefreshRagTabLayout();
         return;
     }
 
@@ -338,8 +527,178 @@ void MainFrame::RefreshRagPanel() {
     setSlot(m_ragFileSlot2, m_ragDeleteBtn2, files.size() > 1 ? files[1] : "", 2);
     setSlot(m_ragFileSlot3, m_ragDeleteBtn3, files.size() > 2 ? files[2] : "", 3);
     setSlot(m_ragFileSlot4, m_ragDeleteBtn4, files.size() > 3 ? files[3] : "", 4);
-    
+
+    ApplyIngestControls(agent ? agent->eventStreamSnapshot()
+                              : Thoth::localEventStreamSnapshot(NowMs()));
+    RefreshRagTabLayout();
+}
+
+void MainFrame::RefreshCorpusPanel() {
+    if (!m_corpusStatus || !m_corpusText || !agent) {
+        return;
+    }
+
+    const auto caps = agent->capabilities();
+    m_corpusText->Clear();
+
+    if (!caps.supportsCorpusList) {
+        m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kUnavailableLabel));
+        return;
+    }
+
+    m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kLoadingLabel));
+    m_corpusText->Clear();
+
+    const nlohmann::json body = agent->listCorpusDocuments();
+    std::string err;
+    if (!Thoth::CorpusDocuments::hasRequiredV1Fields(body, err)) {
+        m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kUnavailableLabel));
+        return;
+    }
+
+    const auto disposition = Thoth::disposePanelData(
+        true, Thoth::CorpusDocuments::isEffectivelyEmpty(body));
+    if (disposition == Thoth::PanelDataDisposition::Empty) {
+        m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kEmptyLabel));
+        return;
+    }
+
+    m_corpusStatus->SetLabel(
+        wxString::FromUTF8(Thoth::CorpusDocuments::kInventoryPopulatedLabel));
+    m_corpusStatus->SetToolTip(wxString::FromUTF8(
+        Thoth::RetrievalVerificationDisplay::kInventoryLayerHint));
+
+    wxString inventory;
+    for (const auto& doc : body["documents"]) {
+        if (!doc.is_object()) {
+            continue;
+        }
+        wxString line = wxString::FromUTF8(doc.value("name", ""));
+        const std::string docId = doc.value("id", "");
+        if (!docId.empty()) {
+            line += wxString::FromUTF8(" \u00b7 id=" + docId);
+        }
+        const std::string status = doc.value("status", "");
+        if (!status.empty()) {
+            line += wxString::FromUTF8(" \u00b7 " + status);
+        }
+        if (status == "failed" && doc.contains("reason") && doc["reason"].is_string()) {
+            const std::string reason = doc["reason"].get<std::string>();
+            if (!reason.empty()) {
+                line += wxString::FromUTF8(" \u00b7 " + reason);
+            }
+        }
+        if (doc.contains("chunk_count") && !doc["chunk_count"].is_null()) {
+            if (doc["chunk_count"].is_number_integer()) {
+                line += wxString::FromUTF8(" \u00b7 ");
+                line += wxString::Format("%d chunks", doc["chunk_count"].get<int>());
+            }
+        }
+        if (!inventory.empty()) {
+            inventory += "\n";
+        }
+        inventory += line;
+    }
+    m_corpusText->ChangeValue(inventory);
+
+    SyncLocalNotesFromCorpus(body);
+
     m_auiManager.Update();
+}
+
+void MainFrame::ApplyIngestControls(const Thoth::EventStreamSnapshot& snap) {
+    if (!m_sendToEngineBtn) {
+        return;
+    }
+    const bool engine_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
+    const bool canIngest = agent && agent->capabilities().supportsIngest;
+
+    bool hasNote = false;
+    bool allNotesSent = false;
+    if (m_activeSessionIndex >= 0
+        && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+        const auto& session =
+            m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+        const auto unsent =
+            Thoth::LocalNoteEngineSync::collectUnsentLocalNotePaths(session);
+        hasNote = !unsent.empty();
+        allNotesSent = !session.ragFilePaths.empty() && unsent.empty();
+    }
+    m_sendToEngineBtn->Show(canIngest || hasNote);
+    m_sendToEngineBtn->Enable(canIngest && hasNote && engine_usable);
+    if (!canIngest) {
+        m_sendToEngineBtn->SetToolTip(
+            wxString::FromUTF8("Document ingest unavailable with the current backend"));
+    } else if (!engine_usable) {
+        m_sendToEngineBtn->SetToolTip(
+            wxString::FromUTF8("Engine is not ready — try again when Engine: Ready"));
+    } else if (!hasNote) {
+        m_sendToEngineBtn->SetToolTip(
+            wxString::FromUTF8(allNotesSent
+                                   ? "All Local Notes in this session have already been sent"
+                                   : "Add a Local Note (drop or Import Corpus) first"));
+    } else {
+        m_sendToEngineBtn->SetToolTip(
+            wxString::FromUTF8(
+                "Send the Local Note to Engine corpus for this chat session "
+                "(Engine list shows full inventory; retrieval uses session scope)"));
+    }
+}
+
+void MainFrame::OnSendToEngine(wxCommandEvent& WXUNUSED(evt)) {
+    if (!agent || !agent->capabilities().supportsIngest) {
+        SetTransientStatus(wxString::FromUTF8(
+            "Document ingest unavailable with the current backend"));
+        return;
+    }
+    if (m_activeSessionIndex < 0
+        || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
+        return;
+    }
+    if (m_sessionId.empty()) {
+        SetTransientStatus(wxString::FromUTF8("Select or create a chat session first"));
+        return;
+    }
+
+    const auto& session =
+        m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    const std::vector<std::string> unsent =
+        Thoth::LocalNoteEngineSync::collectUnsentLocalNotePaths(session);
+    if (unsent.empty()) {
+        if (session.ragFilePaths.empty()) {
+            SetTransientStatus(wxString::FromUTF8("Add a Local Note first"));
+        } else {
+            SetTransientStatus(wxString::FromUTF8(
+                "All Local Notes in this session have already been sent to Engine"));
+        }
+        return;
+    }
+
+    std::string selected_path;
+    if (unsent.size() == 1) {
+        selected_path = unsent.front();
+    } else {
+        wxArrayString choices;
+        for (const auto& path : unsent) {
+            choices.Add(wxString::FromUTF8(std::filesystem::path(path).filename().string()));
+        }
+        wxSingleChoiceDialog dialog(this,
+                                    wxString::FromUTF8("Choose a Local Note to send:"),
+                                    wxString::FromUTF8("Send to Engine"),
+                                    choices);
+        if (dialog.ShowModal() != wxID_OK) {
+            return;
+        }
+        const int index = dialog.GetSelection();
+        if (index < 0 || static_cast<std::size_t>(index) >= unsent.size()) {
+            return;
+        }
+        selected_path = unsent[static_cast<std::size_t>(index)];
+    }
+
+    agent->setSessionId(m_sessionId);
+    SetTransientStatus(wxString::FromUTF8("Sending document to Engine…"));
+    agent->createCorpusDocument(selected_path);
 }
 
 void MainFrame::RenderSession(std::size_t sessionIndex) {
@@ -400,6 +759,14 @@ bool MainFrame::SyncAgentMemoryFromActiveSession(bool includeRagFiles) {
 
     const Thoth::ChatSession& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
 
+    // Phase 10: Engine owns conversation — no host memory sync.
+    if (agent->capabilities().supportsConversation) {
+        if (!session.activeGoal.empty()) {
+            RefreshGoalBanner();
+        }
+        return false;
+    }
+
     // Remote (Plan K): conversation/RAG/resume sync have no HTTP APIs — skip no-ops.
     if (agent->isRemote()) {
         if (!session.activeGoal.empty()) {
@@ -458,18 +825,22 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
         agent->setSessionId(m_sessionId);
     }
 
+    RefreshSessionConversationFromEngine(m_sessionId);
+
     RenderSession(sessionIndex);
     RefreshChatList();
     RefreshRagPanel(); // New: Update the RAG file panel
     const bool memoryLoaded = SyncAgentMemoryFromActiveSession();
+    UpdateBackendModeBanner();
     if (agent && agent->isRemote()) {
-        SetStatusText("Remote engine mode — host memory/RAG not synced");
+        SetTransientStatus("Host memory/RAG not synced with Engine");
     } else {
-        SetStatusText(memoryLoaded ? "Loaded selected chat into memory"
+        SetTransientStatus(memoryLoaded ? "Loaded selected chat into memory"
                                    : "Selected chat (memory sync unavailable)");
     }
     RefreshGoalBanner();
     RefreshAllPanels();
+    UpdateChatSendChrome();
 }
 
 MainFrame::MainFrame()
@@ -481,52 +852,9 @@ MainFrame::MainFrame()
 
     agent = std::make_unique<AgentInterface>();
 
-    agent->onResponse = [this](const std::string& reply, const std::string& requestId) {
-        wxTheApp->CallAfter([this, reply, requestId]() {
-            // Safety: Check if this window still exists
-            if (wxPendingDelete.Member(this) || !wxWindow::FindWindowById(GetId())) {
-                return;
-            }
-
-            const auto requestIt = m_requestToSession.find(requestId);
-            if (requestIt == m_requestToSession.end()) {
-                return;
-            }
-
-            const std::string targetSessionId = requestIt->second;
-            m_requestToSession.erase(requestIt);
-
-            auto sessionIt = std::find_if(m_sessions.begin(), m_sessions.end(),
-                [&targetSessionId](const Thoth::ChatSession& session) {
-                    return session.id == targetSessionId;
-                });
-            if (sessionIt == m_sessions.end()) {
-                return;
-            }
-
-            sessionIt->messages.push_back({"assistant", reply, NowMs()});
-            sessionIt->updatedAtMs = NowMs();
-            SaveChatSessions();
-
-            if (m_typingIndicator) {
-                m_typingIndicator->Hide();
-            }
-            if (m_graphPanel) m_graphPanel->UpdateControllerState("IDLE");
-            m_auiManager.Update();
-
-            RefreshChatList();
-
-            // Only render if we are still looking at the session that got the reply
-            if (m_sessionId == targetSessionId) {
-                 RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
-                 if (m_inputCtrl) {
-                     m_inputCtrl->SetFocus();
-                 }
-            }
-
-            SetStatusText("Response received");
-            RefreshAllPanels();
-        });
+    agent->onOperationComplete = [this](const Thoth::OperationResult& result,
+                                        const std::string& requestId) {
+        HandleOperationComplete(result, requestId);
     };
 
     // --- Wire Observability events (Phase 2) ---
@@ -542,6 +870,9 @@ MainFrame::MainFrame()
             // Safety: Check if this window still exists
             if (!wxPendingDelete.Member(this) && wxWindow::FindWindowById(GetId())) {
                 bool isActiveSession = (eventSessionId.empty() || eventSessionId == this->m_sessionId);
+                const bool retrievalForTab =
+                    Thoth::RetrievalVerificationDisplay::retrievalDiagnosticsTargetsSession(
+                        eventSessionId, this->m_sessionId);
                 
                 std::cerr << "[MainFrame] onEvent: type=" << (int)type 
                           << ", evSid=" << eventSessionId 
@@ -550,7 +881,7 @@ MainFrame::MainFrame()
 
                 if (type == EventType::RETRIEVAL_DIAGNOSTICS) {
                     std::cerr << "[MainFrame] Received RETRIEVAL_DIAGNOSTICS event.\n";
-                    if (isActiveSession) {
+                    if (retrievalForTab) {
                         if (this->m_gragPanel) this->m_gragPanel->UpdateDiagnostics(metadata);
                         if (this->m_graphPanel) this->m_graphPanel->UpdateControllerState("EXECUTING_RETRIEVAL");
                     }
@@ -560,15 +891,12 @@ MainFrame::MainFrame()
                     }
                 } else if (type == EventType::STATE_CHANGED) {
                     if (isActiveSession) {
+                        const auto progressSrc = this->ActiveBackendProgressSource();
                         if (controllerState == "PLANNING") {
                             m_goalPlanningPending = true;
-                            if (m_stateStrip) {
-                                m_stateStrip->SetActivityMessage("Planning…");
-                            }
+                            this->ApplyWorkActivity("Planning…", progressSrc);
                         } else if (controllerState == "REVISING_PLAN") {
-                            if (m_stateStrip) {
-                                m_stateStrip->SetActivityMessage("Revising plan…");
-                            }
+                            this->ApplyWorkActivity("Revising plan…", progressSrc);
                         }
                         if (metadata.contains("reasoning_stage")) {
                             std::string stage = metadata["reasoning_stage"].get<std::string>();
@@ -593,7 +921,9 @@ MainFrame::MainFrame()
                                 if (hasSteps) {
                                     this->m_stateStrip->ResetPlan(plan);
                                 } else {
-                                    this->m_stateStrip->SetActivityMessage("Plan generation failed");
+                                    this->ApplyWorkActivity(
+                                        "Plan generation failed",
+                                        this->ActiveBackendProgressSource());
                                 }
                             }
                             if (this->m_planPanel) {
@@ -602,15 +932,19 @@ MainFrame::MainFrame()
                             }
                         }
                         if (metadata["plan"].contains("goal") && metadata["plan"]["goal"].is_string()) {
-                            // Use eventSessionId if present (best correlation)
-                            std::string targetSid = eventSessionId;
-                            if (targetSid.empty()) {
-                                // If event has no ID, only update current session if we're sure
-                                targetSid = this->m_sessionId;
-                            }
-                            
+                            const std::string targetSid =
+                                this->ResolveGoalEventSessionId(eventSessionId);
                             if (!targetSid.empty()) {
-                                SetSessionGoal(targetSid, metadata["plan"]["goal"].get<std::string>());
+                                const bool knownSession = std::any_of(
+                                    this->m_sessions.begin(),
+                                    this->m_sessions.end(),
+                                    [&targetSid](const Thoth::ChatSession& session) {
+                                        return session.id == targetSid;
+                                    });
+                                if (knownSession) {
+                                    SetSessionGoal(targetSid,
+                                                   metadata["plan"]["goal"].get<std::string>());
+                                }
                             }
                         }
                     }
@@ -638,25 +972,64 @@ MainFrame::MainFrame()
                     }
                 } else if (type == EventType::INDEXING_STARTED) {
                     std::string path = metadata.value("file_path", "");
-                    if (isActiveSession) {
+                    const auto progressSrc = this->ActiveBackendProgressSource();
+                    if (isActiveSession && Thoth::mayApplyIndexingProgress(progressSrc)) {
                         ++m_ragIndexingCount;
                         RefreshExecutiveStripActivity();
                     }
-                    wxFileName fn(wxString::FromUTF8(path));
-                    SetStatusText("Indexing: " + fn.GetFullName());
-                    UpdateRagSlotLabel(path, "Indexing…");
+                    wxFileName fn(wxString::FromUTF8(ragEventBasename(path)));
+                    this->ApplyWorkStatus("Indexing: " + fn.GetFullName(), progressSrc);
+                    if (Thoth::mayApplyIndexingProgress(progressSrc)) {
+                        ApplyLocalNoteIndexingStarted(path);
+                    }
                 } else if (type == EventType::INDEXING_COMPLETED) {
                     std::string path = metadata.value("file_path", "");
-                    if (isActiveSession) {
+                    const auto progressSrc = this->ActiveBackendProgressSource();
+                    if (isActiveSession && Thoth::mayApplyIndexingProgress(progressSrc)) {
                         m_ragIndexingCount = std::max(0, m_ragIndexingCount - 1);
                         RefreshExecutiveStripActivity();
                     }
-                    wxFileName fn(wxString::FromUTF8(path));
-                    SetStatusText("Indexed: " + fn.GetFullName());
+                    wxFileName fn(wxString::FromUTF8(ragEventBasename(path)));
+                    if (metadata.contains("success")) {
+                        const bool ok = metadata.value("success", false);
+                        if (ok) {
+                            this->ApplyWorkStatus(
+                                "Indexing succeeded: " + fn.GetFullName(), progressSrc);
+                        } else {
+                            std::string reason = metadata.value("reason", "");
+                            wxString msg = wxString::FromUTF8("Indexing failed: ")
+                                + fn.GetFullName();
+                            if (!reason.empty()) {
+                                msg += wxString::FromUTF8(" (" + reason + ")");
+                            }
+                            this->ApplyWorkStatus(msg, progressSrc);
+                        }
+                        if (Thoth::mayApplyIndexingProgress(progressSrc)) {
+                            int chunk_count = -1;
+                            if (metadata.contains("chunk_count")
+                                && metadata["chunk_count"].is_number_integer()) {
+                                chunk_count = metadata["chunk_count"].get<int>();
+                            }
+                            ApplyLocalNoteIndexingCompleted(
+                                path, metadata.value("success", false), chunk_count);
+                        }
+                    } else {
+                        this->ApplyWorkStatus(
+                            "Indexing finished: " + fn.GetFullName(), progressSrc);
+                        if (Thoth::mayApplyIndexingProgress(progressSrc)) {
+                            ApplyLocalNoteIndexingCompleted(path, false, -1);
+                        }
+                    }
                     RefreshRagPanel();
+                    if (agent && agent->capabilities().supportsCorpusList) {
+                        RefreshCorpusPanel();
+                    }
                 } else if (type == EventType::PLAN_COMPLETED) {
                     m_goalPlanningPending = false;
-                    this->SetStatusText("Goal completed successfully");
+                    this->ApplyWorkStatus(
+                        "Goal completed successfully",
+                        this->ActiveBackendProgressSource());
+                    ClearSessionGoal(this->ResolveGoalEventSessionId(eventSessionId));
                     if (isActiveSession) {
                         if (this->m_typingIndicator) {
                             this->m_typingIndicator->Hide();
@@ -670,6 +1043,7 @@ MainFrame::MainFrame()
                     }
                     this->RefreshAllPanels();
                 } else if (type == EventType::PLAN_FAILED) {
+                    ClearSessionGoal(this->ResolveGoalEventSessionId(eventSessionId));
                     if (isActiveSession) {
                         m_goalPlanningPending = false;
                         RefreshExecutiveStripActivity();
@@ -679,6 +1053,7 @@ MainFrame::MainFrame()
                         if (this->m_planPanel) this->m_planPanel->SetExecutionState("Failed");
                     }
                 } else if (type == EventType::PLAN_ABORTED) {
+                    ClearSessionGoal(this->ResolveGoalEventSessionId(eventSessionId));
                     if (isActiveSession) {
                         m_goalPlanningPending = false;
                         RefreshExecutiveStripActivity();
@@ -692,27 +1067,31 @@ MainFrame::MainFrame()
                               << metadata.value("source", "unknown")
                               << " count=" << metadata.value("plan_count", 0) << "\n";
                     if (isActiveSession) {
-                        SetStatusText(wxString::Format(
+                        this->ApplyWorkStatus(wxString::Format(
                             "Plan reuse: %d similar past plan(s) from %s",
                             metadata.value("plan_count", 0),
-                            wxString::FromUTF8(metadata.value("source", "unknown"))));
+                            wxString::FromUTF8(metadata.value("source", "unknown"))),
+                            this->ActiveBackendProgressSource());
                     }
                 } else if (type == EventType::REFLECTION_REPLAN) {
                     std::cerr << "[MainFrame] REFLECTION_REPLAN score="
                               << metadata.value("trajectory_score", 0.0f)
                               << " cycle=" << metadata.value("reflection_cycle", 0) << "\n";
                     if (isActiveSession) {
-                        SetStatusText(wxString::Format(
+                        this->ApplyWorkStatus(wxString::Format(
                             "Reflection replan (score %.2f, cycle %d)",
                             metadata.value("trajectory_score", 0.0f),
-                            metadata.value("reflection_cycle", 0)));
+                            metadata.value("reflection_cycle", 0)),
+                            this->ActiveBackendProgressSource());
                     }
                 } else if (type == EventType::PLAN_HISTORY_STORED) {
                     std::cerr << "[MainFrame] PLAN_HISTORY_STORED plan_id="
                               << metadata.value("plan_id", "")
                               << " score=" << metadata.value("success_score", 0.0f) << "\n";
                     if (isActiveSession) {
-                        SetStatusText("Plan history saved to past_plans + cognate_plans");
+                        this->ApplyWorkStatus(
+                            "Plan history saved to past_plans + cognate_plans",
+                            this->ActiveBackendProgressSource());
                     }
                 }
                 
@@ -847,35 +1226,67 @@ MainFrame::MainFrame()
     // --- Bottom Tabbed Notebook ---
     m_bottomNotebook = new wxNotebook(this, wxID_ANY);
     
-    // 1. RAG Files Tab
-    wxPanel* ragTab = new wxPanel(m_bottomNotebook, wxID_ANY);
+    // 1. RAG Files Tab — splitter keeps Engine inventory + Local Notes both visible
+    m_ragTab = new wxPanel(m_bottomNotebook, wxID_ANY);
+    wxBoxSizer* ragTabOuter = new wxBoxSizer(wxVERTICAL);
+    wxSplitterWindow* ragSplit =
+        new wxSplitterWindow(m_ragTab, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                             wxSP_LIVE_UPDATE | wxSP_3D);
+    ragSplit->SetMinimumPaneSize(80);
+
+    wxPanel* corpusPanel = new wxPanel(ragSplit, wxID_ANY);
+    wxBoxSizer* corpusSizer = new wxBoxSizer(wxVERTICAL);
+    wxStaticText* corpusHeader = new wxStaticText(
+        corpusPanel, wxID_ANY,
+        wxString::FromUTF8("Engine inventory (read-only — not session attachments)"));
+    corpusHeader->Wrap(400);
+    m_corpusStatus = new wxStaticText(corpusPanel, wxID_ANY,
+        wxString::FromUTF8(Thoth::CorpusDocuments::kLoadingLabel));
+    m_corpusText = new wxTextCtrl(
+        corpusPanel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(-1, 80),
+        wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP | wxHSCROLL);
+    m_corpusText->SetToolTip(wxString::FromUTF8("Select text and Ctrl+C to copy"));
+    corpusSizer->Add(corpusHeader, 0, wxEXPAND | wxALL, 5);
+    corpusSizer->Add(m_corpusStatus, 0, wxLEFT | wxRIGHT | wxBOTTOM, 5);
+    corpusSizer->Add(m_corpusText, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 5);
+    corpusPanel->SetSizer(corpusSizer);
+
+    wxPanel* localNotesPanel = new wxPanel(ragSplit, wxID_ANY);
+    wxBoxSizer* localNotesOuter = new wxBoxSizer(wxVERTICAL);
+    wxStaticText* localNotesHeader = new wxStaticText(
+        localNotesPanel, wxID_ANY,
+        wxString::FromUTF8("Local Notes — drop or Import Corpus, then Send to Engine"));
+    localNotesHeader->Wrap(400);
+    localNotesOuter->Add(localNotesHeader, 0, wxEXPAND | wxALL, 5);
+
     wxFlexGridSizer* ragSizer = new wxFlexGridSizer(2, 2, 5, 5);
     ragSizer->AddGrowableCol(0, 1);
     ragSizer->AddGrowableCol(1, 1);
-    ragSizer->AddGrowableRow(0, 1);
-    ragSizer->AddGrowableRow(1, 1);
 
-    auto createSlotSizer = [this, ragTab](wxStaticText*& slot, wxButton*& btn, int index) {
+    auto createSlotSizer = [this, localNotesPanel](wxStaticText*& slot, wxButton*& btn, int index) {
         wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
-        slot = new wxStaticText(ragTab, wxID_ANY, wxString::Format("Empty Slot %d", index));
-        btn = new wxButton(ragTab, wxID_ANY, "X", wxDefaultPosition, wxSize(32, 32));
+        slot = new wxStaticText(localNotesPanel, wxID_ANY, wxString::Format("Empty Slot %d", index),
+                                wxDefaultPosition, wxDefaultSize,
+                                wxST_ELLIPSIZE_END);
+        btn = new wxButton(localNotesPanel, wxID_ANY, "X", wxDefaultPosition, wxSize(28, 28));
         btn->SetToolTip("Remove file");
-
-        wxFont font = slot->GetFont();
-        font.MakeSmaller();
-        slot->SetFont(font);
+        slot->SetMinSize(wxSize(80, 22));
 
         sizer->Add(slot, 1, wxALIGN_CENTER_VERTICAL | wxALL, 5);
         sizer->Add(btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+        sizer->SetMinSize(wxSize(-1, 32));
 
         btn->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) {
             if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) return;
             auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
             if (static_cast<size_t>(index - 1) < session.ragFilePaths.size()) {
+                const std::string removed = session.ragFilePaths[static_cast<std::size_t>(index - 1)];
                 session.ragFilePaths.erase(session.ragFilePaths.begin() + (index - 1));
+                session.localNoteEngine.erase(removed);
                 SaveChatSessions();
                 RefreshRagPanel();
-                if (agent) {
+                if (agent
+                    && Thoth::RemoteRagHonesty::shouldSyncRagFilesToBackend(agent->isRemote())) {
                     agent->setRagFiles(session.ragFilePaths);
                 }
             }
@@ -888,8 +1299,28 @@ MainFrame::MainFrame()
     ragSizer->Add(createSlotSizer(m_ragFileSlot2, m_ragDeleteBtn2, 2), 1, wxEXPAND);
     ragSizer->Add(createSlotSizer(m_ragFileSlot3, m_ragDeleteBtn3, 3), 1, wxEXPAND);
     ragSizer->Add(createSlotSizer(m_ragFileSlot4, m_ragDeleteBtn4, 4), 1, wxEXPAND);
-    ragTab->SetSizer(ragSizer);
-    ragTab->SetDropTarget(new FileDropTarget(this));
+
+    localNotesOuter->Add(ragSizer, 1, wxEXPAND | wxLEFT | wxRIGHT, 5);
+
+    m_sendToEngineBtn = new wxButton(localNotesPanel,
+                                      wxID_ANY,
+                                      wxString::FromUTF8("Send to Engine"));
+    m_sendToEngineBtn->SetToolTip(
+        wxString::FromUTF8("Create an Engine corpus document from a Local Note"));
+    localNotesOuter->Add(m_sendToEngineBtn, 0, wxEXPAND | wxALL, 5);
+    m_sendToEngineBtn->Bind(wxEVT_BUTTON, &MainFrame::OnSendToEngine, this);
+
+    localNotesPanel->SetSizer(localNotesOuter);
+    localNotesPanel->SetMinSize(wxSize(240, 140));
+
+    ragSplit->SplitHorizontally(corpusPanel, localNotesPanel);
+    ragSplit->SetSashPosition(180);
+
+    ragTabOuter->Add(ragSplit, 1, wxEXPAND);
+    m_ragTab->SetSizer(ragTabOuter);
+    m_ragTab->SetDropTarget(new FileDropTarget(this));
+
+    wxPanel* ragTab = m_ragTab;
 
     // 2. Trajectories Tab
     m_trajectoryViewer = new TrajectoryViewer(m_bottomNotebook);
@@ -939,7 +1370,7 @@ MainFrame::MainFrame()
         .Name("SystemState")
         .Layer(1)
         .BestSize(-1, 350)
-        .MinSize(-1, 150)
+        .MinSize(-1, 280)
         .Caption("System State")
         .CloseButton(true)
         .Resizable(true)
@@ -983,6 +1414,11 @@ MainFrame::MainFrame()
 
     // Goal Banner bindings
     m_clearGoalBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        if (agent && agent->isRemote()) {
+            SetTransientStatus(
+                wxString::FromUTF8("Goal cleared for this chat. Use Agent → Abort if a plan is "
+                                   "still running on the Engine."));
+        }
         ClearActiveGoal();
     });
     
@@ -991,16 +1427,29 @@ MainFrame::MainFrame()
         auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
         wxString newGoal = wxGetTextFromUser("Revise active goal:", "Revise Goal", wxString::FromUTF8(session.activeGoal), this);
         if (!newGoal.IsEmpty()) {
-            m_goalPlanningPending = true;
-            RefreshExecutiveStripActivity();
-            SetStatusText("Planning goal…");
-            if (agent) agent->executeGoal(newGoal.ToStdString());
+            SetTransientStatus(wxString::FromUTF8(Thoth::kGoalSubmittedChrome));
+            const std::string goalStd = newGoal.ToStdString();
+            SetSessionGoal(m_sessionId, goalStd);
+            SyncBackendSessionIdentity();
+            if (agent) {
+                agent->executeGoal(goalStd);
+            }
         }
     });
 
-    CreateStatusBar(1);
+    CreateStatusBar(3);
+    int widths[3] = {-2, -3, -1};
+    SetStatusWidths(3, widths);
+    UpdateBackendModeBanner();
 
     SetupMenuBar();
+    ApplyBenchmarksMenuCapabilities();
+    ApplyEngineDegradedControls(agent ? agent->eventStreamSnapshot()
+                                      : Thoth::localEventStreamSnapshot(NowMs()));
+
+    m_connectionPollTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, &MainFrame::OnConnectionPollTimer, this, m_connectionPollTimer.GetId());
+    m_connectionPollTimer.Start(1000);
 
     LoadChatSessions();
     if (m_sessions.empty()) {
@@ -1011,13 +1460,15 @@ MainFrame::MainFrame()
     }
     ActivateSession(0); // Activate the first session (most recent)
 
-    SetStatusText("Ready");
+    UpdateBackendModeBanner();
+    SetTransientStatus("Ready");
 }
 
 MainFrame::~MainFrame() {
+    m_connectionPollTimer.Stop();
     m_auiManager.UnInit();
     if (agent) {
-        agent->onResponse = nullptr;
+        agent->onOperationComplete = nullptr;
         agent->onEvent = nullptr;
     }
 }
@@ -1037,7 +1488,7 @@ void MainFrame::OnCopyChat(wxCommandEvent& WXUNUSED(evt)) {
     if (wxTheClipboard->Open()) {
         wxTheClipboard->SetData(new wxTextDataObject(fullChat));
         wxTheClipboard->Close();
-        SetStatusText("Full chat copied to clipboard.");
+        SetTransientStatus("Full chat copied to clipboard.");
     }
 }
 
@@ -1059,66 +1510,59 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
         [&activeId](const Thoth::ChatSession& s) { return s.id == activeId; });
     
     if (it == m_sessions.end()) {
-        SetStatusText("Error: Active session lost");
+        SetTransientStatus("Error: Active session lost");
         return;
     }
 
     Thoth::ChatSession& session = *it;
+    const bool isGoal = InputStartsGoal(input);
+    const wxString goalText = isGoal ? ExtractGoalText(input) : wxString();
+    const bool engineConversation =
+        agent && agent->capabilities().supportsConversation && !isGoal;
+
     if (session.messages.empty()) {
         session.title = BuildSessionTitle(input);
     }
-    
-    session.messages.push_back({"user", input.ToStdString(), NowMs()});
+
+    if (!engineConversation) {
+        session.messages.push_back({"user", input.ToStdString(), NowMs()});
+    }
     session.updatedAtMs = NowMs();
     SaveChatSessions();
 
-    const bool isGoal = InputStartsGoal(input);
-    const wxString goalText = isGoal ? ExtractGoalText(input) : wxString();
-
     // Sync conversation memory after the new message is stored. Skip RAG re-index for
     // goals so /goal is not blocked behind bulk indexing on the worker thread.
-    // Remote mode skips entirely (no sync APIs — Plan K).
-    SyncAgentMemoryFromActiveSession(!isGoal);
+    SyncAgentMemoryFromActiveSession(!isGoal && !engineConversation);
     
     // Refresh UI
-    RefreshChatList(); // Re-sorts, updates m_activeSessionIndex to match m_sessionId
-    RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
+    RefreshChatList();
+    if (!engineConversation) {
+        RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
+    }
 
     if (m_graphPanel) {
         m_graphPanel->ResetNodes();
-        m_graphPanel->UpdateControllerState(isGoal ? "PLANNING" : "CONVERSATIONAL");
     }
     m_auiManager.Update();
 
     if (isGoal) {
-        m_goalPlanningPending = true;
-    }
-    RefreshExecutiveStripActivity();
-    if (m_goalPlanningPending && m_ragIndexingCount == 0) {
-        SetStatusText("Planning goal…");
-    } else if (!isGoal && agent && agent->isRemote()) {
-        SetStatusText("Message sent to remote engine…");
-    } else if (!isGoal && !session.ragFilePaths.empty()) {
-        SetStatusText("Syncing RAG context…");
-    } else if (!isGoal) {
-        SetStatusText("Message sent, awaiting response...");
+        SetTransientStatus(wxString::FromUTF8(Thoth::kGoalSubmittedChrome));
     } else {
-        SetStatusText("Starting goal…");
+        SetTransientStatus(wxString::FromUTF8(Thoth::kMessageSubmittedChrome));
     }
 
     if (agent) {
         if (isGoal) {
-            // Explicit goal: → /v1/goals (remote) or plugin executeGoal (local).
-            // Do not block /v1/chat on create_plan; progress via SSE.
             if (m_typingIndicator) {
                 m_typingIndicator->Hide();
             }
             const std::string goalStd = goalText.ToStdString();
             if (goalStd.empty()) {
-                SetStatusText("Goal text empty — use \"goal: …\" or \"/goal …\"");
+                SetTransientStatus("Goal text empty — use \"goal: …\" or \"/goal …\"");
             } else {
                 std::cerr << "[MainFrame] executeGoal for session " << activeId << "\n";
                 SetSessionGoal(activeId, goalStd);
+                SyncBackendSessionIdentity();
                 agent->executeGoal(goalStd);
                 if (!agent->isRemote() && !session.ragFilePaths.empty()) {
                     auto sessionCopy = session;
@@ -1126,11 +1570,25 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
                     agent->setRagFiles(sessionCopy.ragFilePaths);
                 }
             }
-        } else {
+        } else if (engineConversation) {
+            SyncBackendSessionIdentity();
+            if (agent->workerHasContentionBeforeEnqueue()) {
+                SetTransientStatus(
+                    wxString::FromUTF8("Waiting for Engine… (message queued behind prior work)"));
+            }
             m_typingIndicator->Show();
             ++m_requestCounter;
             const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
             m_requestToSession[requestId] = activeId;
+            RegisterPendingChatRequest(requestId, activeId);
+            agent->appendConversationTurn(activeId, input.ToStdString(), requestId);
+        } else {
+            SyncBackendSessionIdentity();
+            m_typingIndicator->Show();
+            ++m_requestCounter;
+            const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
+            m_requestToSession[requestId] = activeId;
+            RegisterPendingChatRequest(requestId, activeId);
             std::cerr << "[MainFrame] Sending request " << requestId << " for session "
                       << activeId << "\n";
             agent->processUserInput(input.ToStdString(), requestId);
@@ -1146,12 +1604,33 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
 
 void MainFrame::OnShowDecisionTrace(wxCommandEvent& WXUNUSED(evt)) {
     if (!agent) {
-        wxMessageBox("Agent is not initialized.", "Decision Trace", wxOK | wxICON_WARNING, this);
+        wxMessageBox("Agent is not initialized.", "Explain Plan", wxOK | wxICON_WARNING, this);
         return;
     }
 
-    const std::string summary = agent->getLatestDecisionTraceSummary();
-    wxMessageBox(wxString::FromUTF8(summary), "Why this answer?", wxOK | wxICON_INFORMATION, this);
+    // Phase 3/4 D11: Unavailable with why when backend lacks plan diagnostics.
+    if (!agent->capabilities().supportsPlanDiagnostics) {
+        wxMessageBox(
+            wxString::FromUTF8(Thoth::CognitiveDiagnostics::formatExplainPlanUnavailableBody()),
+            wxString::FromUTF8(Thoth::CognitiveDiagnostics::kExplainPlanDialogTitle),
+            wxOK | wxICON_INFORMATION,
+            this);
+        return;
+    }
+
+    // Phase 4: render Engine-authored structured decision summary (D12/D13).
+    const nlohmann::json summary = agent->getLatestDecisionSummary();
+    std::string body;
+    if (Thoth::DecisionSummary::isEffectivelyEmpty(summary)) {
+        body = "No decision summary available.";
+    } else {
+        body = Thoth::DecisionSummary::formatForDisplay(summary);
+    }
+    wxMessageBox(
+        wxString::FromUTF8(body),
+        wxString::FromUTF8(Thoth::CognitiveDiagnostics::kExplainPlanDialogTitle),
+        wxOK | wxICON_INFORMATION,
+        this);
 }
 
 void MainFrame::OnChatSelected(wxDataViewEvent& evt) {
@@ -1180,7 +1659,7 @@ void MainFrame::OnNewChat(wxCommandEvent& WXUNUSED(evt)) {
     }
     ActivateSession(newIndex);
     m_inputCtrl->SetFocus();
-    SetStatusText("New chat created");
+    SetTransientStatus("New chat created");
 }
 
 void MainFrame::OnDeleteChat(wxCommandEvent& WXUNUSED(evt)) {
@@ -1204,7 +1683,7 @@ void MainFrame::OnDeleteChat(wxCommandEvent& WXUNUSED(evt)) {
         wxYES_NO | wxNO_DEFAULT | wxICON_WARNING,
         this);
     if (confirm != wxYES) {
-        SetStatusText("Delete canceled");
+        SetTransientStatus("Delete canceled");
         return;
     }
 
@@ -1212,6 +1691,7 @@ void MainFrame::OnDeleteChat(wxCommandEvent& WXUNUSED(evt)) {
     std::erase_if(m_requestToSession, [&deletedSessionId](const auto& entry) {
         return entry.second == deletedSessionId;
     });
+    m_inFlightChatBySession.erase(deletedSessionId);
 
     m_sessions.erase(m_sessions.begin() + sessionIndexToDelete);
 
@@ -1227,7 +1707,7 @@ void MainFrame::OnDeleteChat(wxCommandEvent& WXUNUSED(evt)) {
     ActivateSession(static_cast<size_t>(nextIndex));
 
     m_inputCtrl->SetFocus();
-    SetStatusText("Chat deleted");
+    SetTransientStatus("Chat deleted");
 }
 
 bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
@@ -1265,65 +1745,303 @@ bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
         MigrateFilesToSandbox(session.ragFilePaths);
         SaveChatSessions();
         RefreshRagPanel();
-        if (agent) {
+        const bool hostOnlyNotes =
+            agent && Thoth::RemoteRagHonesty::localNotesAreHostSideOnly(agent->isRemote());
+        // Phase 5: never invent indexing from the drop itself.
+        if (hostOnlyNotes) {
+            if (m_stateStrip) {
+                m_stateStrip->SetActivityMessage(wxString::FromUTF8(
+                    Thoth::RemoteRagHonesty::kHostOnlyTooltip));
+            }
+            SetTransientStatus(wxString::FromUTF8(
+                Thoth::RemoteRagHonesty::formatHostOnlyAddStatus(filesAddedCount)));
+        } else {
+            SetTransientStatus(wxString::FromUTF8(
+                Thoth::formatFilesAddedChromeStatus(filesAddedCount)));
+        }
+        if (agent
+            && Thoth::RemoteRagHonesty::shouldSyncRagFilesToBackend(agent->isRemote())) {
             agent->setRagFiles(session.ragFilePaths);
         }
-        if (m_stateStrip) {
-            m_stateStrip->SetActivityMessage("Indexing dropped files…");
-        }
-        SetStatusText("Added " + std::to_string(filesAddedCount) + " file(s) — indexing…");
         return true;
     }
 
     return false;
 }
 
+namespace {
+
+Thoth::PanelPresentationState ResearchCollectionDisposition(const nlohmann::json& body) {
+    using namespace Thoth;
+    if (ResearchResources::isFetchError(body)) {
+        return PanelPresentationState::Error;
+    }
+    std::string err;
+    if (!ResearchResources::hasRequiredCollectionFields(body, err)) {
+        return PanelPresentationState::Error;
+    }
+    if (ResearchResources::isEffectivelyEmpty(body)) {
+        return PanelPresentationState::Empty;
+    }
+    return PanelPresentationState::Populated;
+}
+
+Thoth::PanelPresentationState GraphStatisticsDisposition(const nlohmann::json& body) {
+    using namespace Thoth;
+    if (GraphStatistics::isFetchError(body)) {
+        return PanelPresentationState::Error;
+    }
+    std::string err;
+    if (!GraphStatistics::hasRequiredFields(body, err)) {
+        return PanelPresentationState::Error;
+    }
+    if (GraphStatistics::isEffectivelyEmpty(body)) {
+        return PanelPresentationState::Empty;
+    }
+    return PanelPresentationState::Populated;
+}
+
+} // namespace
+
 void MainFrame::RefreshAllPanels() {
     if (!agent) return;
 
+    const auto caps = agent->capabilities();
+    const wxString unavailable =
+        wxString::FromUTF8(Thoth::kUnavailableWithCurrentBackend);
+
     if (m_strategyPanel) {
-        m_strategyPanel->UpdateStrategies(agent->getStrategies());
+        if (!caps.supportsStrategies) {
+            m_strategyPanel->SetPresentationState(
+                Thoth::PanelPresentationState::Unavailable, unavailable);
+        } else {
+            m_strategyPanel->SetPresentationState(Thoth::PanelPresentationState::Loading);
+            const nlohmann::json body = agent->getStrategies();
+            const auto disposition = ResearchCollectionDisposition(body);
+            if (disposition == Thoth::PanelPresentationState::Error) {
+                m_strategyPanel->SetPresentationState(
+                    Thoth::PanelPresentationState::Error, "Error loading strategies.");
+            } else if (disposition == Thoth::PanelPresentationState::Empty) {
+                m_strategyPanel->SetPresentationState(Thoth::PanelPresentationState::Empty);
+            } else {
+                m_strategyPanel->UpdateStrategies(Thoth::ResearchResources::itemsArray(body));
+            }
+        }
     }
     if (m_trajectoryViewer) {
-        m_trajectoryViewer->UpdateTrajectories(agent->getTrajectories());
+        if (!caps.supportsTrajectories) {
+            m_trajectoryViewer->SetPresentationState(
+                Thoth::PanelPresentationState::Unavailable, unavailable);
+        } else {
+            m_trajectoryViewer->SetPresentationState(Thoth::PanelPresentationState::Loading);
+            const nlohmann::json trajBody = agent->getTrajectories();
+            const auto trajDisposition = ResearchCollectionDisposition(trajBody);
+            if (trajDisposition == Thoth::PanelPresentationState::Error) {
+                m_trajectoryViewer->SetPresentationState(
+                    Thoth::PanelPresentationState::Error, "Error loading trajectories.");
+            } else {
+                nlohmann::json episodeItems = nlohmann::json::array();
+                bool episodeError = false;
+                if (caps.supportsEpisodes) {
+                    const nlohmann::json epBody = agent->getEpisodes();
+                    const auto epDisposition = ResearchCollectionDisposition(epBody);
+                    if (epDisposition == Thoth::PanelPresentationState::Error) {
+                        episodeError = true;
+                    } else {
+                        episodeItems = Thoth::ResearchResources::itemsArray(epBody);
+                    }
+                }
+                if (episodeError) {
+                    m_trajectoryViewer->SetPresentationState(
+                        Thoth::PanelPresentationState::Error, "Error loading episodes.");
+                } else {
+                    const bool trajEmpty =
+                        trajDisposition == Thoth::PanelPresentationState::Empty;
+                    const bool epEmpty = !caps.supportsEpisodes || episodeItems.empty();
+                    if (trajEmpty && epEmpty) {
+                        m_trajectoryViewer->SetPresentationState(
+                            Thoth::PanelPresentationState::Empty);
+                    } else {
+                        m_trajectoryViewer->UpdateTrajectories(
+                            Thoth::ResearchResources::itemsArray(trajBody), episodeItems);
+                    }
+                }
+            }
+        }
     }
     if (m_experimentLab) {
-        m_experimentLab->UpdateExperiments(agent->getExperiments());
+        if (!caps.supportsExperiments) {
+            m_experimentLab->SetPresentationState(
+                Thoth::PanelPresentationState::Unavailable, unavailable);
+        } else {
+            m_experimentLab->UpdateExperiments(agent->getExperiments());
+        }
     }
     if (m_graphPanel) {
-        m_graphPanel->UpdateGraphStats(agent->getGraphStats());
-    }
-    
-    // Refresh logs if available (Safe tail read)
-    FileHandler fileHandler;
-    std::string tracePath = fileHandler.getAgentWorkspacePath("decision_trace.jsonl");
-    if (m_logText && std::filesystem::exists(tracePath)) {
-        try {
-            std::ifstream in(tracePath, std::ios::binary | std::ios::ate);
-            if (in) {
-                std::streamsize fileSize = in.tellg();
-                size_t maxRead = 4096; // Read last 4KB
-                size_t toRead = std::min(static_cast<size_t>(fileSize), maxRead);
-                
-                in.seekg(fileSize - static_cast<std::streamsize>(toRead));
-                std::string content(toRead, '\0');
-                in.read(&content[0], static_cast<std::streamsize>(toRead));
-                
-                size_t start = 0;
-                while (start < content.size() && (static_cast<unsigned char>(content[start]) & 0xC0) == 0x80) {
-                    start++;
-                }
-
-                wxString logContent = wxString::FromUTF8(content.substr(start));
-                m_logText->SetValue(logContent);
-                if (m_logText->GetValue().length() > 10000) {
-                    m_logText->SetValue(m_logText->GetValue().Right(10000));
-                }
-                m_logText->SetInsertionPointEnd();
+        if (!caps.supportsGraphStats) {
+            m_graphPanel->SetPresentationState(
+                Thoth::PanelPresentationState::Unavailable, unavailable);
+        } else {
+            m_graphPanel->SetPresentationState(Thoth::PanelPresentationState::Loading);
+            const nlohmann::json body = agent->getGraphStats();
+            const auto disposition = GraphStatisticsDisposition(body);
+            if (disposition == Thoth::PanelPresentationState::Error) {
+                m_graphPanel->SetPresentationState(
+                    Thoth::PanelPresentationState::Error, "Error loading graph stats.");
+            } else if (disposition == Thoth::PanelPresentationState::Empty) {
+                m_graphPanel->SetPresentationState(Thoth::PanelPresentationState::Empty);
+            } else {
+                m_graphPanel->UpdateGraphStats(Thoth::GraphStatistics::statisticsPayload(body));
             }
-        } catch (...) {
-            m_logText->SetValue("Error reading log file.");
         }
+    }
+
+    RefreshCorpusPanel();
+
+    if (m_logText) {
+        if (!caps.supportsLogs) {
+            // Phase 3: capability-specific why (not bare Unavailable alone).
+            m_logText->SetValue(wxString::FromUTF8(
+                std::string("Unavailable\n\n")
+                + Thoth::CognitiveDiagnostics::kLogsNotExposedWhy));
+        } else {
+            FileHandler fileHandler;
+            std::string tracePath = fileHandler.getAgentWorkspacePath("decision_trace.jsonl");
+            if (std::filesystem::exists(tracePath)) {
+                try {
+                    std::ifstream in(tracePath, std::ios::binary | std::ios::ate);
+                    if (in) {
+                        std::streamsize fileSize = in.tellg();
+                        size_t maxRead = 4096; // Read last 4KB
+                        size_t toRead = std::min(static_cast<size_t>(fileSize), maxRead);
+
+                        in.seekg(fileSize - static_cast<std::streamsize>(toRead));
+                        std::string content(toRead, '\0');
+                        in.read(&content[0], static_cast<std::streamsize>(toRead));
+
+                        size_t start = 0;
+                        while (start < content.size()
+                               && (static_cast<unsigned char>(content[start]) & 0xC0) == 0x80) {
+                            start++;
+                        }
+
+                        wxString logContent = wxString::FromUTF8(content.substr(start));
+                        m_logText->SetValue(logContent);
+                        if (m_logText->GetValue().length() > 10000) {
+                            m_logText->SetValue(m_logText->GetValue().Right(10000));
+                        }
+                        m_logText->SetInsertionPointEnd();
+                    }
+                } catch (...) {
+                    m_logText->SetValue("Error reading log file.");
+                }
+            }
+        }
+    }
+}
+
+void MainFrame::UpdateBackendModeBanner() {
+    if (!GetStatusBar()) {
+        return;
+    }
+    if (!agent) {
+        SetStatusText("Backend: —", 0);
+        return;
+    }
+    SetStatusText(wxString::FromUTF8(agent->backendModeLabel()), 0);
+    RefreshEventStreamIndicators();
+}
+
+void MainFrame::RefreshEventStreamIndicators() {
+    if (!GetStatusBar() || GetStatusBar()->GetFieldsCount() < 2 || !agent) {
+        return;
+    }
+
+    const auto snap = agent->eventStreamSnapshot();
+    ApplyEngineDegradedControls(snap);
+
+    if (!snap.applies) {
+        SetStatusText("", 1);
+        if (m_gragPanel) {
+            m_gragPanel->UpdateLastEventAgeLabel("");
+        }
+        return;
+    }
+
+    wxString secondary;
+    if (Thoth::shouldShowConnectionIndicator(snap)) {
+        secondary = wxString::FromUTF8(Thoth::formatEventsStatusLine(snap.connection));
+    }
+    if (Thoth::shouldShowEngineIndicator(snap)) {
+        if (!secondary.IsEmpty()) {
+            secondary << " · ";
+        }
+        secondary << wxString::FromUTF8(Thoth::formatEngineStatusLine(snap.engine));
+    }
+    SetStatusText(secondary, 1);
+
+    if (m_gragPanel) {
+        m_gragPanel->UpdateLastEventAgeLabel(wxString::FromUTF8(
+            Thoth::formatLastEventAgeLabel(snap.last_event_ms, snap.snapshot_ms)));
+    }
+}
+
+void MainFrame::ApplyEngineDegradedControls(const Thoth::EventStreamSnapshot& snap) {
+    const bool engine_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
+    if (m_sendButton) {
+        m_sendButton->Enable(engine_usable);
+        m_sendButton->SetToolTip(engine_usable
+            ? wxString()
+            : wxString::FromUTF8("Engine is not ready — try again when Engine: Ready"));
+    }
+    if (m_reviseGoalBtn) {
+        m_reviseGoalBtn->Enable(engine_usable);
+    }
+    if (wxMenuBar* bar = GetMenuBar()) {
+        bar->Enable(ID_MENU_AGENT_RUN_GOAL, engine_usable);
+        bar->Enable(ID_MENU_AGENT_PAUSE, engine_usable);
+        bar->Enable(ID_MENU_AGENT_RESUME, engine_usable);
+        bar->Enable(ID_MENU_AGENT_ABORT, engine_usable);
+    }
+    ApplyIngestControls(snap);
+}
+
+void MainFrame::OnConnectionPollTimer(wxTimerEvent& WXUNUSED(evt)) {
+    RefreshEventStreamIndicators();
+    if (!agent || !agent->capabilities().supportsCorpusList || !HasPendingLocalNoteIndexing()) {
+        return;
+    }
+    const std::int64_t now = NowMs();
+    if (now - m_lastCorpusPollForIndexingMs < 5000) {
+        return;
+    }
+    m_lastCorpusPollForIndexingMs = now;
+    RefreshCorpusPanel();
+}
+
+void MainFrame::SetTransientStatus(const wxString& text) {
+    const int field = (GetStatusBar() && GetStatusBar()->GetFieldsCount() > 2) ? 2 : 0;
+    if (GetStatusBar() && GetStatusBar()->GetFieldsCount() > 1) {
+        SetStatusText(text, field);
+    } else {
+        SetStatusText(text);
+    }
+}
+
+void MainFrame::ApplyBenchmarksMenuCapabilities() {
+    wxMenuBar* bar = GetMenuBar();
+    if (!bar) return;
+    const bool enabled = !agent || agent->capabilities().supportsBenchmarks;
+    bar->Enable(ID_MENU_BENCH_RUN_GRAG, enabled);
+    bar->Enable(ID_MENU_BENCH_RETRIEVAL_COMPARISON, enabled);
+    bar->Enable(ID_MENU_BENCH_STRATEGY_LEARNING, enabled);
+    bar->Enable(ID_MENU_BENCH_FULL_SYSTEM, enabled);
+    bar->Enable(ID_MENU_BENCH_EXPORT_COGNITIVE_METRICS, enabled);
+    if (wxMenuItem* status = bar->FindItem(ID_MENU_BENCH_STATUS)) {
+        status->SetItemLabel(enabled
+            ? "Status: Available"
+            : wxString::FromUTF8(Thoth::kBenchmarksAvailableInLocal));
+        status->Enable(false);
     }
 }
 
@@ -1337,7 +2055,7 @@ void MainFrame::OnMenuFileOpenSession(wxCommandEvent& WXUNUSED(evt)) {
 
 void MainFrame::OnMenuFileSaveSession(wxCommandEvent& WXUNUSED(evt)) {
     SaveChatSessions();
-    SetStatusText("Sessions saved.");
+    SetTransientStatus("Sessions saved.");
 }
 
 void MainFrame::OnMenuFileExportSession(wxCommandEvent& WXUNUSED(evt)) {
@@ -1364,27 +2082,31 @@ void MainFrame::OnMenuFileExit(wxCommandEvent& WXUNUSED(evt)) {
 
 void MainFrame::OnMenuAgentRunGoal(wxCommandEvent& WXUNUSED(evt)) {
     wxString goal = wxGetTextFromUser("Enter autonomous goal:", "Run Goal", "", this);
-    if (!goal.IsEmpty()) {
-        m_goalPlanningPending = true;
-        RefreshExecutiveStripActivity();
-        SetStatusText("Planning goal…");
-        if (agent) {
-            agent->executeGoal(goal.ToStdString());
-        }
+    if (goal.IsEmpty()) {
+        return;
+    }
+    if (m_sessionId.empty()) {
+        CreateNewSession("New Chat");
+        ActivateSession(m_sessions.size() - 1);
+    }
+    SetTransientStatus(wxString::FromUTF8(Thoth::kGoalSubmittedChrome));
+    const std::string goalStd = goal.ToStdString();
+    SetSessionGoal(m_sessionId, goalStd);
+    SyncBackendSessionIdentity();
+    if (agent) {
+        agent->executeGoal(goalStd);
     }
 }
 
 void MainFrame::OnMenuAgentPause(wxCommandEvent& WXUNUSED(evt)) {
     if (agent) {
         agent->pause();
-        SetStatusText("Agent execution paused.");
     }
 }
 
 void MainFrame::OnMenuAgentResume(wxCommandEvent& WXUNUSED(evt)) {
     if (agent) {
         agent->resume();
-        SetStatusText("Agent execution resumed.");
     }
 }
 
@@ -1392,7 +2114,6 @@ void MainFrame::OnMenuAgentAbort(wxCommandEvent& WXUNUSED(evt)) {
     const int confirm = wxMessageBox("Abort active goal?", "Confirm Abort", wxYES_NO | wxICON_WARNING, this);
     if (confirm == wxYES && agent) {
         agent->abort();
-        SetStatusText("Agent execution aborted.");
     }
 }
 
@@ -1435,6 +2156,13 @@ void MainFrame::SetupMenuBar() {
     benchMenu->Append(ID_MENU_BENCH_FULL_SYSTEM, "Run &Full System Benchmark");
     benchMenu->AppendSeparator();
     benchMenu->Append(ID_MENU_BENCH_EXPORT_COGNITIVE_METRICS, "Export &Cognitive Metrics...");
+    benchMenu->AppendSeparator();
+    {
+        wxMenuItem* statusItem = benchMenu->Append(
+            ID_MENU_BENCH_STATUS,
+            wxString::FromUTF8(Thoth::kBenchmarksAvailableInLocal));
+        statusItem->Enable(false);
+    }
 
     // View Menu
     wxMenu* viewMenu = new wxMenu();
@@ -1533,6 +2261,9 @@ void MainFrame::OnMenuToolsPromptTemplates(wxCommandEvent& WXUNUSED(evt)) {
 }
 
 void MainFrame::OnMenuBenchRunGrag(wxCommandEvent& WXUNUSED(evt)) {
+    if (agent && !agent->capabilities().supportsBenchmarks) {
+        return;
+    }
     if (m_isBenchmarkRunning) {
         wxMessageBox("A benchmark is already in progress. Concurrent runs are disabled to prevent SQLite database locking.", 
                      "Benchmark Busy", wxOK | wxICON_INFORMATION);
@@ -1696,7 +2427,7 @@ void MainFrame::OnMenuBenchExportCognitiveMetrics(wxCommandEvent& WXUNUSED(evt))
         }
     }
 
-    SetStatusText(wxString::Format("Exported %zu cognitive metric rows.", rows.size()));
+    SetTransientStatus(wxString::Format("Exported %zu cognitive metric rows.", rows.size()));
 }
 
 void MainFrame::OnMenuBenchRetrievalComparison(wxCommandEvent& WXUNUSED(evt)) {
@@ -1708,6 +2439,9 @@ void MainFrame::OnMenuBenchStrategyLearning(wxCommandEvent& WXUNUSED(evt)) {
 }
 
 void MainFrame::OnMenuBenchFullSystem(wxCommandEvent& WXUNUSED(evt)) {
+    if (agent && !agent->capabilities().supportsBenchmarks) {
+        return;
+    }
     if (m_isBenchmarkRunning) {
         wxMessageBox("A benchmark is already in progress.", "Benchmark Busy", wxOK | wxICON_INFORMATION);
         return;
@@ -1823,11 +2557,85 @@ void MainFrame::RefreshGoalBanner() {
 }
 
 void MainFrame::ClearActiveGoal() {
-    if (m_activeSessionIndex >= 0 && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
-        m_sessions[static_cast<size_t>(m_activeSessionIndex)].activeGoal.clear();
-        SaveChatSessions();
+    if (m_sessionId.empty()) {
+        return;
     }
-    RefreshGoalBanner();
+    ClearSessionGoal(m_sessionId);
+}
+
+void MainFrame::ClearSessionGoal(const std::string& sessionId) {
+    if (sessionId.empty()) {
+        return;
+    }
+    auto it = std::find_if(m_sessions.begin(), m_sessions.end(),
+                           [&sessionId](const Thoth::ChatSession& session) {
+                               return session.id == sessionId;
+                           });
+    if (it == m_sessions.end()) {
+        return;
+    }
+    if (it->activeGoal.empty()) {
+        return;
+    }
+    it->activeGoal.clear();
+    SaveChatSessions();
+    if (m_sessionId == sessionId) {
+        RefreshGoalBanner();
+    }
+}
+
+void MainFrame::SyncBackendSessionIdentity() {
+    if (agent && !m_sessionId.empty()) {
+        agent->setSessionId(m_sessionId);
+    }
+}
+
+std::string MainFrame::ResolveGoalEventSessionId(const std::string& eventSessionId) const {
+    if (!eventSessionId.empty()) {
+        return eventSessionId;
+    }
+    return m_sessionId;
+}
+
+void MainFrame::RegisterPendingChatRequest(const std::string& requestId,
+                                           const std::string& sessionId) {
+    if (requestId.empty() || sessionId.empty()) {
+        return;
+    }
+    ++m_inFlightChatBySession[sessionId];
+    UpdateChatSendChrome();
+}
+
+void MainFrame::ClearPendingChatRequest(const std::string& /*requestId*/,
+                                          const std::string& sessionId) {
+    if (sessionId.empty()) {
+        return;
+    }
+    auto it = m_inFlightChatBySession.find(sessionId);
+    if (it == m_inFlightChatBySession.end()) {
+        UpdateChatSendChrome();
+        return;
+    }
+    it->second = std::max(0, it->second - 1);
+    if (it->second == 0) {
+        m_inFlightChatBySession.erase(it);
+    }
+    UpdateChatSendChrome();
+}
+
+void MainFrame::UpdateChatSendChrome() {
+    if (!m_sendButton) {
+        return;
+    }
+    const bool engineConversation =
+        agent && agent->capabilities().supportsConversation;
+    if (!engineConversation || m_sessionId.empty()) {
+        m_sendButton->Enable(true);
+        return;
+    }
+    const auto it = m_inFlightChatBySession.find(m_sessionId);
+    const int inFlight = (it != m_inFlightChatBySession.end()) ? it->second : 0;
+    m_sendButton->Enable(inFlight == 0);
 }
 
 void MainFrame::SetSessionGoal(const std::string& sessionId, const std::string& goal) {
@@ -1836,7 +2644,6 @@ void MainFrame::SetSessionGoal(const std::string& sessionId, const std::string& 
         return session.id == sessionId;
     });
     if (it == m_sessions.end()) {
-        std::cerr << "[MainFrame] SetSessionGoal: Session NOT FOUND!\n";
         return;
     }
 
@@ -1886,21 +2693,227 @@ void MainFrame::RefreshExecutiveStripActivity() {
     }
 }
 
-void MainFrame::UpdateRagSlotLabel(const std::string& path, const std::string& label) {
-    auto update = [&](wxStaticText* slot, const std::string& p) {
-        if (!slot || m_activeSessionIndex < 0) return false;
-        std::filesystem::path fp(p);
-        if (slot->GetLabel().Contains(fp.filename().string())) {
-            slot->SetLabel(fp.filename().string() + " (" + label + ")");
+Thoth::ProgressSource MainFrame::ActiveBackendProgressSource() const {
+    const bool is_remote = agent && agent->isRemote();
+    return Thoth::progressSourceForBackendEvent(is_remote);
+}
+
+void MainFrame::ApplyWorkActivity(const wxString& message, Thoth::ProgressSource source) {
+    if (!m_stateStrip || !Thoth::mayApplyWorkProgress(source)) {
+        return;
+    }
+    m_stateStrip->SetActivityMessage(message);
+}
+
+void MainFrame::ApplyWorkStatus(const wxString& text, Thoth::ProgressSource source) {
+    if (!Thoth::mayApplyWorkProgress(source)) {
+        return;
+    }
+    SetTransientStatus(text);
+}
+
+void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
+                                        const std::string& requestId) {
+    wxTheApp->CallAfter([this, result, requestId]() {
+        if (wxPendingDelete.Member(this) || !wxWindow::FindWindowById(GetId())) {
+            return;
+        }
+
+        const Thoth::EventStreamSnapshot snap =
+            agent ? agent->eventStreamSnapshot() : Thoth::EventStreamSnapshot{};
+        const std::string correlated =
+            Thoth::formatCorrelatedUserMessage(snap, result);
+        const wxString message = wxString::FromUTF8(correlated);
+        const Thoth::OperationUiSeverity severity =
+            Thoth::uiSeverityForFailure(result, snap);
+
+        const bool isChat = result.operation == Thoth::kOpChat && !requestId.empty();
+        std::string targetSessionId;
+        if (isChat) {
+            const auto requestIt = m_requestToSession.find(requestId);
+            if (requestIt == m_requestToSession.end()) {
+                return;
+            }
+            targetSessionId = requestIt->second;
+            m_requestToSession.erase(requestIt);
+            ClearPendingChatRequest(requestId, targetSessionId);
+
+            auto sessionIt = std::find_if(m_sessions.begin(), m_sessions.end(),
+                [&targetSessionId](const Thoth::ChatSession& session) {
+                    return session.id == targetSessionId;
+                });
+            if (sessionIt == m_sessions.end()) {
+                return;
+            }
+
+            const bool engineConversation =
+                agent && agent->capabilities().supportsConversation;
+
+            if (result.success) {
+                if (engineConversation) {
+                    RefreshSessionConversationFromEngine(targetSessionId);
+                } else {
+                    sessionIt->messages.push_back({"assistant", result.response_text, NowMs()});
+                }
+            } else if (severity == Thoth::OperationUiSeverity::Panel && !engineConversation) {
+                sessionIt->messages.push_back({"assistant", correlated, NowMs()});
+            }
+
+            if (result.success || (severity == Thoth::OperationUiSeverity::Panel && !engineConversation)) {
+                sessionIt->updatedAtMs = NowMs();
+                SaveChatSessions();
+            }
+
+            if (m_typingIndicator) {
+                m_typingIndicator->Hide();
+            }
+            if (m_graphPanel) {
+                m_graphPanel->UpdateControllerState("IDLE");
+            }
+            m_auiManager.Update();
+            RefreshChatList();
+
+            if (m_sessionId == targetSessionId) {
+                RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
+                if (m_inputCtrl) {
+                    m_inputCtrl->SetFocus();
+                }
+            }
+            RefreshAllPanels();
+        }
+
+        if (!result.success && isChat && agent && agent->capabilities().supportsConversation
+            && Thoth::engineConversationChatFailureNeedsStatusBar(result, true)) {
+            SetTransientStatus(message);
+        }
+
+        if (severity == Thoth::OperationUiSeverity::Modal) {
+            wxMessageBox(message, wxString::FromUTF8("Operation failed"), wxOK | wxICON_ERROR,
+                         this);
+            if (!result.success && result.operation == Thoth::kOpGoal) {
+                m_goalPlanningPending = false;
+                RefreshExecutiveStripActivity();
+                ClearSessionGoal(m_sessionId);
+            }
+            return;
+        }
+
+        if (!result.success && result.operation == Thoth::kOpGoal) {
+            m_goalPlanningPending = false;
+            RefreshExecutiveStripActivity();
+            ClearSessionGoal(m_sessionId);
+        }
+
+        if (result.success) {
+            SetTransientStatus(message);
+            if (result.operation == Thoth::CorpusCreate::kOperationName) {
+                if (result.ingest_host_path && result.ingest_document_id
+                    && m_activeSessionIndex >= 0
+                    && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+                    RecordLocalNoteIngestAccept(
+                        *result.ingest_host_path,
+                        *result.ingest_document_id,
+                        result.ingest_document_name.value_or(""));
+                }
+                RefreshCorpusPanel();
+            }
+            return;
+        }
+
+        if (severity == Thoth::OperationUiSeverity::StatusBar
+            || (severity == Thoth::OperationUiSeverity::Panel && !isChat)) {
+            SetTransientStatus(message);
+        }
+    });
+}
+
+void MainFrame::RecordLocalNoteIngestAccept(const std::string& host_path,
+                                            const std::string& document_id,
+                                            const std::string& document_name) {
+    if (m_activeSessionIndex < 0
+        || m_activeSessionIndex >= static_cast<int>(m_sessions.size())
+        || host_path.empty() || document_id.empty()) {
+        return;
+    }
+    auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    auto& info = session.localNoteEngine[host_path];
+    info.document_id = document_id;
+    info.document_name = document_name;
+    info.indexing = true;
+    info.chunk_count = -1;
+    info.failed = false;
+    session.updatedAtMs = NowMs();
+    SaveChatSessions();
+    RefreshRagPanel();
+}
+
+void MainFrame::SyncLocalNotesFromCorpus(const nlohmann::json& corpus_body) {
+    if (m_activeSessionIndex < 0
+        || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
+        return;
+    }
+    auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    if (!Thoth::LocalNoteEngineSync::syncSessionFromCorpusList(session, corpus_body)) {
+        return;
+    }
+    session.updatedAtMs = NowMs();
+    SaveChatSessions();
+    RefreshRagPanel();
+}
+
+bool MainFrame::HasPendingLocalNoteIndexing() const {
+    if (m_activeSessionIndex < 0
+        || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
+        return false;
+    }
+    for (const auto& entry :
+         m_sessions[static_cast<std::size_t>(m_activeSessionIndex)].localNoteEngine) {
+        if (entry.second.indexing) {
             return true;
         }
-        return false;
-    };
+    }
+    return false;
+}
 
-    if (update(m_ragFileSlot1, path)) return;
-    if (update(m_ragFileSlot2, path)) return;
-    if (update(m_ragFileSlot3, path)) return;
-    if (update(m_ragFileSlot4, path)) return;
+void MainFrame::ApplyLocalNoteIndexingStarted(const std::string& engine_file_path) {
+    if (m_activeSessionIndex < 0
+        || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
+        return;
+    }
+    auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    const std::string host_path =
+        findSessionRagPathForIndexingEvent(session, engine_file_path);
+    if (host_path.empty()) {
+        return;
+    }
+    auto& info = session.localNoteEngine[host_path];
+    info.indexing = true;
+    info.failed = false;
+    SaveChatSessions();
+    RefreshRagPanel();
+}
+
+void MainFrame::ApplyLocalNoteIndexingCompleted(const std::string& engine_file_path,
+                                                bool success,
+                                                int chunk_count) {
+    if (m_activeSessionIndex < 0
+        || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
+        return;
+    }
+    auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    const std::string host_path =
+        findSessionRagPathForIndexingEvent(session, engine_file_path);
+    if (host_path.empty()) {
+        return;
+    }
+    auto& info = session.localNoteEngine[host_path];
+    info.indexing = false;
+    info.failed = !success;
+    if (success && chunk_count >= 0) {
+        info.chunk_count = chunk_count;
+    }
+    SaveChatSessions();
+    RefreshRagPanel();
 }
 
 void MainFrame::MigrateFilesToSandbox(std::vector<std::string>& paths) {

@@ -57,7 +57,7 @@ Before making any changes:
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
-**Active work:** Remaining Phase 3–4 items (G2 subgoals, **G1d** positive-weight DROP + **G1e** KEEP@−0.05 in production 2026-07-19 — magnitude tuning paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.2, M5 vector benchmarks). **M4 range restore ✅** ([`M4_PROTOCOL.md`](M4_PROTOCOL.md)). **Phase 5 (Self-Building)** is optional future expansion — not scheduled. **E1 ✅**; **E2 Phases A–E ✅ certified** (2026-07-09). **C6.3-03 ✅** sealed; **C6.3-04 ✅** promotion policy; **C6.3-05 ✅** operator guide; **C6.3-06 ✅** regression fixtures. **Containerization Plans A–L ✅** (2026-07-12–16); **Plan M ✅**; **Plan N (N0–N6) ✅**; **Plan N5 ✅** (2026-07-17–18) — see [`completed_improvements_log.md`](completed_improvements_log.md) July 2026 at-a-glance. Next forks: **B1**, **E3**, **G2/M5**. See `cursor_list.md`.
+**Active work:** Remaining Phase 3–4 items (G2 subgoals, **G1e** KEEP@−0.05, **B1** Phase 1 Candidate awaiting freeze — [`B1_PROTOCOL.md`](B1_PROTOCOL.md) v1.1, M5). **M4 range restore ✅**. **E1 ✅**; **E2 Phases A–E ✅**. **GUI client/server:** Phase 0–12A 🔒 ([`GUI_integration.md`](GUI_integration.md)); Phase 1–12A ✅; Phase 12B placeholder. Next forks: **B1** freeze → Phase 2, **E3**, **G2/M5**. See `cursor_list.md`.
 
 ---
 
