@@ -20,7 +20,7 @@ target_include_directories(thoth-core-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/include
     ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
 )
-target_link_libraries(thoth-core-tests PRIVATE basic_agent Threads::Threads)
+target_link_libraries(thoth-core-tests PRIVATE basic_agent alp_migration Threads::Threads)
 add_test(NAME thoth-core-tests COMMAND thoth-core-tests)
 set_tests_properties(thoth-core-tests PROPERTIES
     LABELS "pr;unit"

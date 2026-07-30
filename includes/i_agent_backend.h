@@ -63,7 +63,13 @@ public:
     virtual nlohmann::json listCorpusDocuments() const = 0;
 
     /** Phase 9 — create corpus document from a host Local Note path. */
-    virtual Thoth::OperationResult createCorpusDocument(const std::string& sourceFilePath) = 0;
+    virtual Thoth::OperationResult createCorpusDocument(
+        const std::string& sourceFilePath,
+        const Thoth::CorpusCreateGuiOptions& options = {}) = 0;
+
+    /** ALP-E — dry_run intent for Send picker (POST /v1/rag/documents). */
+    virtual Thoth::OperationResult queryCorpusDocumentIntent(
+        const std::string& sourceFilePath) = 0;
 
     /** Phase 10 — Engine-owned conversation authority. */
     virtual nlohmann::json createConversationSession() = 0;

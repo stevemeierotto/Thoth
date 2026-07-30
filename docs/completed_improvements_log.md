@@ -4,7 +4,24 @@ Last updated: 2026-07-25 (llama.cpp dedicated embed server ✅; GUI Phase 12A �
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
-## July 2026 — completed at a glance (2026-07-01 → 2026-07-18)
+## 2026-07-27 — ALP-G certification harness (Attachment Lifecycle ALP1)
+
+**Status:** 🔶 Automated gates shipped; **full ALP1 certification pending G2b/G3 operator sign-off**
+
+**Delivered:**
+
+- `scripts/alp_g_verify.sh` — `preflight` (forbidden-source guard), `gate` (G0+G2a), optional `engine` (G1)
+- `scripts/alp_egar_lifecycle_verify.sh` — EGAR lifecycle G2a (isolated workspace)
+- `agent_workspace/alp_certification/alp_g_report.json` — certification artifact template
+- `docker/alp.env.example` + `docker/README.md` item **19** (G2b/G3 manual checklist)
+- ALP-G safety review in `docs/ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md`
+- G2a strengthened: registry invariants + ALP-F session A/B retrieval isolation
+
+**Automated minimum:** `./scripts/alp_g_verify.sh gate`
+
+**Full certification requires:** G2b EGAR GUI scenario + G3 reconcile smoke (README item 19) + operator field in report + log update.
+
+---
 
 | Track | What shipped | Status |
 |-------|----------------|--------|

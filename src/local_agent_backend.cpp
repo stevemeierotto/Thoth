@@ -12,6 +12,9 @@
 #include "corpus_documents.h"
 #include "conversation_authority.h"
 #include "corpus_create.h"
+#include "corpus_create_local.h"
+#include "engine_error.h"
+#include "alp_sha256.h"
 #include "research_resources.h"
 #include "graph_statistics.h"
 #include "engine_error.h"
@@ -381,63 +384,69 @@ nlohmann::json LocalAgentBackend::listCorpusDocuments() const {
     }
 }
 
-Thoth::OperationResult LocalAgentBackend::createCorpusDocument(
+Thoth::OperationResult LocalAgentBackend::queryCorpusDocumentIntent(
     const std::string& sourceFilePath) {
     using namespace Thoth;
+    using namespace Thoth::CorpusCreateLocal;
+    try {
+        if (!plugin_) {
+            return makeFailure(kOpQueryDocumentIntent,
+                               "Could not query send intent",
+                               "plugin not initialized");
+        }
+        std::string read_err;
+        const auto payload = readLocalNoteFile(sourceFilePath, read_err);
+        if (!payload) {
+            return makeFailure(kOpQueryDocumentIntent,
+                               "Could not query send intent",
+                               read_err.empty() ? sourceFilePath : read_err);
+        }
+        const auto create_req = makeCreateRequest(
+            *payload, plugin_->getActiveSessionId(), sourceFilePath, {}, true);
+        const nlohmann::json body = plugin_->createCorpusDocument(create_req);
+        return operationResultFromJsonBody(body, sourceFilePath, true);
+    } catch (const Thoth::EngineException& ex) {
+        auto result = operationResultFromEngineException(ex, sourceFilePath);
+        result.operation = kOpQueryDocumentIntent;
+        result.user_message = "Could not query send intent";
+        return result;
+    } catch (const std::exception& ex) {
+        return makeFailure(kOpQueryDocumentIntent,
+                           "Could not query send intent",
+                           ex.what());
+    } catch (...) {
+        return makeFailure(kOpQueryDocumentIntent, "Could not query send intent");
+    }
+}
+
+Thoth::OperationResult LocalAgentBackend::createCorpusDocument(
+    const std::string& sourceFilePath,
+    const Thoth::CorpusCreateGuiOptions& options) {
+    using namespace Thoth;
+    using namespace Thoth::CorpusCreateLocal;
     try {
         if (!plugin_) {
             return makeFailure(CorpusCreate::kOperationName,
                                "Document could not be sent to Engine",
                                "plugin not initialized");
         }
-        if (sourceFilePath.empty()) {
+        std::string read_err;
+        const auto payload = readLocalNoteFile(sourceFilePath, read_err);
+        if (!payload) {
             return makeFailure(CorpusCreate::kOperationName,
-                               "No Local Note selected",
-                               "empty source path");
+                               read_err == "Local Note file not found"
+                                   ? "Local Note file not found"
+                                   : (read_err == "No Local Note selected"
+                                          ? "No Local Note selected"
+                                          : "Document could not be sent to Engine"),
+                               read_err.empty() ? sourceFilePath : read_err);
         }
-        std::error_code ec;
-        if (!std::filesystem::exists(sourceFilePath, ec)) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Local Note file not found",
-                               sourceFilePath);
-        }
-        std::ifstream in(sourceFilePath, std::ios::binary);
-        if (!in) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Could not read Local Note",
-                               sourceFilePath);
-        }
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        const std::string content = buffer.str();
-        if (content.empty()) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Local Note is empty",
-                               sourceFilePath);
-        }
-        const std::string suggested_name =
-            std::filesystem::path(sourceFilePath).filename().string();
-        const nlohmann::json body = plugin_->createCorpusDocument(
-            suggested_name, content, plugin_->getActiveSessionId());
-        std::string err;
-        if (!CorpusCreate::hasRequiredAcceptedFields(body, err)) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Document acceptance response invalid",
-                               err);
-        }
-        const std::string doc_name = body["document"]["name"].get<std::string>();
-        const std::string doc_id = body["document"]["id"].get<std::string>();
-        auto result = makeSuccess(CorpusCreate::kOperationName,
-                                  "Document accepted: " + doc_name);
-        result.ingest_host_path = sourceFilePath;
-        result.ingest_document_id = doc_id;
-        result.ingest_document_name = doc_name;
-        return result;
+        const auto create_req = makeCreateRequest(
+            *payload, plugin_->getActiveSessionId(), sourceFilePath, options, false);
+        const nlohmann::json body = plugin_->createCorpusDocument(create_req);
+        return operationResultFromJsonBody(body, sourceFilePath, false);
     } catch (const Thoth::EngineException& ex) {
-        return makeFailure(CorpusCreate::kOperationName,
-                           "Document could not be sent to Engine",
-                           ex.error().message,
-                           ex.error().code == Thoth::EngineErrorCode::ENGINE_BUSY);
+        return operationResultFromEngineException(ex, sourceFilePath);
     } catch (const std::exception& ex) {
         logBackendError("createCorpusDocument", ex);
         return makeFailure(CorpusCreate::kOperationName,

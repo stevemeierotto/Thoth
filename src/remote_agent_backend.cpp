@@ -10,6 +10,7 @@
 #include "decision_summary.h"
 #include "conversation_authority.h"
 #include "corpus_create.h"
+#include "corpus_create_local.h"
 #include "corpus_documents.h"
 #include "research_resources.h"
 #include "graph_statistics.h"
@@ -959,106 +960,107 @@ Thoth::BackendCapabilities RemoteAgentBackend::capabilities() const {
     return caps;
 }
 
-Thoth::OperationResult RemoteAgentBackend::createCorpusDocument(
+Thoth::OperationResult RemoteAgentBackend::queryCorpusDocumentIntent(
     const std::string& sourceFilePath) {
+    return postCorpusDocumentRequest(sourceFilePath, {}, true);
+}
+
+Thoth::OperationResult RemoteAgentBackend::createCorpusDocument(
+    const std::string& sourceFilePath,
+    const Thoth::CorpusCreateGuiOptions& options) {
+    return postCorpusDocumentRequest(sourceFilePath, options, false);
+}
+
+Thoth::OperationResult RemoteAgentBackend::postCorpusDocumentRequest(
+    const std::string& sourceFilePath,
+    const Thoth::CorpusCreateGuiOptions& options,
+    bool dry_run) {
     using namespace Thoth;
+    using namespace Thoth::CorpusCreateLocal;
     try {
         std::string ready_err;
         if (!ensureReady(ready_err)) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Document could not be sent to Engine",
+            return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                               dry_run ? "Could not query send intent"
+                                       : "Document could not be sent to Engine",
                                ready_err,
                                true);
         }
         {
             std::lock_guard<std::mutex> lock(ready_mutex_);
             if (!ingest_allowed_) {
-                return makeFailure(CorpusCreate::kOperationName,
-                                   "Document ingest unavailable with the current Engine",
+                return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                                   dry_run ? "Could not query send intent"
+                                           : "Document ingest unavailable with the current Engine",
                                    "ingest capability missing from /ready");
             }
         }
-        if (sourceFilePath.empty()) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "No Local Note selected",
-                               "empty source path");
+        std::string read_err;
+        const auto payload = readLocalNoteFile(sourceFilePath, read_err);
+        if (!payload) {
+            return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                               dry_run ? "Could not query send intent"
+                                       : (read_err == "Local Note file not found"
+                                              ? "Local Note file not found"
+                                              : "Document could not be sent to Engine"),
+                               read_err.empty() ? sourceFilePath : read_err);
         }
-        std::error_code ec;
-        if (!std::filesystem::exists(sourceFilePath, ec)) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Local Note file not found",
-                               sourceFilePath);
-        }
-        std::ifstream in(sourceFilePath, std::ios::binary);
-        if (!in) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Could not read Local Note",
-                               sourceFilePath);
-        }
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        const std::string content = buffer.str();
-        if (content.empty()) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Local Note is empty",
-                               sourceFilePath);
-        }
-        const std::string suggested_name =
-            std::filesystem::path(sourceFilePath).filename().string();
         std::string backend_session_id;
         {
             std::lock_guard<std::mutex> lock(session_mutex_);
             backend_session_id = session_id_;
         }
-        const json req = CorpusCreate::makeCreateDocumentRequestBody(
-            suggested_name, content, backend_session_id);
+        const json req = CorpusCreate::makeCreateDocumentRequestBodyAlp(
+            makeCreateRequest(*payload, backend_session_id, sourceFilePath, options, dry_run));
         const HttpResult http = httpPostJson(CorpusCreate::kHttpPath,
                                              req.dump(),
                                              ThothRemoteHttp::kControlTimeoutSec);
         if (!http.transport_ok) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Document could not be sent to Engine",
+            return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                               dry_run ? "Could not query send intent"
+                                       : "Document could not be sent to Engine",
                                "[RemoteEngine] create transport: " + http.transport_error,
                                true);
         }
         if (http.status < 200 || http.status >= 300) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Document could not be sent to Engine",
-                               formatHttpErrorMessage(http.status, http.body),
-                               http.status >= 500,
-                               http.status);
+            const std::string machine_code = parseHttpErrorMachineCode(http.body);
+            auto result = makeFailure(
+                dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                dry_run ? "Could not query send intent" : "Document could not be sent to Engine",
+                formatHttpErrorMessage(http.status, http.body),
+                http.status >= 500,
+                http.status);
+            result.ingest_host_path = sourceFilePath;
+            if (!machine_code.empty()) {
+                result.ingest_machine_code = machine_code;
+                if (machine_code == "content_conflict") {
+                    result.ingest_content_conflict = true;
+                }
+            }
+            return result;
         }
         json body;
         try {
             body = json::parse(http.body);
         } catch (const std::exception& ex) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Document acceptance response invalid",
+            return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                               dry_run ? "Could not query send intent"
+                                       : "Document acceptance response invalid",
                                ex.what());
         }
-        std::string err;
-        if (!CorpusCreate::hasRequiredAcceptedFields(body, err)) {
-            return makeFailure(CorpusCreate::kOperationName,
-                               "Document acceptance response invalid",
-                               err);
-        }
-        const std::string doc_name = body["document"]["name"].get<std::string>();
-        const std::string doc_id = body["document"]["id"].get<std::string>();
-        auto result = makeSuccess(CorpusCreate::kOperationName,
-                                  "Document accepted: " + doc_name);
-        result.ingest_host_path = sourceFilePath;
-        result.ingest_document_id = doc_id;
-        result.ingest_document_name = doc_name;
-        return result;
+        return operationResultFromJsonBody(body, sourceFilePath, dry_run);
     } catch (const std::exception& ex) {
-        logRemoteError("createCorpusDocument", ex.what());
-        return makeFailure(CorpusCreate::kOperationName,
-                           "Document could not be sent to Engine",
+        logRemoteError(dry_run ? "queryCorpusDocumentIntent" : "createCorpusDocument", ex.what());
+        return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                           dry_run ? "Could not query send intent"
+                                   : "Document could not be sent to Engine",
                            ex.what());
     } catch (...) {
-        logRemoteError("createCorpusDocument", "unknown error");
-        return makeFailure(CorpusCreate::kOperationName,
-                           "Document could not be sent to Engine");
+        logRemoteError(dry_run ? "queryCorpusDocumentIntent" : "createCorpusDocument",
+                       "unknown error");
+        return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
+                           dry_run ? "Could not query send intent"
+                                   : "Document could not be sent to Engine");
     }
 }
 

@@ -79,7 +79,11 @@ public:
     nlohmann::json listCorpusDocuments() const;
 
     /** Phase 9 — initiate create corpus document (acceptance OperationResult). */
-    void createCorpusDocument(const std::string& sourceFilePath);
+    void createCorpusDocument(const std::string& sourceFilePath,
+                              const Thoth::CorpusCreateGuiOptions& options = {});
+
+    /** ALP-E — synchronous dry_run intent query for Send picker / reconcile. */
+    Thoth::OperationResult queryCorpusDocumentIntent(const std::string& sourceFilePath);
 
     /** Phase 10 — Engine conversation authority. */
     nlohmann::json createConversationSession() const;

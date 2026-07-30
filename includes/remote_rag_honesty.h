@@ -57,10 +57,14 @@ inline std::string formatLocalNoteEngineSlotLabel(const std::string& basename,
                                                   const std::string& document_id,
                                                   int chunk_count,
                                                   bool indexing,
-                                                  bool failed) {
+                                                  bool failed,
+                                                  bool use_short_uuid = false) {
     std::string label = basename.empty() ? "document" : basename;
     if (!document_id.empty()) {
-        label += " · id=" + document_id;
+        const std::string id_display =
+            use_short_uuid && document_id.size() > 8 ? document_id.substr(0, 8)
+                                                   : document_id;
+        label += " · id=" + id_display;
     }
     if (indexing) {
         label += " · indexing…";

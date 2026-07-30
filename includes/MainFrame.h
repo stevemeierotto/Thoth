@@ -21,6 +21,8 @@
 #include "FileDropTarget.h"
 #include "ChatSessionDataViewModel.h"
 #include "ChatSessionTypes.h" // Contains ChatMessage and ChatSession structs
+#include "local_note_engine_sync.h"
+#include "json.hpp"
 #include "progress_source.h"
 
 class GragDiagnosticsPanel;
@@ -152,6 +154,11 @@ private:
 
     std::unique_ptr<AgentInterface> agent;
 
+    /** ALP-E — Engine intent snapshot for active session (non-authoritative). */
+    std::vector<Thoth::LocalNoteEngineSync::LocalNoteIntent> m_localNoteIntents;
+    Thoth::LocalNoteEngineSync::LocalNoteReconcileState m_localNoteReconcileState =
+        Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
+
     static std::int64_t NowMs();
     std::string BuildSessionTitle(const wxString& firstUserMessage) const;
     std::string BuildMemorySummary(const Thoth::ChatSession& session) const;
@@ -164,13 +171,23 @@ private:
     void RefreshCorpusPanel();
     void RefreshSessionConversationFromEngine(const std::string& sessionId);
     void ApplyIngestControls(const Thoth::EventStreamSnapshot& snap);
-    void ApplyLocalNoteIndexingStarted(const std::string& engine_file_path);
-    void ApplyLocalNoteIndexingCompleted(const std::string& engine_file_path,
-                                         bool success,
-                                         int chunk_count);
+    void ApplyLocalNoteIndexingStarted(
+        const Thoth::LocalNoteEngineSync::IndexingEventMetadata& event);
+    void ApplyLocalNoteIndexingCompleted(
+        const Thoth::LocalNoteEngineSync::IndexingEventMetadata& event,
+        bool success,
+        int chunk_count);
     void RecordLocalNoteIngestAccept(const std::string& host_path,
                                      const std::string& document_id,
-                                     const std::string& document_name);
+                                     const std::string& document_name,
+                                     const std::string& revision_id = {},
+                                     const std::string& content_hash = {});
+    void ReconcileLocalNotesEngine(const nlohmann::json& corpus_body);
+    bool UseAlpGuiPicker() const;
+    void SendLocalNoteToEngine(const std::string& host_path, bool force_replace);
+    bool ConfirmForceReplace(const std::string& host_path,
+                             const std::string& reason) const;
+    nlohmann::json LoadLegacyIdMap() const;
     void SyncLocalNotesFromCorpus(const nlohmann::json& corpus_body);
     bool HasPendingLocalNoteIndexing() const;
     void MigrateFilesToSandbox(std::vector<std::string>& paths);

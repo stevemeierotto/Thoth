@@ -55,7 +55,12 @@ public:
 
     nlohmann::json listCorpusDocuments() const override;
 
-    Thoth::OperationResult createCorpusDocument(const std::string& sourceFilePath) override;
+    Thoth::OperationResult createCorpusDocument(
+        const std::string& sourceFilePath,
+        const Thoth::CorpusCreateGuiOptions& options = {}) override;
+
+    Thoth::OperationResult queryCorpusDocumentIntent(
+        const std::string& sourceFilePath) override;
 
     nlohmann::json createConversationSession() override;
     Thoth::OperationResult appendConversationTurn(const std::string& session_id,
@@ -95,6 +100,11 @@ private:
 
     Thoth::OperationResult controlPost(const char* path_suffix, const char* op_name,
                                        const char* operation);
+
+    Thoth::OperationResult postCorpusDocumentRequest(
+        const std::string& sourceFilePath,
+        const Thoth::CorpusCreateGuiOptions& options,
+        bool dry_run);
 
     void startSseIfNeeded();
     void stopSse();

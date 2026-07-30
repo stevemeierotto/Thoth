@@ -42,6 +42,13 @@
 #include "controller_event.h"
 #include "env_loader.h"
 #include "index_manager.h"
+#include "alp_feature_flags.h"
+#include "alp_storage_paths.h"
+#include "document_registry.h"
+#include "alp_migration_analyzer.h"
+#include "alp_migration_apply.h"
+#include "attachment_send_policy.h"
+#include "alp_sha256.h"
 #include "agent_context_retrieval.h"
 #include "llm_interface.h"
 #include "logger.h"
@@ -77,6 +84,7 @@
 #include "remote_rag_honesty.h"
 #include "ChatSessionTypes.h"
 #include "local_note_engine_sync.h"
+#include "corpus_create_local.h"
 #include "backend_capabilities.h"
 #include "panel_presentation_state.h"
 #include "cognitive_diagnostics_authority.h"
@@ -6616,7 +6624,7 @@ static bool testLocalNoteEngineCorpusSync() {
     ChatSession session;
     session.ragFilePaths.push_back("/host/notes.md");
     session.localNoteEngine["/host/notes.md"] = LocalNoteEngineInfo{
-        "doc-abc", "notes_1.md", -1, true, false};
+        "doc-abc", "notes_1.md", {}, {}, -1, true, false, false};
 
     const auto corpus = CorpusDocuments::makeDocument(
         "doc-abc", "notes_1.md", "failed", std::nullopt, std::nullopt, "empty_document");
@@ -6663,11 +6671,11 @@ static bool testLocalNoteSendSelectionFilter() {
     ChatSession session;
     session.ragFilePaths = {"/host/a.md", "/host/b.md", "/host/c.md", "/host/d.md"};
     session.localNoteEngine["/host/b.md"] = LocalNoteEngineInfo{
-        "doc-b", "b.md", 12, false, false};
+        "doc-b", "b.md", {}, {}, 12, false, false, false};
     session.localNoteEngine["/host/c.md"] = LocalNoteEngineInfo{
-        "doc-c", "c.md", -1, true, false};
+        "doc-c", "c.md", {}, {}, -1, true, false, false};
     session.localNoteEngine["/host/d.md"] = LocalNoteEngineInfo{
-        "doc-d", "d.md", -1, false, true};
+        "doc-d", "d.md", {}, {}, -1, false, true, false};
 
     if (localNoteAlreadySent(session, "/host/a.md")) {
         std::cerr << "testLocalNoteSendSelectionFilter: host-only must not count as sent\n";
@@ -16221,7 +16229,1990 @@ static bool testE2EpisodicLearningBenchmarkSmoke() {
     return true;
 }
 
+static bool testAlpFeatureFlagsDefaultOff() {
+    unsetenv("THOTH_ALP_ENABLED");
+    unsetenv("THOTH_ALP_TX_INDEX");
+    unsetenv("THOTH_ALP_GUI");
+    unsetenv("THOTH_ALP_GREENFIELD");
+
+    if (Thoth::AlpFeatureFlags::alpEnabled() ||
+        Thoth::AlpFeatureFlags::transactionalIndexingEnabled() ||
+        Thoth::AlpFeatureFlags::alpGuiEnabled() ||
+        Thoth::AlpFeatureFlags::alpGreenfield()) {
+        std::cerr << "testAlpFeatureFlagsDefaultOff: flags must default off\n";
+        return false;
+    }
+
+    setenv("THOTH_ALP_ENABLED", "1", 1);
+    if (!Thoth::AlpFeatureFlags::alpEnabled()) {
+        std::cerr << "testAlpFeatureFlagsDefaultOff: THOTH_ALP_ENABLED=1 not honored\n";
+        unsetenv("THOTH_ALP_ENABLED");
+        return false;
+    }
+    unsetenv("THOTH_ALP_ENABLED");
+    return true;
+}
+
+static bool testAlpDocumentRegistryEmptyLoadSave() {
+    const fs::path temp =
+        fs::temp_directory_path() / ("thoth_alp_registry_" + std::to_string(getpid()) + ".json");
+
+    Thoth::DocumentRegistry reg;
+    if (!reg.load(temp.string())) {
+        std::cerr << "testAlpDocumentRegistryEmptyLoadSave: load missing file failed\n";
+        return false;
+    }
+    if (!reg.loaded() || reg.body()["documents"].size() != 0) {
+        std::cerr << "testAlpDocumentRegistryEmptyLoadSave: expected empty v1 body\n";
+        return false;
+    }
+    if (!reg.save(temp.string())) {
+        std::cerr << "testAlpDocumentRegistryEmptyLoadSave: save failed\n";
+        return false;
+    }
+
+    Thoth::DocumentRegistry reloaded;
+    if (!reloaded.load(temp.string())) {
+        std::cerr << "testAlpDocumentRegistryEmptyLoadSave: reload failed\n";
+        fs::remove(temp);
+        return false;
+    }
+    if (reloaded.body().value("schema_version", 0) != Thoth::DocumentRegistry::kSchemaVersion) {
+        std::cerr << "testAlpDocumentRegistryEmptyLoadSave: schema_version mismatch\n";
+        fs::remove(temp);
+        return false;
+    }
+
+    fs::remove(temp);
+    return true;
+}
+
+static bool testAlpNamespacesCreatedOnInit() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const fs::path seed = Thoth::AlpStoragePaths::seedCorpusDir();
+    const fs::path attachments = Thoth::AlpStoragePaths::operatorAttachmentsDir();
+    const fs::path revisions = Thoth::AlpStoragePaths::revisionStorageRoot();
+
+    if (!fs::is_directory(seed) || !fs::is_directory(attachments) || !fs::is_directory(revisions)) {
+        std::cerr << "testAlpNamespacesCreatedOnInit: ALP namespace dirs missing after init\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpIndexManagerLoadsEmptyRegistry() {
+    const fs::path reg_path = Thoth::DocumentRegistry::defaultRegistryPath();
+    const fs::path reg_backup = reg_path.string() + ".bak_empty_" + std::to_string(getpid());
+    std::error_code ec;
+    const bool had_registry = fs::exists(reg_path, ec);
+    if (had_registry) {
+        fs::copy(reg_path, reg_backup, fs::copy_options::overwrite_existing, ec);
+    }
+
+    Thoth::DocumentRegistry empty;
+    empty.clear();
+    if (!empty.save(reg_path.string())) {
+        std::cerr << "testAlpIndexManagerLoadsEmptyRegistry: could not seed empty registry\n";
+        return false;
+    }
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const auto& reg = idx.getDocumentRegistry();
+    bool ok = true;
+    if (!reg.loaded()) {
+        std::cerr << "testAlpIndexManagerLoadsEmptyRegistry: registry not loaded\n";
+        ok = false;
+    }
+    const auto& body = reg.body();
+    if (!body.contains("documents") || !body["documents"].is_array() ||
+        body["documents"].size() != 0) {
+        std::cerr << "testAlpIndexManagerLoadsEmptyRegistry: expected empty documents array\n";
+        ok = false;
+    }
+
+    if (had_registry) {
+        fs::copy(reg_backup, reg_path, fs::copy_options::overwrite_existing, ec);
+        fs::remove(reg_backup, ec);
+    } else if (fs::exists(reg_path, ec)) {
+        fs::remove(reg_path, ec);
+    }
+
+    return ok;
+}
+
+static bool testAlpTransactionalIndexPreservesOnEmptyReindex() {
+    setenv("THOTH_ALP_TX_INDEX", "1", 1);
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "alp_tx_preserve";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "alp_tx_preserve.md";
+
+    std::string normalized = doc.string();
+    try {
+        normalized = fs::absolute(doc).lexically_normal().string();
+    } catch (...) {
+    }
+
+    auto countForFile = [&](const IndexManager& im) {
+        int n = 0;
+        for (const auto& c : im.getChunks()) {
+            if (c.fileName == normalized) {
+                ++n;
+            }
+        }
+        return n;
+    };
+
+    {
+        std::ofstream out(doc);
+        out << "# ALP transactional preserve\n\n"
+            << "This document has enough substantive text to index successfully under ALP-B.\n"
+            << "It must survive a failed reindex attempt without losing committed chunks.\n";
+    }
+
+    idx.indexFile(doc.string());
+    const int before = countForFile(idx);
+    if (before < 1) {
+        std::cerr << "testAlpTransactionalIndexPreservesOnEmptyReindex: initial index empty\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    {
+        std::ofstream out(doc, std::ios::trunc);
+        out << "   \n\t";
+    }
+
+    idx.indexFile(doc.string());
+    const int after = countForFile(idx);
+    if (after != before) {
+        std::cerr << "testAlpTransactionalIndexPreservesOnEmptyReindex: chunk count changed "
+                  << before << " -> " << after << "\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    unsetenv("THOTH_ALP_TX_INDEX");
+    fs::remove(doc);
+    return true;
+}
+
+static bool testAlpValidateFailurePreservesPriorChunks() {
+    setenv("THOTH_ALP_TX_INDEX", "1", 1);
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "alp_validate_fail";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "alp_validate_fail.md";
+
+    std::string normalized = doc.string();
+    try {
+        normalized = fs::absolute(doc).lexically_normal().string();
+    } catch (...) {
+    }
+
+    auto countForFile = [&](const IndexManager& im) {
+        int n = 0;
+        for (const auto& c : im.getChunks()) {
+            if (c.fileName == normalized) {
+                ++n;
+            }
+        }
+        return n;
+    };
+
+    {
+        std::ofstream out(doc);
+        out << "# Valid initial index\n\n";
+        for (int i = 0; i < 15; ++i) {
+            out << "Initial paragraph " << i
+                << " with enough text to produce multiple committed chunks.\n\n";
+        }
+    }
+
+    idx.indexFile(doc.string());
+    const int before = countForFile(idx);
+    if (before < 2) {
+        std::cerr << "testAlpValidateFailurePreservesPriorChunks: need multi-chunk baseline\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    {
+        std::ofstream out(doc, std::ios::trunc);
+        for (int i = 0; i < 25; ++i) {
+            out << "Replacement paragraph " << i
+                << " with sufficient length for embed attempts on reindex.\n\n";
+        }
+    }
+
+    // Fail all embed attempts after the first → embed_ok/embed_attempts < 95%.
+    setenv("THOTH_ALP_TEST_EMBED_FAIL_AFTER", "1", 1);
+    idx.indexFile(doc.string());
+    unsetenv("THOTH_ALP_TEST_EMBED_FAIL_AFTER");
+
+    if (countForFile(idx) != before) {
+        std::cerr << "testAlpValidateFailurePreservesPriorChunks: chunk count changed\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    unsetenv("THOTH_ALP_TX_INDEX");
+    fs::remove(doc);
+    return true;
+}
+
+static bool testAlpEmbedFailurePreservesPriorChunks() {
+    setenv("THOTH_ALP_TX_INDEX", "1", 1);
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "alp_embed_fail";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "alp_embed_fail.md";
+
+    std::string normalized = doc.string();
+    try {
+        normalized = fs::absolute(doc).lexically_normal().string();
+    } catch (...) {
+    }
+
+    auto countForFile = [&](const IndexManager& im) {
+        int n = 0;
+        for (const auto& c : im.getChunks()) {
+            if (c.fileName == normalized) {
+                ++n;
+            }
+        }
+        return n;
+    };
+
+    {
+        std::ofstream out(doc);
+        out << "# Embed failure preserve\n\n";
+        for (int i = 0; i < 20; ++i) {
+            out << "Paragraph " << i
+                << " with enough text to become a valid chunk for indexing.\n\n";
+        }
+    }
+
+    idx.indexFile(doc.string());
+    const int before = countForFile(idx);
+    if (before < 1) {
+        std::cerr << "testAlpEmbedFailurePreservesPriorChunks: initial index empty\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        unsetenv("THOTH_ALP_TEST_EMBED_FAIL_AFTER");
+        fs::remove(doc);
+        return false;
+    }
+
+    {
+        std::ofstream out(doc, std::ios::trunc);
+        for (int i = 0; i < 30; ++i) {
+            out << "Replacement paragraph " << i
+                << " with sufficient length to attempt embedding on reindex.\n\n";
+        }
+    }
+
+    setenv("THOTH_ALP_TEST_EMBED_FAIL_AFTER", "0", 1);
+    idx.indexFile(doc.string());
+    unsetenv("THOTH_ALP_TEST_EMBED_FAIL_AFTER");
+
+    if (countForFile(idx) != before) {
+        std::cerr << "testAlpEmbedFailurePreservesPriorChunks: chunk count changed\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    unsetenv("THOTH_ALP_TX_INDEX");
+    fs::remove(doc);
+    return true;
+}
+
+static bool testAlpPersistFailurePreservesOnDiskCommit() {
+    setenv("THOTH_ALP_TX_INDEX", "1", 1);
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "alp_persist_fail";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "alp_persist_fail.md";
+    const fs::path index_path = rag_dir / "rag_index.bin";
+    if (fs::exists(index_path)) {
+        fs::remove(index_path);
+    }
+
+    std::string normalized = doc.string();
+    try {
+        normalized = fs::absolute(doc).lexically_normal().string();
+    } catch (...) {
+    }
+
+    auto countForFile = [&](const IndexManager& im) {
+        int n = 0;
+        for (const auto& c : im.getChunks()) {
+            if (c.fileName == normalized) {
+                ++n;
+            }
+        }
+        return n;
+    };
+
+    {
+        std::ofstream out(doc);
+        out << "# Persist failure test v1\n\n"
+            << "First revision with enough text to index and persist to disk.\n";
+    }
+
+    {
+        IndexManager idx(engine.get());
+        idx.init(index_path.string());
+        idx.indexFile(doc.string());
+        if (countForFile(idx) < 1) {
+            std::cerr << "testAlpPersistFailurePreservesOnDiskCommit: v1 index empty\n";
+            unsetenv("THOTH_ALP_TX_INDEX");
+            fs::remove(doc);
+            fs::remove(index_path);
+            return false;
+        }
+    }
+
+    const int disk_before = [&]() {
+        IndexManager idx(engine.get());
+        idx.init(index_path.string());
+        return countForFile(idx);
+    }();
+
+    {
+        std::ofstream out(doc, std::ios::trunc);
+        out << "# Persist failure test v2\n\n"
+            << "Replacement content that should commit in memory but not persist.\n"
+            << "Extra paragraph to ensure reindex runs and produces distinct chunks.\n";
+    }
+
+    setenv("THOTH_ALP_FORCE_SAVE_INDEX_FAIL", "1", 1);
+    {
+        IndexManager idx(engine.get());
+        idx.init(index_path.string());
+        idx.indexFile(doc.string());
+    }
+    unsetenv("THOTH_ALP_FORCE_SAVE_INDEX_FAIL");
+
+    const int disk_after = [&]() {
+        IndexManager idx(engine.get());
+        idx.init(index_path.string());
+        return countForFile(idx);
+    }();
+
+    if (disk_after != disk_before) {
+        std::cerr << "testAlpPersistFailurePreservesOnDiskCommit: disk count changed "
+                  << disk_before << " -> " << disk_after << "\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        fs::remove(index_path);
+        return false;
+    }
+
+    unsetenv("THOTH_ALP_TX_INDEX");
+    fs::remove(doc);
+    fs::remove(index_path);
+    return true;
+}
+
+static bool testAlpRegistryRevisionLifecycle() {
+    const fs::path temp =
+        fs::temp_directory_path()
+        / ("thoth_alp_registry_rev_" + std::to_string(getpid()) + ".json");
+
+    Thoth::DocumentRegistry reg;
+    reg.load(temp.string());
+    if (!reg.beginRevision("doc-1", "rev-a", "/tmp/a.md")) {
+        std::cerr << "testAlpRegistryRevisionLifecycle: begin rev-a failed\n";
+        return false;
+    }
+    if (!reg.markRevisionCommitted("doc-1", "rev-a", 5)) {
+        std::cerr << "testAlpRegistryRevisionLifecycle: commit rev-a failed\n";
+        fs::remove(temp);
+        return false;
+    }
+    if (!reg.beginRevision("doc-1", "rev-b", "/tmp/b.md")) {
+        std::cerr << "testAlpRegistryRevisionLifecycle: begin rev-b failed\n";
+        fs::remove(temp);
+        return false;
+    }
+    if (!reg.markRevisionCommitted("doc-1", "rev-b", 7)) {
+        std::cerr << "testAlpRegistryRevisionLifecycle: commit rev-b failed\n";
+        fs::remove(temp);
+        return false;
+    }
+    reg.supersedePriorRevisions("doc-1", "rev-b");
+
+    std::string state_a;
+    std::string state_b;
+    for (const auto& row : reg.body()["revisions"]) {
+        if (row.value("revision_id", "") == "rev-a") {
+            state_a = row.value("state", "");
+        }
+        if (row.value("revision_id", "") == "rev-b") {
+            state_b = row.value("state", "");
+        }
+    }
+    if (state_a != "superseded" || state_b != "committed") {
+        std::cerr << "testAlpRegistryRevisionLifecycle: unexpected revision states\n";
+        fs::remove(temp);
+        return false;
+    }
+
+    fs::remove(temp);
+    return true;
+}
+
+static bool testAlpIndexingCompletedMetadata() {
+    setenv("THOTH_ALP_TX_INDEX", "1", 1);
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "alp_event_meta";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "alp_event_meta.md";
+
+    {
+        std::ofstream out(doc);
+        out << "# Event metadata test\n\nContent for ALP indexing completion metadata.\n";
+    }
+
+    ControllerEvent completed;
+    bool got = false;
+    idx.setEventCallback([&](const ControllerEvent& ev) {
+        if (ev.type == EventType::INDEXING_COMPLETED) {
+            completed = ev;
+            got = true;
+        }
+    });
+
+    idx.setAlpIndexContext(
+        IndexManager::AlpIndexContext{"doc-meta-1", "rev-meta-1", "alp_event_meta.md"});
+    idx.indexFile(doc.string());
+    idx.clearAlpIndexContext();
+
+    if (!got) {
+        std::cerr << "testAlpIndexingCompletedMetadata: no INDEXING_COMPLETED\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+    if (completed.metadata.value("document_id", "") != "doc-meta-1"
+        || completed.metadata.value("revision_id", "") != "rev-meta-1") {
+        std::cerr << "testAlpIndexingCompletedMetadata: metadata ids missing\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    unsetenv("THOTH_ALP_TX_INDEX");
+    fs::remove(doc);
+    return true;
+}
+
+static fs::path makeAlpD0FixtureWorkspace() {
+    const fs::path root =
+        fs::temp_directory_path() / ("thoth_alp_d0_" + std::to_string(getpid()));
+    fs::create_directories(root / "rag");
+    return root;
+}
+
+static bool testAlpD0ReportDeterministic() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    const fs::path egar = root / "rag" / "EGAR.md";
+    const fs::path egar1 = root / "rag" / "EGAR_1.md";
+
+    {
+        std::ofstream out(egar);
+        out << "# EGAR winner\n\nPrimary document with enough content for ALP D0 migration analysis.\n";
+    }
+    {
+        std::ofstream out(egar1);
+        out << "# EGAR duplicate stem\n\nSecondary suffix file with different hash content for grouping.\n";
+    }
+
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    const auto r1 = analyzer.runDryRun();
+    const auto r2 = analyzer.runDryRun();
+
+    if (r1["report_hash"] != r2["report_hash"]) {
+        std::cerr << "testAlpD0ReportDeterministic: report_hash mismatch\n";
+        fs::remove_all(root);
+        return false;
+    }
+    if (r1.value("dry_run", false) != true) {
+        std::cerr << "testAlpD0ReportDeterministic: dry_run flag missing\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpD0EgarSuffixGroupWinner() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    const fs::path egar = root / "rag" / "EGAR.md";
+    const fs::path egar1 = root / "rag" / "EGAR_1.md";
+
+    {
+        std::ofstream out(egar);
+        out << "Primary EGAR content with sufficient length for migration candidate validity.\n";
+    }
+    {
+        std::ofstream out(egar1);
+        out << "Secondary EGAR_1 content also valid but should lose if mtime is older.\n";
+    }
+
+    {
+        std::ofstream touch_newer(egar);
+        touch_newer << "Primary EGAR content with sufficient length for migration candidate validity.\n";
+    }
+
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    const auto report = analyzer.runDryRun();
+    bool found = false;
+    for (const auto& group : report["groups"]) {
+        if (group.value("canonical_stem", "") != "EGAR") {
+            continue;
+        }
+        found = true;
+        const std::string winner_path = group["winner"].value("path", "");
+        if (winner_path.find("EGAR_1.md") != std::string::npos) {
+            std::cerr << "testAlpD0EgarSuffixGroupWinner: unexpected winner\n";
+            fs::remove_all(root);
+            return false;
+        }
+        if (group["losers"].size() < 1) {
+            std::cerr << "testAlpD0EgarSuffixGroupWinner: expected a loser row\n";
+            fs::remove_all(root);
+            return false;
+        }
+    }
+    if (!found) {
+        std::cerr << "testAlpD0EgarSuffixGroupWinner: EGAR group missing\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpD0ReadOnlyNoMutation() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    const fs::path egar = root / "rag" / "EGAR.md";
+    {
+        std::ofstream out(egar);
+        out << "Read-only dry-run must not mutate workspace files during analysis.\n";
+    }
+
+    const auto hash_file = [](const fs::path& p) {
+        std::ifstream in(p, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+
+    const std::string before = hash_file(egar);
+    const auto mtime_before = fs::last_write_time(egar);
+
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    (void)analyzer.runDryRun();
+
+    const std::string after = hash_file(egar);
+    if (before != after || fs::last_write_time(egar) != mtime_before) {
+        std::cerr << "testAlpD0ReadOnlyNoMutation: fixture file changed\n";
+        fs::remove_all(root);
+        return false;
+    }
+    if (fs::exists(root / "document_registry.json")) {
+        std::cerr << "testAlpD0ReadOnlyNoMutation: document_registry.json created\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpD0PreviewIdsNotInCanonicalHashVolatility() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    {
+        std::ofstream out(root / "rag" / "note.md");
+        out << "Preview id fields must be stable in report_hash across identical runs.\n";
+    }
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    const auto report = analyzer.runDryRun();
+    const auto canonical = Thoth::AlpMigrationAnalyzer::canonicalPayload(report);
+    if (canonical.contains("generated_at") || canonical.contains("migration_run_id")
+        || canonical.contains("report_hash")) {
+        std::cerr << "testAlpD0PreviewIdsNotInCanonicalHashVolatility: volatile keys in canonical\n";
+        fs::remove_all(root);
+        return false;
+    }
+    if (!report["groups"].size()) {
+        std::cerr << "testAlpD0PreviewIdsNotInCanonicalHashVolatility: no groups\n";
+        fs::remove_all(root);
+        return false;
+    }
+    const auto& winner = report["groups"][0]["winner"];
+    if (winner.value("preview_only", false) != true) {
+        std::cerr << "testAlpD0PreviewIdsNotInCanonicalHashVolatility: preview_only missing\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpD1ApplyEgarSuffixMerge() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    const fs::path egar = root / "rag" / "EGAR.md";
+    const fs::path egar1 = root / "rag" / "EGAR_1.md";
+
+    {
+        std::ofstream out(egar);
+        out << "Primary EGAR content with sufficient length for ALP D1 migration apply.\n";
+    }
+    {
+        std::ofstream out(egar1);
+        out << "Secondary EGAR_1 content also valid but should lose suffix merge.\n";
+    }
+
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    const nlohmann::json report = analyzer.runDryRun();
+    const std::string run_id = "alp-d1-test-egar";
+
+    Thoth::AlpMigrationApply apply_engine(root.string());
+    const auto result = apply_engine.apply(report, run_id, nullptr);
+    if (!result.success) {
+        std::cerr << "testAlpD1ApplyEgarSuffixMerge: apply failed: " << result.error << "\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    const fs::path attachment = root / "rag" / "attachments" / "EGAR.md";
+    if (!fs::exists(attachment)) {
+        std::cerr << "testAlpD1ApplyEgarSuffixMerge: winner not promoted\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    const fs::path archive = root / "rag" / "migration_archive" / run_id / "EGAR_1.md";
+    if (!fs::exists(archive)) {
+        std::cerr << "testAlpD1ApplyEgarSuffixMerge: loser not archived\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    std::ifstream reg_in(root / "document_registry.json");
+    nlohmann::json registry;
+    reg_in >> registry;
+    if (registry["documents"].size() != 1) {
+        std::cerr << "testAlpD1ApplyEgarSuffixMerge: expected one document row\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    if (!fs::exists(root / "legacy_id_map.json")) {
+        std::cerr << "testAlpD1ApplyEgarSuffixMerge: legacy_id_map missing\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpD1AbortsOnReportHashMismatch() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    {
+        std::ofstream out(root / "rag" / "note.md");
+        out << "Initial content for hash mismatch abort test on ALP D1 apply.\n";
+    }
+
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    const nlohmann::json report = analyzer.runDryRun();
+
+    {
+        std::ofstream out(root / "rag" / "note.md", std::ios::app);
+        out << "\nCorpus drift after dry-run approval.\n";
+    }
+
+    Thoth::AlpMigrationApply apply_engine(root.string());
+    const auto result = apply_engine.apply(report, "alp-d1-hash-mismatch", nullptr);
+    if (result.success) {
+        std::cerr << "testAlpD1AbortsOnReportHashMismatch: apply should have failed\n";
+        fs::remove_all(root);
+        return false;
+    }
+    if (result.error.find("drift") == std::string::npos
+        && result.error.find("report_hash") == std::string::npos) {
+        std::cerr << "testAlpD1AbortsOnReportHashMismatch: unexpected error: " << result.error
+                  << "\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpD1AbortsOnUnresolvedAmbiguity() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    const fs::path grag = root / "rag" / "GRAG_benchmark.md";
+    {
+        std::ofstream out(grag);
+        out << "Seed heuristic filename plus registry bind creates ambiguous tier for D1 abort.\n";
+    }
+
+    nlohmann::json reg{{"owners", nlohmann::json::object()}};
+    reg["owners"][fs::absolute(grag).lexically_normal().string()] = "session-ambiguous";
+    {
+        std::ofstream out(root / "rag_attachment_registry.json");
+        out << reg.dump(2);
+    }
+
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    const nlohmann::json report = analyzer.runDryRun();
+
+    bool has_ambiguous_candidate = false;
+    for (const auto& group : report["groups"]) {
+        for (const auto& c : group.value("candidates", nlohmann::json::array())) {
+            if (c.value("tier_classification", "") == "ambiguous") {
+                has_ambiguous_candidate = true;
+                break;
+            }
+        }
+    }
+    if (!has_ambiguous_candidate) {
+        std::cerr << "testAlpD1AbortsOnUnresolvedAmbiguity: fixture missing ambiguous candidate\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    Thoth::AlpMigrationApply apply_engine(root.string());
+    std::string err;
+    if (apply_engine.validateReport(report, nullptr, err)) {
+        std::cerr << "testAlpD1AbortsOnUnresolvedAmbiguity: validate should fail\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpD1RollbackRestoresM0() {
+    const fs::path root = makeAlpD0FixtureWorkspace();
+    const fs::path note = root / "rag" / "note.md";
+    const std::string original = "Rollback test original content for ALP D1 M0 restore path.\n";
+    {
+        std::ofstream out(note);
+        out << original;
+    }
+
+    Thoth::AlpMigrationAnalyzer analyzer(root.string());
+    const nlohmann::json report = analyzer.runDryRun();
+    const std::string run_id = "alp-d1-test-rollback";
+
+    Thoth::AlpMigrationApply apply_engine(root.string());
+    const auto result = apply_engine.apply(report, run_id, nullptr);
+    if (!result.success) {
+        std::cerr << "testAlpD1RollbackRestoresM0: apply failed: " << result.error << "\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    if (!fs::exists(root / "document_registry.json")) {
+        std::cerr << "testAlpD1RollbackRestoresM0: registry should exist post-apply\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    std::string rb_err;
+    if (!apply_engine.rollback(run_id, rb_err)) {
+        std::cerr << "testAlpD1RollbackRestoresM0: rollback failed: " << rb_err << "\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    std::ifstream in(note);
+    const std::string restored((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+    if (restored != original) {
+        std::cerr << "testAlpD1RollbackRestoresM0: note content not restored\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    if (fs::exists(root / "legacy_id_map.json")) {
+        std::cerr << "testAlpD1RollbackRestoresM0: legacy_id_map should be removed\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    Thoth::AlpMigrationAnalyzer analyzer2(root.string());
+    const auto report2 = analyzer2.runDryRun();
+    if (report["report_hash"] != report2["report_hash"]) {
+        std::cerr << "testAlpD1RollbackRestoresM0: report_hash mismatch after rollback\n";
+        fs::remove_all(root);
+        return false;
+    }
+
+    fs::remove_all(root);
+    return true;
+}
+
+static bool testAlpCSendPolicyNoOpOnSameHash() {
+    Thoth::AttachmentSendPolicy::PolicyInput in;
+    in.document_exists = true;
+    in.content_hash = "abc123";
+    Thoth::AttachmentSendPolicy::CommittedRevision committed;
+    committed.content_hash = "abc123";
+    committed.indexed_at_ms = 1000;
+    in.committed = committed;
+    const auto result = Thoth::AttachmentSendPolicy::evaluate(in);
+    if (result.action != Thoth::AttachmentSendPolicy::SendAction::NoOp) {
+        std::cerr << "testAlpCSendPolicyNoOpOnSameHash: expected no_op\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpCSendPolicyConflictOnOldMtime() {
+    Thoth::AttachmentSendPolicy::PolicyInput in;
+    in.document_exists = true;
+    in.content_hash = "new_hash";
+    in.local_source_mtime_sec = 5;
+    Thoth::AttachmentSendPolicy::CommittedRevision committed;
+    committed.content_hash = "old_hash";
+    committed.indexed_at_ms = 10000;
+    in.committed = committed;
+    const auto result = Thoth::AttachmentSendPolicy::evaluate(in);
+    if (result.action != Thoth::AttachmentSendPolicy::SendAction::Conflict) {
+        std::cerr << "testAlpCSendPolicyConflictOnOldMtime: expected conflict\n";
+        return false;
+    }
+    in.force_replace = true;
+    const auto forced = Thoth::AttachmentSendPolicy::evaluate(in);
+    if (forced.action != Thoth::AttachmentSendPolicy::SendAction::NewRevision) {
+        std::cerr << "testAlpCSendPolicyConflictOnOldMtime: force_replace expected new_revision\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpCCreateAlpPathNoSuffix() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    const fs::path reg_path = Thoth::DocumentRegistry::defaultRegistryPath();
+    const fs::path reg_backup =
+        reg_path.string() + ".bak." + std::to_string(getpid());
+    std::error_code ec;
+    const bool had_registry = fs::exists(reg_path, ec);
+    if (had_registry) {
+        fs::copy(reg_path, reg_backup, fs::copy_options::overwrite_existing, ec);
+    }
+
+    auto restore_registry = [&]() {
+        if (had_registry) {
+            fs::copy(reg_backup, reg_path, fs::copy_options::overwrite_existing, ec);
+            fs::remove(reg_backup, ec);
+        } else if (fs::exists(reg_path, ec)) {
+            fs::remove(reg_path, ec);
+        }
+    };
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const std::string slot_name = "alp_c_nosuffix_" + std::to_string(getpid()) + ".md";
+    const fs::path attachment_path = Thoth::AlpStoragePaths::operatorAttachmentPath(slot_name);
+    if (fs::exists(attachment_path)) {
+        fs::remove(attachment_path);
+    }
+    if (fs::exists(attachment_path.string() + "_1.md")) {
+        fs::remove(attachment_path.string() + "_1.md");
+    }
+
+    FileHandler fh;
+    const fs::path rag_dir = fs::path(fh.getRagDirectory());
+
+    IndexManager::CreateCorpusDocumentOptions opts;
+    const std::string content1 =
+        "First ALP-C create content with enough bytes for validation gate.\n";
+    const auto r1 = idx.createCorpusDocument(rag_dir.string(),
+                                             slot_name,
+                                             content1,
+                                             "session-a",
+                                             opts);
+    if (!r1.ok) {
+        std::cerr << "testAlpCCreateAlpPathNoSuffix: first create failed: " << r1.error << "\n";
+        fs::remove(attachment_path);
+        restore_registry();
+        return false;
+    }
+
+    bool committed = false;
+    for (int i = 0; i < 500; ++i) {
+        while (idx.isIndexing()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        Thoth::DocumentRegistry reg;
+        reg.load(Thoth::DocumentRegistry::defaultRegistryPath());
+        if (auto rev = reg.findCommittedRevision(r1.document_id)) {
+            if (rev->chunk_count > 0) {
+                committed = true;
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!committed) {
+        std::cerr << "testAlpCCreateAlpPathNoSuffix: first revision never committed\n";
+        fs::remove(attachment_path);
+        restore_registry();
+        return false;
+    }
+
+    const std::string content2 =
+        "Second ALP-C create with different hash and newer implied content.\n";
+    opts.content_hash = Thoth::sha256Hex(content2);
+    opts.local_source_mtime_sec = 9999999999LL;
+    const auto r2 = idx.createCorpusDocument(rag_dir.string(),
+                                             slot_name,
+                                             content2,
+                                             "session-b",
+                                             opts);
+    if (!r2.ok) {
+        std::cerr << "testAlpCCreateAlpPathNoSuffix: second create failed: " << r2.error << "\n";
+        fs::remove(attachment_path);
+        restore_registry();
+        return false;
+    }
+
+    if (r1.document_id != r2.document_id) {
+        std::cerr << "testAlpCCreateAlpPathNoSuffix: document_id must be reused\n";
+        fs::remove(attachment_path);
+        restore_registry();
+        return false;
+    }
+
+    const fs::path suffix_path =
+        fs::path(Thoth::AlpStoragePaths::operatorAttachmentsDir())
+        / (fs::path(slot_name).stem().string() + "_1" + fs::path(slot_name).extension().string());
+    if (fs::exists(suffix_path)) {
+        std::cerr << "testAlpCCreateAlpPathNoSuffix: suffix file forbidden\n";
+        fs::remove(attachment_path);
+        fs::remove(suffix_path);
+        restore_registry();
+        return false;
+    }
+
+    fs::remove(attachment_path);
+    restore_registry();
+    return true;
+}
+
+static bool testAlpCMisconfiguredRejectsCreate() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_off("THOTH_ALP_TX_INDEX", "0");
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    FileHandler fh;
+    const fs::path rag_dir = fs::path(fh.getRagDirectory());
+    const auto result = idx.createCorpusDocument(rag_dir.string(),
+                                                 "Misconfigured.md",
+                                                 "Content for misconfigured ALP-C gate test.\n",
+                                                 "session-a");
+    if (result.ok || result.machine_code != "alp_misconfigured") {
+        std::cerr << "testAlpCMisconfiguredRejectsCreate: expected alp_misconfigured\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testAlpCRegistryEnsureDocumentUniqueCanonical() {
+    Thoth::DocumentRegistry reg;
+    reg.clear();
+    if (!reg.ensureDocument("doc-a", "EGAR.md", "/tmp/a/EGAR.md")) {
+        std::cerr << "testAlpCRegistryEnsureDocumentUniqueCanonical: ensure doc-a failed\n";
+        return false;
+    }
+    if (reg.ensureDocument("doc-b", "EGAR.md", "/tmp/b/EGAR.md")) {
+        std::cerr << "testAlpCRegistryEnsureDocumentUniqueCanonical: duplicate canonical must fail\n";
+        return false;
+    }
+    return true;
+}
+
+static bool waitAlpCommittedRevision(const std::string& document_id, IndexManager& idx) {
+    for (int i = 0; i < 500; ++i) {
+        while (idx.isIndexing()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        const auto& reg = idx.getDocumentRegistry();
+        if (auto rev = reg.findCommittedRevision(document_id)) {
+            if (rev->chunk_count > 0) {
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
+static bool waitAlpSpecificRevisionCommitted(const std::string& document_id,
+                                             const std::string& revision_id,
+                                             IndexManager& idx) {
+    for (int i = 0; i < 500; ++i) {
+        while (idx.isIndexing()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        const auto& reg = idx.getDocumentRegistry();
+        const nlohmann::json& body = reg.body();
+        if (!body.contains("documents") || !body.contains("revisions")) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        std::string current_rev;
+        for (const auto& doc : body["documents"]) {
+            if (doc.value("document_id", "") == document_id) {
+                current_rev = doc.value("current_revision_id", "");
+                break;
+            }
+        }
+        if (current_rev != revision_id) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        for (const auto& row : body["revisions"]) {
+            if (row.value("document_id", "") != document_id
+                || row.value("revision_id", "") != revision_id) {
+                continue;
+            }
+            if (row.value("state", "") == "committed"
+                && row.value("chunk_count", 0) > 0) {
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
+static bool testAlpFSessionLinkIsolation() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    const fs::path reg_path = Thoth::DocumentRegistry::defaultRegistryPath();
+    const fs::path reg_backup = reg_path.string() + ".bak." + std::to_string(getpid());
+    std::error_code ec;
+    const bool had_registry = fs::exists(reg_path, ec);
+    if (had_registry) {
+        fs::copy(reg_path, reg_backup, fs::copy_options::overwrite_existing, ec);
+    }
+    auto restore_registry = [&]() {
+        if (had_registry) {
+            fs::copy(reg_backup, reg_path, fs::copy_options::overwrite_existing, ec);
+            fs::remove(reg_backup, ec);
+        } else if (fs::exists(reg_path, ec)) {
+            fs::remove(reg_path, ec);
+        }
+    };
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const std::string slot_name = "alp_f_iso_" + std::to_string(getpid()) + ".md";
+    const fs::path attachment_path = Thoth::AlpStoragePaths::operatorAttachmentPath(slot_name);
+    if (fs::exists(attachment_path)) {
+        fs::remove(attachment_path);
+    }
+
+    FileHandler fh;
+    const std::string body =
+        "ALP-F session link isolation secret token ALPFISO unique phrase.\n";
+    const auto created = idx.createCorpusDocument(fh.getRagDirectory(),
+                                                slot_name,
+                                                body,
+                                                "session-alp-f-a");
+    if (!created.ok) {
+        std::cerr << "testAlpFSessionLinkIsolation: create failed: " << created.error << "\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    if (!waitAlpCommittedRevision(created.document_id, idx)) {
+        std::cerr << "testAlpFSessionLinkIsolation: revision never committed\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    idx.classifyAllChunksMetadata();
+
+    Thoth::RetrievalScope scopeA =
+        Thoth::resolveAgentContextRetrievalScope("session-alp-f-a", &idx);
+    const auto hitsA = idx.retrieveChunks("ALPFISO unique phrase", 5, &scopeA);
+    if (hitsA.empty()) {
+        std::cerr << "testAlpFSessionLinkIsolation: session A must retrieve\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    Thoth::RetrievalScope scopeB =
+        Thoth::resolveAgentContextRetrievalScope("session-alp-f-b", &idx);
+    const auto hitsB = idx.retrieveChunks("ALPFISO unique phrase", 5, &scopeB);
+    if (!hitsB.empty()) {
+        std::cerr << "testAlpFSessionLinkIsolation: session B must not retrieve\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    restore_registry();
+    fs::remove(attachment_path);
+    return true;
+}
+
+static bool testAlpFLocalNoteDeleteLinkPersists() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    const fs::path reg_path = Thoth::DocumentRegistry::defaultRegistryPath();
+    const fs::path reg_backup = reg_path.string() + ".bak." + std::to_string(getpid());
+    std::error_code ec;
+    const bool had_registry = fs::exists(reg_path, ec);
+    if (had_registry) {
+        fs::copy(reg_path, reg_backup, fs::copy_options::overwrite_existing, ec);
+    }
+    auto restore_registry = [&]() {
+        if (had_registry) {
+            fs::copy(reg_backup, reg_path, fs::copy_options::overwrite_existing, ec);
+            fs::remove(reg_backup, ec);
+        } else if (fs::exists(reg_path, ec)) {
+            fs::remove(reg_path, ec);
+        }
+    };
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const std::string slot_name = "alp_f_localdel_" + std::to_string(getpid()) + ".md";
+    const fs::path attachment_path = Thoth::AlpStoragePaths::operatorAttachmentPath(slot_name);
+    if (fs::exists(attachment_path)) {
+        fs::remove(attachment_path);
+    }
+
+    FileHandler fh;
+    const std::string body =
+        "ALP-F local note delete persistence token ALPFLOCALDEL unique.\n";
+    const auto created = idx.createCorpusDocument(fh.getRagDirectory(),
+                                                slot_name,
+                                                body,
+                                                "session-alp-f-local-a");
+    if (!created.ok) {
+        std::cerr << "testAlpFLocalNoteDeleteLinkPersists: create failed\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    if (!waitAlpCommittedRevision(created.document_id, idx)) {
+        std::cerr << "testAlpFLocalNoteDeleteLinkPersists: not committed\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    if (!idx.getDocumentRegistry().hasSessionLink(created.document_id, "session-alp-f-local-a")) {
+        std::cerr << "testAlpFLocalNoteDeleteLinkPersists: missing session link\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    // Simulate Local Note delete: GUI slot removed only — Engine link/registry unchanged.
+    if (!idx.getDocumentRegistry().hasSessionLink(created.document_id, "session-alp-f-local-a")) {
+        std::cerr << "testAlpFLocalNoteDeleteLinkPersists: link must persist after GUI delete\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    idx.classifyAllChunksMetadata();
+
+    Thoth::RetrievalScope scopeA =
+        Thoth::resolveAgentContextRetrievalScope("session-alp-f-local-a", &idx);
+    if (idx.retrieveChunks("ALPFLOCALDEL unique", 5, &scopeA).empty()) {
+        std::cerr << "testAlpFLocalNoteDeleteLinkPersists: session A must still retrieve\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    Thoth::RetrievalScope scopeB =
+        Thoth::resolveAgentContextRetrievalScope("session-alp-f-local-b", &idx);
+    if (!idx.retrieveChunks("ALPFLOCALDEL unique", 5, &scopeB).empty()) {
+        std::cerr << "testAlpFLocalNoteDeleteLinkPersists: session B must not retrieve\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    restore_registry();
+    fs::remove(attachment_path);
+    return true;
+}
+
+static bool testAlpFMultiSessionSameDocument() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    const fs::path reg_path = Thoth::DocumentRegistry::defaultRegistryPath();
+    const fs::path reg_backup = reg_path.string() + ".bak." + std::to_string(getpid());
+    std::error_code ec;
+    const bool had_registry = fs::exists(reg_path, ec);
+    if (had_registry) {
+        fs::copy(reg_path, reg_backup, fs::copy_options::overwrite_existing, ec);
+    }
+    auto restore_registry = [&]() {
+        if (had_registry) {
+            fs::copy(reg_backup, reg_path, fs::copy_options::overwrite_existing, ec);
+            fs::remove(reg_backup, ec);
+        } else if (fs::exists(reg_path, ec)) {
+            fs::remove(reg_path, ec);
+        }
+    };
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const std::string slot_name = "alp_f_multi_" + std::to_string(getpid()) + ".md";
+    const fs::path attachment_path = Thoth::AlpStoragePaths::operatorAttachmentPath(slot_name);
+    if (fs::exists(attachment_path)) {
+        fs::remove(attachment_path);
+    }
+
+    FileHandler fh;
+    const std::string body1 =
+        "ALP-F multi session first send token ALPFMULTI first body.\n";
+    const auto first = idx.createCorpusDocument(fh.getRagDirectory(),
+                                                slot_name,
+                                                body1,
+                                                "session-alp-f-multi-a");
+    if (!first.ok) {
+        std::cerr << "testAlpFMultiSessionSameDocument: first create failed\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    if (!waitAlpCommittedRevision(first.document_id, idx)) {
+        std::cerr << "testAlpFMultiSessionSameDocument: first not committed\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    // Same content → link_only for session B (no second in-flight revision).
+    const auto second = idx.createCorpusDocument(fh.getRagDirectory(),
+                                                 slot_name,
+                                                 body1,
+                                                 "session-alp-f-multi-b");
+    if (!second.ok) {
+        std::cerr << "testAlpFMultiSessionSameDocument: link create failed: "
+                  << second.error << "\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    if (second.document_id != first.document_id) {
+        std::cerr << "testAlpFMultiSessionSameDocument: document_id must match\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    if (!idx.getDocumentRegistry().hasSessionLink(first.document_id, "session-alp-f-multi-b")) {
+        std::cerr << "testAlpFMultiSessionSameDocument: session B link missing\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    idx.classifyAllChunksMetadata();
+
+    Thoth::RetrievalScope scopeB =
+        Thoth::resolveAgentContextRetrievalScope("session-alp-f-multi-b", &idx);
+    if (idx.retrieveChunks("ALPFMULTI first body", 5, &scopeB).empty()) {
+        std::cerr << "testAlpFMultiSessionSameDocument: session B must retrieve\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    restore_registry();
+    fs::remove(attachment_path);
+    return true;
+}
+
+static bool testAlpFOrphanAttachmentExcluded() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const std::string orphan_name = "alp_f_orphan_" + std::to_string(getpid()) + ".md";
+    const fs::path orphan_path = Thoth::AlpStoragePaths::operatorAttachmentPath(orphan_name);
+    fs::create_directories(orphan_path.parent_path());
+    {
+        std::ofstream out(orphan_path);
+        out << "Orphan attachment without registry row ALPFORPHAN secret.\n";
+    }
+
+    CodeChunk chunk;
+    chunk.fileName = orphan_path.string();
+    chunk.code = "Orphan attachment without registry row ALPFORPHAN secret.";
+    chunk.embedding = engine->embed(chunk.code);
+    idx.addChunkToIndex(std::move(chunk));
+
+    Thoth::RetrievalScope scope =
+        Thoth::resolveAgentContextRetrievalScope("session-orphan-test", &idx);
+    const auto hits = idx.retrieveChunks("ALPFORPHAN secret", 5, &scope);
+    if (!hits.empty()) {
+        std::cerr << "testAlpFOrphanAttachmentExcluded: orphan must not retrieve\n";
+        fs::remove(orphan_path);
+        return false;
+    }
+
+    fs::remove(orphan_path);
+    return true;
+}
+
+static bool testAlpEPickerExcludesNoOpSameHash() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    std::vector<LocalNoteIntent> intents;
+    intents.push_back(LocalNoteIntent{
+        "/host/a.md", "a.md", "no_op", "hash_matches_committed", "doc-a", "a.md", true});
+    intents.push_back(LocalNoteIntent{
+        "/host/b.md", "b.md", "create", "new_document_slot", "", "b.md", true});
+
+    const auto picker = collectPickerCandidates(intents);
+    if (picker.size() != 1 || picker.front().host_path != "/host/b.md") {
+        std::cerr << "testAlpEPickerExcludesNoOpSameHash: expected only create candidate\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpEPickerIncludesRetryAndConflict() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    std::vector<LocalNoteIntent> intents;
+    intents.push_back(LocalNoteIntent{
+        "/host/r.md", "r.md", "retry", "retry_after_failed_revision", "doc-r", "r.md", true});
+    intents.push_back(LocalNoteIntent{
+        "/host/c.md", "c.md", "conflict", "local_mtime_not_newer", "doc-c", "c.md", true});
+
+    const auto picker = collectPickerCandidates(intents);
+    if (picker.size() != 2) {
+        std::cerr << "testAlpEPickerIncludesRetryAndConflict: expected two candidates\n";
+        return false;
+    }
+    if (actionPickerLabel(picker[0].action) != "Retry indexing"
+        || actionPickerLabel(picker[1].action) != "Replace (confirm)") {
+        std::cerr << "testAlpEPickerIncludesRetryAndConflict: labels wrong\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpERemapSandboxCacheKeys() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    ChatSession session;
+    session.localNoteEngine["/tmp/note.md"] = LocalNoteEngineInfo{
+        "doc-1", "note.md", "rev-1", "hash-a", 3, false, false, true};
+
+    const std::map<std::string, std::string> remaps{
+        {"/tmp/note.md", "agent_workspace/rag/note.md"}};
+    remapEngineCacheKeys(session.localNoteEngine, remaps);
+
+    if (session.localNoteEngine.count("/tmp/note.md") != 0
+        || session.localNoteEngine.count("agent_workspace/rag/note.md") == 0) {
+        std::cerr << "testAlpERemapSandboxCacheKeys: remap failed\n";
+        return false;
+    }
+    const auto& info = session.localNoteEngine.at("agent_workspace/rag/note.md");
+    if (info.document_id != "doc-1" || info.revision_id != "rev-1") {
+        std::cerr << "testAlpERemapSandboxCacheKeys: metadata lost\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpEUpgradeLegacyDocumentIds() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    ChatSession session;
+    session.localNoteEngine["/host/a.md"] = LocalNoteEngineInfo{
+        "legacy-hash-id", "a.md", {}, {}, -1, false, false, false};
+
+    const nlohmann::json legacy_map = {
+        {"legacy-hash-id", "550e8400-e29b-41d4-a716-446655440000"}};
+    if (upgradeLegacyDocumentIds(session, legacy_map) != 1) {
+        std::cerr << "testAlpEUpgradeLegacyDocumentIds: expected one upgrade\n";
+        return false;
+    }
+    if (session.localNoteEngine["/host/a.md"].document_id
+        != "550e8400-e29b-41d4-a716-446655440000") {
+        std::cerr << "testAlpEUpgradeLegacyDocumentIds: uuid not applied\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpELocalNoteDeleteClearsCacheOnly() {
+    using namespace Thoth;
+
+    ChatSession session;
+    session.ragFilePaths = {"/host/note.md"};
+    session.localNoteEngine["/host/note.md"] = LocalNoteEngineInfo{
+        "550e8400-e29b-41d4-a716-446655440000", "note.md", "rev-1", "hash", 4, false, false, true};
+
+    const std::string removed = session.ragFilePaths.front();
+    session.ragFilePaths.erase(session.ragFilePaths.begin());
+    session.localNoteEngine.erase(removed);
+
+    if (!session.ragFilePaths.empty() || !session.localNoteEngine.empty()) {
+        std::cerr << "testAlpELocalNoteDeleteClearsCacheOnly: GUI slot/cache must clear\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpEIntentResponseParsing() {
+    using namespace Thoth;
+    using namespace Thoth::CorpusCreateLocal;
+
+    const auto body = CorpusCreate::makeDryRunResponse(
+        "create", "doc-preview", "note.md", "new_document_slot");
+    const auto result = operationResultFromJsonBody(body, "/host/note.md", true);
+    if (!result.success || result.operation != kOpQueryDocumentIntent) {
+        std::cerr << "testAlpEIntentResponseParsing: dry_run success expected\n";
+        return false;
+    }
+    if (!result.ingest_action || *result.ingest_action != "create") {
+        std::cerr << "testAlpEIntentResponseParsing: action missing\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpEIndexingEventDocumentIdWins() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    ChatSession session;
+    session.ragFilePaths = {"/host/EGAR.md", "/host/EGAR_1.md"};
+    session.localNoteEngine["/host/EGAR.md"] = LocalNoteEngineInfo{
+        "doc-egar", "EGAR.md", "rev-a", {}, -1, false, false, true};
+    session.localNoteEngine["/host/EGAR_1.md"] = LocalNoteEngineInfo{
+        "doc-egar-1", "EGAR_1.md", "rev-b", {}, -1, false, false, true};
+
+    IndexingEventMetadata event;
+    event.file_path = "agent_workspace/rag/attachments/EGAR_1.md";
+    event.document_id = "doc-egar-1";
+
+    const std::string host = findHostPathForIndexingEvent(session, event, true);
+    if (host != "/host/EGAR_1.md") {
+        std::cerr << "testAlpEIndexingEventDocumentIdWins: document_id must win\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpEIndexingEventNoBasenameOnlyAlpGui() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    ChatSession session;
+    session.ragFilePaths = {"/host/EGAR.md", "/host/EGAR_1.md"};
+    session.localNoteEngine["/host/EGAR.md"] = LocalNoteEngineInfo{
+        "doc-egar", "EGAR.md", {}, {}, -1, false, false, true};
+    session.localNoteEngine["/host/EGAR_1.md"] = LocalNoteEngineInfo{
+        "doc-egar-1", "EGAR_1.md", {}, {}, -1, false, false, true};
+
+    IndexingEventMetadata event;
+    event.file_path = "agent_workspace/rag/attachments/EGAR.md";
+
+    const std::string host = findHostPathForIndexingEvent(session, event, true);
+    if (host != "/host/EGAR.md") {
+        std::cerr << "testAlpEIndexingEventNoBasenameOnlyAlpGui: expected path match\n";
+        return false;
+    }
+
+    IndexingEventMetadata ambiguous_event;
+    ambiguous_event.file_path = "agent_workspace/rag/attachments/shared.md";
+    ChatSession ambiguous_session;
+    ambiguous_session.ragFilePaths = {"/host/a/shared.md", "/other/shared.md"};
+    if (!findHostPathForIndexingEvent(ambiguous_session, ambiguous_event, true).empty()) {
+        std::cerr << "testAlpEIndexingEventNoBasenameOnlyAlpGui: ambiguous path must fail\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpECorpusMatchLadderAmbiguousName() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    LocalNoteEngineInfo info;
+    info.document_name = "EGAR.md";
+    info.content_hash = "hash-a";
+
+    const nlohmann::json documents = nlohmann::json::array({
+        nlohmann::json{{"id", "doc-1"}, {"name", "EGAR.md"}},
+        nlohmann::json{{"id", "doc-2"}, {"name", "EGAR.md"}},
+    });
+
+    const CorpusDocMatch match = matchCacheEntryToCorpusDoc(info, documents, {});
+    if (!match.ambiguous || match.doc_index >= 0) {
+        std::cerr << "testAlpECorpusMatchLadderAmbiguousName: name-only must be ambiguous\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpECorpusMatchLegacyMap() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    LocalNoteEngineInfo info;
+    info.document_id = "legacy-hash-id";
+    info.document_name = "note.md";
+
+    const nlohmann::json documents = nlohmann::json::array({
+        nlohmann::json{{"id", "550e8400-e29b-41d4-a716-446655440000"},
+                       {"name", "note.md"},
+                       {"status", "indexed"},
+                       {"chunk_count", 2}},
+    });
+    const nlohmann::json legacy_map = {
+        {"legacy-hash-id", "550e8400-e29b-41d4-a716-446655440000"}};
+
+    const CorpusDocMatch match =
+        matchCacheEntryToCorpusDoc(info, documents, legacy_map);
+    if (match.doc_index != 0 || match.kind != CorpusDocMatchKind::LegacyMap) {
+        std::cerr << "testAlpECorpusMatchLegacyMap: legacy map match expected\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpEReconcileStateMachine() {
+    using namespace Thoth::LocalNoteEngineSync;
+
+    if (reconcileAllowsSend(LocalNoteReconcileState::Ready, true) != true
+        || reconcileAllowsSend(LocalNoteReconcileState::Unknown, true) != false
+        || reconcileAllowsSend(LocalNoteReconcileState::Unverified, true) != false
+        || reconcileAllowsSend(LocalNoteReconcileState::Unknown, false) != true) {
+        std::cerr << "testAlpEReconcileStateMachine: Send gating wrong\n";
+        return false;
+    }
+    return true;
+}
+
+/**
+ * ALP-G / ALP-E operator scenario — the EGAR.md lifecycle that caused weeks of pain.
+ * Simulates GUI + Engine chain in an isolated workspace (not piece tests).
+ */
+static bool testAlpEEgarOperatorLifecycle() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+    ScopedEnvVar alp_gui("THOTH_ALP_GUI", "1");
+    ScopedEnvVar greenfield("THOTH_ALP_GREENFIELD", "1");
+
+    const fs::path workspace = makeTempPath("thoth_alp_egar_lifecycle");
+    fs::remove_all(workspace);
+    fs::create_directories(workspace / "rag");
+    ScopedEnvVar workspaceEnv("THOTH_WORKSPACE_PATH", workspace.string().c_str());
+
+    auto fail = [&](const char* msg) {
+        std::cerr << "testAlpEEgarOperatorLifecycle: " << msg << "\n";
+        fs::remove_all(workspace);
+        return false;
+    };
+
+    FileHandler fh;
+    const fs::path egar_src = fs::path(fh.getProjectRoot()) / "docs" / "EGAR.md";
+    std::ifstream egar_in(egar_src);
+    if (!egar_in) {
+        return fail("docs/EGAR.md not found");
+    }
+    std::ostringstream egar_base;
+    egar_base << egar_in.rdbuf();
+    const std::string base = egar_base.str();
+    if (base.size() < 200) {
+        return fail("docs/EGAR.md too short");
+    }
+
+    const std::string content_v1 =
+        base.substr(0, std::min(base.size(), std::size_t{4096}))
+        + "\n\n<!-- ALP_EGAR_LIFECYCLE_V1 -->\n";
+    const std::string content_v2 =
+        base.substr(0, std::min(base.size(), std::size_t{4096}))
+        + "\n\n<!-- ALP_EGAR_LIFECYCLE_V2 newer operator revision -->\n";
+
+    const fs::path host_path = fs::path(fh.getRagDirectory()) / "EGAR.md";
+    const std::string session_id = "session-egar-lifecycle-" + std::to_string(getpid());
+    constexpr const char* kSlot = "EGAR.md";
+
+    auto write_host = [&](const std::string& content) -> bool {
+        std::ofstream out(host_path);
+        if (!out) {
+            return false;
+        }
+        out << content;
+        return true;
+    };
+    if (!write_host(content_v1)) {
+        return fail("could not write host EGAR.md v1");
+    }
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    ChatSession session;
+    session.id = session_id;
+    session.ragFilePaths = {host_path.string()};
+
+    // --- Step 1–3: Import EGAR.md + Send to Engine ---
+    IndexManager::CreateCorpusDocumentOptions send_opts;
+    send_opts.content_hash = Thoth::sha256Hex(content_v1);
+    send_opts.local_source_mtime_sec = 1'700'000'000LL;
+
+    const auto send1 = idx.createCorpusDocument(
+        fh.getRagDirectory(), kSlot, content_v1, session_id, send_opts);
+    if (!send1.ok || send1.action != "create") {
+        return fail("first send must create");
+    }
+    if (send1.document_id.empty() || send1.revision_id.empty()) {
+        return fail("first send missing document_id/revision_id");
+    }
+    if (!waitAlpCommittedRevision(send1.document_id, idx)) {
+        return fail("first revision never committed");
+    }
+
+    session.localNoteEngine[host_path.string()] = LocalNoteEngineInfo{
+        send1.document_id, kSlot, send1.revision_id, send_opts.content_hash,
+        -1, false, false, true};
+
+    const std::string doc_id = send1.document_id;
+    const std::string rev1 = send1.revision_id;
+
+    // --- Step 4–5: Close GUI + Delete Local Note (GUI-only) ---
+    session.ragFilePaths.clear();
+    session.localNoteEngine.clear();
+
+    if (!idx.getDocumentRegistry().hasSessionLink(doc_id, session_id)) {
+        return fail("session link must survive Local Note delete");
+    }
+
+    // --- Step 6–7: Reopen + Reconcile (no slots → Ready) ---
+    if (!reconcileAllowsSend(LocalNoteReconcileState::Ready, true)) {
+        return fail("reconcileAllowsSend sanity");
+    }
+    if (!session.ragFilePaths.empty()) {
+        return fail("post-delete session must have empty rag slots");
+    }
+
+    // --- Step 8: Import newer EGAR.md ---
+    if (!write_host(content_v2)) {
+        return fail("could not write host EGAR.md v2");
+    }
+    session.ragFilePaths = {host_path.string()};
+
+    // --- Reconcile dry_run for re-imported slot ---
+    IndexManager::CreateCorpusDocumentOptions intent_opts;
+    intent_opts.dry_run = true;
+    intent_opts.content_hash = Thoth::sha256Hex(content_v2);
+    intent_opts.local_source_mtime_sec = 9'999'999'999LL;
+
+    const auto intent = idx.createCorpusDocument(
+        fh.getRagDirectory(), kSlot, content_v2, session_id, intent_opts);
+    if (!intent.ok || intent.action != "new_revision") {
+        std::cerr << "testAlpEEgarOperatorLifecycle: expected new_revision, got "
+                  << intent.action << " err=" << intent.error << "\n";
+        fs::remove_all(workspace);
+        return false;
+    }
+    if (intent.document_id != doc_id) {
+        return fail("dry_run must preserve document UUID");
+    }
+
+    LocalNoteIntent picker_intent;
+    picker_intent.host_path = host_path.string();
+    picker_intent.action = intent.action;
+    picker_intent.query_ok = true;
+    picker_intent.document_id = intent.document_id;
+    if (collectPickerCandidates({picker_intent}).size() != 1) {
+        return fail("picker must offer new_revision after re-import");
+    }
+
+    // --- Step 9: Send again ---
+    IndexManager::CreateCorpusDocumentOptions send2_opts;
+    send2_opts.content_hash = Thoth::sha256Hex(content_v2);
+    send2_opts.local_source_mtime_sec = 9'999'999'999LL;
+
+    const auto send2 = idx.createCorpusDocument(
+        fh.getRagDirectory(), kSlot, content_v2, session_id, send2_opts);
+    if (!send2.ok || send2.action != "new_revision") {
+        return fail("second send must be new_revision");
+    }
+    if (send2.document_id != doc_id) {
+        return fail("second send must reuse document UUID");
+    }
+    if (send2.revision_id.empty() || send2.revision_id == rev1) {
+        return fail("second send must allocate a new revision_id");
+    }
+    if (!waitAlpSpecificRevisionCommitted(doc_id, send2.revision_id, idx)) {
+        return fail("second revision never committed");
+    }
+
+    const DocumentRegistry& reg = idx.getDocumentRegistry();
+    if (reg.findCommittedRevision(doc_id)->revision_id != send2.revision_id) {
+        return fail("current committed revision must be rev2");
+    }
+
+    auto revision_state = [&](const std::string& revision_id) -> std::string {
+        if (!reg.body().contains("revisions") || !reg.body()["revisions"].is_array()) {
+            return {};
+        }
+        for (const auto& row : reg.body()["revisions"]) {
+            if (row.value("document_id", "") == doc_id
+                && row.value("revision_id", "") == revision_id) {
+                return row.value("state", "");
+            }
+        }
+        return {};
+    };
+    if (revision_state(rev1) != "superseded") {
+        return fail("first revision must be superseded");
+    }
+    if (revision_state(send2.revision_id) != "committed") {
+        return fail("second revision must be committed");
+    }
+
+    const fs::path egar_attachment = AlpStoragePaths::operatorAttachmentPath(kSlot);
+    const fs::path egar_suffix = fs::path(AlpStoragePaths::operatorAttachmentsDir())
+        / "EGAR_1.md";
+    if (!fs::exists(egar_attachment)) {
+        return fail("EGAR.md attachment must exist");
+    }
+    if (fs::exists(egar_suffix)) {
+        return fail("EGAR_1.md suffix file forbidden");
+    }
+
+    const nlohmann::json corpus = idx.listCorpusDocuments(fh.getRagDirectory());
+    int egar_inventory_rows = 0;
+    for (const auto& doc : corpus["documents"]) {
+        const std::string name = doc.value("name", "");
+        if (name.find("EGAR_1") != std::string::npos) {
+            return fail("corpus inventory must not list EGAR_1 suffix");
+        }
+        if (name == kSlot) {
+            ++egar_inventory_rows;
+            if (doc.value("id", "") != doc_id) {
+                return fail("corpus row id mismatch");
+            }
+        }
+    }
+    if (egar_inventory_rows != 1) {
+        return fail("corpus must list exactly one EGAR.md row");
+    }
+
+    // --- ALP-G registry invariants (certification checklist) ---
+    const nlohmann::json& reg_body = reg.body();
+    if (!reg_body.contains("documents") || !reg_body["documents"].is_array()
+        || reg_body["documents"].size() != 1) {
+        return fail("document_registry must contain exactly one document row");
+    }
+    if (reg_body["documents"][0].value("canonical_name", "") != kSlot) {
+        return fail("document canonical_name must be EGAR.md");
+    }
+    if (reg_body["documents"][0].value("current_revision_id", "") != send2.revision_id) {
+        return fail("current_revision_id must be rev2");
+    }
+    int revision_count = 0;
+    if (reg_body.contains("revisions") && reg_body["revisions"].is_array()) {
+        for (const auto& row : reg_body["revisions"]) {
+            if (row.value("document_id", "") == doc_id) {
+                ++revision_count;
+            }
+        }
+    }
+    if (revision_count != 2) {
+        return fail("document must have exactly two revisions");
+    }
+    int session_link_count = 0;
+    if (reg_body.contains("session_links") && reg_body["session_links"].is_array()) {
+        for (const auto& link : reg_body["session_links"]) {
+            if (link.value("document_id", "") == doc_id) {
+                ++session_link_count;
+            }
+        }
+    }
+    if (session_link_count < 1) {
+        return fail("session_links must include at least one link for document");
+    }
+
+    // --- ALP-F retrieval: session A yes, session B no (after Local Note delete) ---
+    idx.classifyAllChunksMetadata();
+    const std::string query = "ALP_EGAR_LIFECYCLE_V2 newer operator revision";
+    Thoth::RetrievalScope scope_a =
+        Thoth::resolveAgentContextRetrievalScope(session_id, &idx);
+    if (idx.retrieveChunks(query, 5, &scope_a).empty()) {
+        return fail("session A must retrieve EGAR after Local Note delete");
+    }
+    const std::string session_b = session_id + "-isolated";
+    Thoth::RetrievalScope scope_b =
+        Thoth::resolveAgentContextRetrievalScope(session_b, &idx);
+    if (!idx.retrieveChunks(query, 5, &scope_b).empty()) {
+        return fail("session B must not retrieve EGAR without session link");
+    }
+
+    // Picker after successful send: same hash → no_op → not in picker.
+    const auto noop_intent = idx.createCorpusDocument(
+        fh.getRagDirectory(), kSlot, content_v2, session_id, intent_opts);
+    if (!noop_intent.ok || noop_intent.action != "no_op") {
+        return fail("post-send dry_run must be no_op");
+    }
+    LocalNoteIntent noop_row;
+    noop_row.action = noop_intent.action;
+    noop_row.query_ok = true;
+    if (!collectPickerCandidates({noop_row}).empty()) {
+        return fail("picker must be empty after no_op reconcile");
+    }
+
+    std::cout << "[ALP-E EGAR lifecycle] document_id=" << doc_id
+              << " rev1=" << rev1 << " rev2=" << send2.revision_id
+              << " corpus_rows=" << egar_inventory_rows << "\n";
+
+    fs::remove_all(workspace);
+    return true;
+}
+
+static bool testAlpEDryRunIntentIntegration() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    FileHandler fh;
+    const std::string slot = "alp_e_dryrun_" + std::to_string(getpid()) + ".md";
+    const std::string content =
+        "ALP-E dry run intent integration content with enough bytes.\n";
+    IndexManager::CreateCorpusDocumentOptions opts;
+    opts.dry_run = true;
+    opts.content_hash = Thoth::sha256Hex(content);
+
+    const auto result = idx.createCorpusDocument(
+        fh.getRagDirectory(), slot, content, "session-alp-e", opts);
+    if (!result.ok || result.action != "create") {
+        std::cerr << "testAlpEDryRunIntentIntegration: expected create action, got "
+                  << result.action << " err=" << result.error << "\n";
+        return false;
+    }
+    return true;
+}
+
 int main() {
+    if (const char* egarOnly = std::getenv("THOTH_ALP_EGAR_LIFECYCLE_ONLY")) {
+        if (egarOnly[0] != '0' && std::string(egarOnly) != "false") {
+            if (!testAlpEEgarOperatorLifecycle()) {
+                return 1;
+            }
+            std::cout << "ALP-E EGAR operator lifecycle PASSED.\n";
+            return 0;
+        }
+    }
+
     if (const char* parallelOnly = std::getenv("THOTH_PARALLEL_RETRIEVAL_ONLY")) {
         if (parallelOnly[0] == '1') {
             return testParallelRetrieval() ? 0 : 1;
@@ -16716,6 +18707,46 @@ int main() {
     if (!testR2IndexManagerIndexingHonesty()) failures++;
     if (!testIndexManagerWholeFileFallbackAfterShortParagraphs()) failures++;
     if (!testSessionScopedReplaceOnResend()) failures++;
+    if (!testAlpFeatureFlagsDefaultOff()) failures++;
+    if (!testAlpDocumentRegistryEmptyLoadSave()) failures++;
+    if (!testAlpNamespacesCreatedOnInit()) failures++;
+    if (!testAlpIndexManagerLoadsEmptyRegistry()) failures++;
+    if (!testAlpTransactionalIndexPreservesOnEmptyReindex()) failures++;
+    if (!testAlpValidateFailurePreservesPriorChunks()) failures++;
+    if (!testAlpEmbedFailurePreservesPriorChunks()) failures++;
+    if (!testAlpPersistFailurePreservesOnDiskCommit()) failures++;
+    if (!testAlpRegistryRevisionLifecycle()) failures++;
+    if (!testAlpIndexingCompletedMetadata()) failures++;
+    if (!testAlpD0ReportDeterministic()) failures++;
+    if (!testAlpD0EgarSuffixGroupWinner()) failures++;
+    if (!testAlpD0ReadOnlyNoMutation()) failures++;
+    if (!testAlpD0PreviewIdsNotInCanonicalHashVolatility()) failures++;
+    if (!testAlpD1ApplyEgarSuffixMerge()) failures++;
+    if (!testAlpD1AbortsOnReportHashMismatch()) failures++;
+    if (!testAlpD1AbortsOnUnresolvedAmbiguity()) failures++;
+    if (!testAlpD1RollbackRestoresM0()) failures++;
+    if (!testAlpCSendPolicyNoOpOnSameHash()) failures++;
+    if (!testAlpCSendPolicyConflictOnOldMtime()) failures++;
+    if (!testAlpCCreateAlpPathNoSuffix()) failures++;
+    if (!testAlpCMisconfiguredRejectsCreate()) failures++;
+    if (!testAlpCRegistryEnsureDocumentUniqueCanonical()) failures++;
+    if (!testAlpFSessionLinkIsolation()) failures++;
+    if (!testAlpFLocalNoteDeleteLinkPersists()) failures++;
+    if (!testAlpFMultiSessionSameDocument()) failures++;
+    if (!testAlpFOrphanAttachmentExcluded()) failures++;
+    if (!testAlpEPickerExcludesNoOpSameHash()) failures++;
+    if (!testAlpEPickerIncludesRetryAndConflict()) failures++;
+    if (!testAlpERemapSandboxCacheKeys()) failures++;
+    if (!testAlpEUpgradeLegacyDocumentIds()) failures++;
+    if (!testAlpELocalNoteDeleteClearsCacheOnly()) failures++;
+    if (!testAlpEIntentResponseParsing()) failures++;
+    if (!testAlpEReconcileStateMachine()) failures++;
+    if (!testAlpEIndexingEventDocumentIdWins()) failures++;
+    if (!testAlpEIndexingEventNoBasenameOnlyAlpGui()) failures++;
+    if (!testAlpECorpusMatchLadderAmbiguousName()) failures++;
+    if (!testAlpECorpusMatchLegacyMap()) failures++;
+    if (!testAlpEEgarOperatorLifecycle()) failures++;
+    if (!testAlpEDryRunIntentIntegration()) failures++;
     if (!testSessionReclaimDefaultOwnedOnResend()) failures++;
     if (!testLargeDocumentUsesSizeFallbackNotSingleChunk()) failures++;
     if (!testGuiPhase9CorpusCreate()) failures++;

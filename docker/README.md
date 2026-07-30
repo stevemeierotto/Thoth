@@ -289,6 +289,49 @@ Use this for manual validation when Compose or a host `thoth-engine` is availabl
 17. **Research resources (GUI Phase 11):** with Engine running and `THOTH_ENGINE_URL` set, open Strategies / Trajectories panels — data loads from Engine (`GET /v1/research/*`) or shows **Error** on fetch failure (never silent empty when the API failed). `/ready` includes `strategies`, `trajectories`, `episodes`. Restart GUI and refresh — panels re-fetch from Engine (no authoritative local cache).
 18. **Graph statistics (GUI Phase 12A):** with Engine running and `THOTH_ENGINE_URL` set, open Graph panel — stats load from Engine (`GET /v1/graph/stats`) or show **Error** on fetch failure (never treat failed fetch or `{}` as Empty). Valid zero-node/zero-edge snapshot → **Empty**. `/ready` includes `graph_stats`. Refresh re-fetches from Engine.
 
+19. **ALP-G certification (Attachment Lifecycle — manual G2b/G3):** requires ALP flags on **both** Engine and GUI. Use a **clean workspace** only: greenfield empty volume (`THOTH_ALP_GREENFIELD=1`) or documented post-D1 brownfield — **not** an unknown host `agent_workspace`.
+
+    **Engine (Compose example):** copy `docker/alp.env.example` into `.env` or export before `docker compose up -d`:
+
+    ```bash
+    THOTH_ALP_ENABLED=1 THOTH_ALP_TX_INDEX=1 THOTH_ALP_GREENFIELD=1
+    ```
+
+    **GUI (restart required):**
+
+    ```bash
+    export THOTH_ENGINE_URL=http://127.0.0.1:8090
+    export THOTH_ALP_ENABLED=1 THOTH_ALP_TX_INDEX=1 THOTH_ALP_GUI=1
+    ```
+
+    **Automated minimum (run first):** `./scripts/alp_g_verify.sh gate` — writes `agent_workspace/alp_certification/alp_g_report.json`.
+
+    **G2b — EGAR operator lifecycle (manual):**
+
+    1. Open GUI; create/select session.
+    2. Import `docs/EGAR.md` to Local Notes.
+    3. **Send to Engine** — wait for indexing; note UUID in Engine Corpus.
+    4. Close GUI.
+    5. Reopen; delete Local Note (**X**) — slot empty; Engine row remains.
+    6. Wait for reconcile (Send disabled until complete when Engine down; enabled after verify).
+    7. Import a **newer** `EGAR.md` (edit file or replace content).
+    8. Picker shows **Update available** / `new_revision`; Send again.
+    9. Verify: **one UUID**; new revision; no `EGAR_1.md` in corpus; `rev1` superseded in registry (if inspectable).
+    10. **Retrieval:** Session A chat query finds EGAR content; **new session B** must **not** retrieve EGAR until B sends/links.
+
+    **G3 — ALP-E reconcile smoke:**
+
+    | Step | Expected |
+    |------|----------|
+    | Engine down at startup | Send disabled; stale cache → “cache not verified” |
+    | Engine up + corpus refresh | Reconcile completes; Send enabled for eligible slots |
+    | Picker labels | Send / Update / Retry / Replace from Engine intent |
+    | Decline force-replace | Local file + cache unchanged |
+    | Restart GUI | No phantom Send from stale cache alone |
+    | One bad Local Note file | Partial reconcile; GUI not stuck forever |
+
+    Sign off in `alp_g_report.json` (`ALP_G_OPERATOR=your_initials ./scripts/alp_g_verify.sh gate`) and append `completed_improvements_log.md`.
+
 **Opt-in automated live harness** (skips when unset):
 
 ```bash

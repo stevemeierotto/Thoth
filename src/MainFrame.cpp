@@ -24,6 +24,8 @@
 #include "retrieval_verification_display.h"
 #include "corpus_create.h"
 #include "local_note_engine_sync.h"
+#include "alp_feature_flags.h"
+#include "corpus_create_local.h"
 #include "conversation_authority.h"
 #include "research_resources.h"
 #include "graph_statistics.h"
@@ -69,53 +71,6 @@ void TrimSessionMessagesForPersistence(Thoth::ChatSession& session) {
     const std::size_t dropCount = session.messages.size() - maxHot;
     session.messages.erase(session.messages.begin(),
                            session.messages.begin() + static_cast<std::ptrdiff_t>(dropCount));
-}
-
-/** R1.5 — SSE file_path may be engine-absolute; Local Note slots use basenames. */
-std::string ragEventBasename(const std::string& file_path) {
-    if (file_path.empty()) {
-        return {};
-    }
-    return std::filesystem::path(file_path).filename().string();
-}
-
-std::string findSessionRagPathByBasename(const Thoth::ChatSession& session,
-                                         const std::string& basename) {
-    if (basename.empty()) {
-        return {};
-    }
-    for (const auto& path : session.ragFilePaths) {
-        if (ragEventBasename(path) == basename) {
-            return path;
-        }
-    }
-    return {};
-}
-
-std::string findSessionRagPathForIndexingEvent(const Thoth::ChatSession& session,
-                                               const std::string& engine_file_path) {
-    const std::string event_base = ragEventBasename(engine_file_path);
-    if (const std::string by_host = findSessionRagPathByBasename(session, event_base);
-        !by_host.empty()) {
-        return by_host;
-    }
-    for (const auto& entry : session.localNoteEngine) {
-        if (!entry.second.document_name.empty()
-            && entry.second.document_name == event_base) {
-            return entry.first;
-        }
-    }
-    std::string lone;
-    for (const auto& entry : session.localNoteEngine) {
-        if (!entry.second.indexing) {
-            continue;
-        }
-        if (!lone.empty()) {
-            return {};
-        }
-        lone = entry.first;
-    }
-    return lone;
 }
 
 std::string TrimGoalForDisplay(const std::string& goal) {
@@ -267,9 +222,12 @@ void MainFrame::LoadChatSessions() {
                     Thoth::LocalNoteEngineInfo info;
                     info.document_id = it.value().value("document_id", "");
                     info.document_name = it.value().value("document_name", "");
+                    info.revision_id = it.value().value("revision_id", "");
+                    info.content_hash = it.value().value("content_hash", "");
                     info.chunk_count = it.value().value("chunk_count", -1);
                     info.indexing = it.value().value("indexing", false);
                     info.failed = it.value().value("failed", false);
+                    info.reconcile_verified = it.value().value("reconcile_verified", false);
                     session.localNoteEngine[it.key()] = std::move(info);
                 }
             }
@@ -334,9 +292,12 @@ void MainFrame::SaveChatSessions() {
                 engineJson[entry.first] = {
                     {"document_id", entry.second.document_id},
                     {"document_name", entry.second.document_name},
+                    {"revision_id", entry.second.revision_id},
+                    {"content_hash", entry.second.content_hash},
                     {"chunk_count", entry.second.chunk_count},
                     {"indexing", entry.second.indexing},
                     {"failed", entry.second.failed},
+                    {"reconcile_verified", entry.second.reconcile_verified},
                 };
             }
             sessionJson["local_note_engine"] = std::move(engineJson);
@@ -459,8 +420,9 @@ void MainFrame::RefreshRagTabLayout() {
 void MainFrame::RefreshRagPanel() {
     const bool hostOnlyNotes =
         agent && Thoth::RemoteRagHonesty::localNotesAreHostSideOnly(agent->isRemote());
+    const bool alp_gui = UseAlpGuiPicker();
 
-    auto setSlot = [this, hostOnlyNotes](wxStaticText* slot, wxButton* btn, const std::string& path, int index) {
+    auto setSlot = [this, hostOnlyNotes, alp_gui](wxStaticText* slot, wxButton* btn, const std::string& path, int index) {
         if (!slot || !btn) return;
         if (path.empty()) {
             slot->SetLabel(wxString::Format("Empty Slot %d", index));
@@ -483,13 +445,17 @@ void MainFrame::RefreshRagPanel() {
                 if (engineInfo
                     && (!engineInfo->document_id.empty() || engineInfo->indexing
                         || engineInfo->failed || engineInfo->chunk_count >= 0)) {
-                    slot->SetLabel(wxString::FromUTF8(
-                        Thoth::RemoteRagHonesty::formatLocalNoteEngineSlotLabel(
+                    std::string label = Thoth::RemoteRagHonesty::formatLocalNoteEngineSlotLabel(
                             base,
                             engineInfo->document_id,
                             engineInfo->chunk_count,
                             engineInfo->indexing,
-                            engineInfo->failed)));
+                            engineInfo->failed,
+                            alp_gui);
+                    if (alp_gui && !engineInfo->reconcile_verified && !path.empty()) {
+                        label += " · cache not verified";
+                    }
+                    slot->SetLabel(wxString::FromUTF8(label));
                     slot->SetToolTip(wxString::FromUTF8(
                         Thoth::RemoteRagHonesty::formatLocalNoteEngineTooltip(
                             engineInfo->document_id,
@@ -553,6 +519,9 @@ void MainFrame::RefreshCorpusPanel() {
     std::string err;
     if (!Thoth::CorpusDocuments::hasRequiredV1Fields(body, err)) {
         m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kUnavailableLabel));
+        if (UseAlpGuiPicker()) {
+            ReconcileLocalNotesEngine(Thoth::CorpusDocuments::emptyV1List());
+        }
         return;
     }
 
@@ -560,6 +529,8 @@ void MainFrame::RefreshCorpusPanel() {
         true, Thoth::CorpusDocuments::isEffectivelyEmpty(body));
     if (disposition == Thoth::PanelDataDisposition::Empty) {
         m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kEmptyLabel));
+        SyncLocalNotesFromCorpus(body);
+        ReconcileLocalNotesEngine(body);
         return;
     }
 
@@ -569,6 +540,7 @@ void MainFrame::RefreshCorpusPanel() {
         Thoth::RetrievalVerificationDisplay::kInventoryLayerHint));
 
     wxString inventory;
+    const bool alp_gui = UseAlpGuiPicker();
     for (const auto& doc : body["documents"]) {
         if (!doc.is_object()) {
             continue;
@@ -576,11 +548,14 @@ void MainFrame::RefreshCorpusPanel() {
         wxString line = wxString::FromUTF8(doc.value("name", ""));
         const std::string docId = doc.value("id", "");
         if (!docId.empty()) {
-            line += wxString::FromUTF8(" \u00b7 id=" + docId);
+            const std::string id_display = alp_gui
+                ? Thoth::LocalNoteEngineSync::formatUuidShort(docId)
+                : docId;
+            line += wxString::FromUTF8(" · id=" + id_display);
         }
         const std::string status = doc.value("status", "");
         if (!status.empty()) {
-            line += wxString::FromUTF8(" \u00b7 " + status);
+            line += wxString::FromUTF8(" · " + status);
         }
         if (status == "failed" && doc.contains("reason") && doc["reason"].is_string()) {
             const std::string reason = doc["reason"].get<std::string>();
@@ -602,6 +577,7 @@ void MainFrame::RefreshCorpusPanel() {
     m_corpusText->ChangeValue(inventory);
 
     SyncLocalNotesFromCorpus(body);
+    ReconcileLocalNotesEngine(body);
 
     m_auiManager.Update();
 }
@@ -612,6 +588,7 @@ void MainFrame::ApplyIngestControls(const Thoth::EventStreamSnapshot& snap) {
     }
     const bool engine_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
     const bool canIngest = agent && agent->capabilities().supportsIngest;
+    const bool alp_gui = UseAlpGuiPicker();
 
     bool hasNote = false;
     bool allNotesSent = false;
@@ -619,19 +596,34 @@ void MainFrame::ApplyIngestControls(const Thoth::EventStreamSnapshot& snap) {
         && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
         const auto& session =
             m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
-        const auto unsent =
-            Thoth::LocalNoteEngineSync::collectUnsentLocalNotePaths(session);
-        hasNote = !unsent.empty();
-        allNotesSent = !session.ragFilePaths.empty() && unsent.empty();
+        if (alp_gui) {
+            const auto candidates =
+                Thoth::LocalNoteEngineSync::collectPickerCandidates(m_localNoteIntents);
+            hasNote = !candidates.empty();
+            allNotesSent = !session.ragFilePaths.empty() && candidates.empty()
+                           && Thoth::LocalNoteEngineSync::reconcileAllowsSend(
+                               m_localNoteReconcileState, alp_gui);
+        } else {
+            const auto unsent =
+                Thoth::LocalNoteEngineSync::collectUnsentLocalNotePaths(session);
+            hasNote = !unsent.empty();
+            allNotesSent = !session.ragFilePaths.empty() && unsent.empty();
+        }
     }
+
+    const bool reconcile_ready =
+        Thoth::LocalNoteEngineSync::reconcileAllowsSend(m_localNoteReconcileState, alp_gui);
     m_sendToEngineBtn->Show(canIngest || hasNote);
-    m_sendToEngineBtn->Enable(canIngest && hasNote && engine_usable);
+    m_sendToEngineBtn->Enable(canIngest && hasNote && engine_usable && reconcile_ready);
     if (!canIngest) {
         m_sendToEngineBtn->SetToolTip(
             wxString::FromUTF8("Document ingest unavailable with the current backend"));
     } else if (!engine_usable) {
         m_sendToEngineBtn->SetToolTip(
             wxString::FromUTF8("Engine is not ready — try again when Engine: Ready"));
+    } else if (alp_gui && !reconcile_ready) {
+        m_sendToEngineBtn->SetToolTip(
+            wxString::FromUTF8("Checking send eligibility with Engine…"));
     } else if (!hasNote) {
         m_sendToEngineBtn->SetToolTip(
             wxString::FromUTF8(allNotesSent
@@ -662,11 +654,33 @@ void MainFrame::OnSendToEngine(wxCommandEvent& WXUNUSED(evt)) {
 
     const auto& session =
         m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
-    const std::vector<std::string> unsent =
-        Thoth::LocalNoteEngineSync::collectUnsentLocalNotePaths(session);
-    if (unsent.empty()) {
+    const bool alp_gui = UseAlpGuiPicker();
+
+    std::vector<std::string> picker_paths;
+    std::vector<Thoth::LocalNoteEngineSync::LocalNoteIntent> picker_intents;
+    if (alp_gui) {
+        picker_intents = Thoth::LocalNoteEngineSync::collectPickerCandidates(m_localNoteIntents);
+        picker_paths.reserve(picker_intents.size());
+        for (const auto& intent : picker_intents) {
+            picker_paths.push_back(intent.host_path);
+        }
+    } else {
+        picker_paths = Thoth::LocalNoteEngineSync::collectUnsentLocalNotePaths(session);
+    }
+
+    if (picker_paths.empty()) {
         if (session.ragFilePaths.empty()) {
             SetTransientStatus(wxString::FromUTF8("Add a Local Note first"));
+        } else if (alp_gui
+                   && m_localNoteReconcileState
+                          == Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Unknown) {
+            SetTransientStatus(wxString::FromUTF8(
+                "Send eligibility not verified yet — wait for Engine reconcile"));
+        } else if (alp_gui
+                   && m_localNoteReconcileState
+                          == Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Unverified) {
+            SetTransientStatus(wxString::FromUTF8(
+                "Engine not ready — Send disabled until reconcile succeeds"));
         } else {
             SetTransientStatus(wxString::FromUTF8(
                 "All Local Notes in this session have already been sent to Engine"));
@@ -675,12 +689,23 @@ void MainFrame::OnSendToEngine(wxCommandEvent& WXUNUSED(evt)) {
     }
 
     std::string selected_path;
-    if (unsent.size() == 1) {
-        selected_path = unsent.front();
+    const Thoth::LocalNoteEngineSync::LocalNoteIntent* selected_intent = nullptr;
+    if (picker_paths.size() == 1) {
+        selected_path = picker_paths.front();
+        if (alp_gui && !picker_intents.empty()) {
+            selected_intent = &picker_intents.front();
+        }
     } else {
         wxArrayString choices;
-        for (const auto& path : unsent) {
-            choices.Add(wxString::FromUTF8(std::filesystem::path(path).filename().string()));
+        for (std::size_t i = 0; i < picker_paths.size(); ++i) {
+            wxString line = wxString::FromUTF8(
+                std::filesystem::path(picker_paths[i]).filename().string());
+            if (alp_gui && i < picker_intents.size()) {
+                line += wxString::FromUTF8(
+                    " · " + Thoth::LocalNoteEngineSync::actionPickerLabel(
+                                picker_intents[i].action));
+            }
+            choices.Add(line);
         }
         wxSingleChoiceDialog dialog(this,
                                     wxString::FromUTF8("Choose a Local Note to send:"),
@@ -690,15 +715,35 @@ void MainFrame::OnSendToEngine(wxCommandEvent& WXUNUSED(evt)) {
             return;
         }
         const int index = dialog.GetSelection();
-        if (index < 0 || static_cast<std::size_t>(index) >= unsent.size()) {
+        if (index < 0 || static_cast<std::size_t>(index) >= picker_paths.size()) {
             return;
         }
-        selected_path = unsent[static_cast<std::size_t>(index)];
+        selected_path = picker_paths[static_cast<std::size_t>(index)];
+        if (alp_gui && static_cast<std::size_t>(index) < picker_intents.size()) {
+            selected_intent = &picker_intents[static_cast<std::size_t>(index)];
+        }
     }
 
+    bool force_replace = false;
+    if (alp_gui && selected_intent && selected_intent->action == "conflict") {
+        if (!ConfirmForceReplace(selected_path, selected_intent->reason)) {
+            return;
+        }
+        force_replace = true;
+    }
+
+    SendLocalNoteToEngine(selected_path, force_replace);
+}
+
+void MainFrame::SendLocalNoteToEngine(const std::string& host_path, bool force_replace) {
+    if (!agent || host_path.empty()) {
+        return;
+    }
     agent->setSessionId(m_sessionId);
     SetTransientStatus(wxString::FromUTF8("Sending document to Engine…"));
-    agent->createCorpusDocument(selected_path);
+    Thoth::CorpusCreateGuiOptions options;
+    options.force_replace = force_replace;
+    agent->createCorpusDocument(host_path, options);
 }
 
 void MainFrame::RenderSession(std::size_t sessionIndex) {
@@ -820,6 +865,10 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
     m_activeSessionIndex = static_cast<int>(sessionIndex);
     m_sessionId = m_sessions[sessionIndex].id;
     m_currentChatTitle = wxString::FromUTF8(m_sessions[sessionIndex].title);
+    m_localNoteIntents.clear();
+    m_localNoteReconcileState = UseAlpGuiPicker()
+        ? Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Unknown
+        : Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
 
     if (agent) {
         agent->setSessionId(m_sessionId);
@@ -971,25 +1020,43 @@ MainFrame::MainFrame()
                         if (this->m_planPanel) this->m_planPanel->UpdateStepStatus(stepId, "Failed");
                     }
                 } else if (type == EventType::INDEXING_STARTED) {
-                    std::string path = metadata.value("file_path", "");
+                    Thoth::LocalNoteEngineSync::IndexingEventMetadata indexing_meta;
+                    indexing_meta.file_path = metadata.value("file_path", "");
+                    indexing_meta.document_id = metadata.value("document_id", "");
+                    indexing_meta.revision_id = metadata.value("revision_id", "");
+                    if (metadata.contains("document_name")
+                        && metadata["document_name"].is_string()) {
+                        indexing_meta.document_name =
+                            metadata["document_name"].get<std::string>();
+                    }
                     const auto progressSrc = this->ActiveBackendProgressSource();
                     if (isActiveSession && Thoth::mayApplyIndexingProgress(progressSrc)) {
                         ++m_ragIndexingCount;
                         RefreshExecutiveStripActivity();
                     }
-                    wxFileName fn(wxString::FromUTF8(ragEventBasename(path)));
+                    wxFileName fn(wxString::FromUTF8(
+                        Thoth::LocalNoteEngineSync::ragEventBasename(indexing_meta.file_path)));
                     this->ApplyWorkStatus("Indexing: " + fn.GetFullName(), progressSrc);
                     if (Thoth::mayApplyIndexingProgress(progressSrc)) {
-                        ApplyLocalNoteIndexingStarted(path);
+                        ApplyLocalNoteIndexingStarted(indexing_meta);
                     }
                 } else if (type == EventType::INDEXING_COMPLETED) {
-                    std::string path = metadata.value("file_path", "");
+                    Thoth::LocalNoteEngineSync::IndexingEventMetadata indexing_meta;
+                    indexing_meta.file_path = metadata.value("file_path", "");
+                    indexing_meta.document_id = metadata.value("document_id", "");
+                    indexing_meta.revision_id = metadata.value("revision_id", "");
+                    if (metadata.contains("document_name")
+                        && metadata["document_name"].is_string()) {
+                        indexing_meta.document_name =
+                            metadata["document_name"].get<std::string>();
+                    }
                     const auto progressSrc = this->ActiveBackendProgressSource();
                     if (isActiveSession && Thoth::mayApplyIndexingProgress(progressSrc)) {
                         m_ragIndexingCount = std::max(0, m_ragIndexingCount - 1);
                         RefreshExecutiveStripActivity();
                     }
-                    wxFileName fn(wxString::FromUTF8(ragEventBasename(path)));
+                    wxFileName fn(wxString::FromUTF8(
+                        Thoth::LocalNoteEngineSync::ragEventBasename(indexing_meta.file_path)));
                     if (metadata.contains("success")) {
                         const bool ok = metadata.value("success", false);
                         if (ok) {
@@ -1011,13 +1078,13 @@ MainFrame::MainFrame()
                                 chunk_count = metadata["chunk_count"].get<int>();
                             }
                             ApplyLocalNoteIndexingCompleted(
-                                path, metadata.value("success", false), chunk_count);
+                                indexing_meta, metadata.value("success", false), chunk_count);
                         }
                     } else {
                         this->ApplyWorkStatus(
                             "Indexing finished: " + fn.GetFullName(), progressSrc);
                         if (Thoth::mayApplyIndexingProgress(progressSrc)) {
-                            ApplyLocalNoteIndexingCompleted(path, false, -1);
+                            ApplyLocalNoteIndexingCompleted(indexing_meta, false, -1);
                         }
                     }
                     RefreshRagPanel();
@@ -2810,12 +2877,37 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
                 if (result.ingest_host_path && result.ingest_document_id
                     && m_activeSessionIndex >= 0
                     && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+                    std::string content_hash;
+                    if (m_activeSessionIndex >= 0) {
+                        const auto& session =
+                            m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+                        const auto it =
+                            session.localNoteEngine.find(*result.ingest_host_path);
+                        if (it != session.localNoteEngine.end()) {
+                            content_hash = it->second.content_hash;
+                        }
+                    }
                     RecordLocalNoteIngestAccept(
                         *result.ingest_host_path,
                         *result.ingest_document_id,
-                        result.ingest_document_name.value_or(""));
+                        result.ingest_document_name.value_or(""),
+                        result.ingest_revision_id.value_or(""),
+                        content_hash);
                 }
                 RefreshCorpusPanel();
+            }
+            return;
+        }
+
+        if (result.operation == Thoth::CorpusCreate::kOperationName
+            && result.ingest_content_conflict && result.ingest_host_path
+            && UseAlpGuiPicker()) {
+            if (ConfirmForceReplace(*result.ingest_host_path,
+                                    result.ingest_reason.value_or(
+                                        result.technical_details))) {
+                SendLocalNoteToEngine(*result.ingest_host_path, true);
+            } else {
+                SetTransientStatus(wxString::FromUTF8("Send cancelled — conflict not confirmed"));
             }
             return;
         }
@@ -2829,7 +2921,9 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
 
 void MainFrame::RecordLocalNoteIngestAccept(const std::string& host_path,
                                             const std::string& document_id,
-                                            const std::string& document_name) {
+                                            const std::string& document_name,
+                                            const std::string& revision_id,
+                                            const std::string& content_hash) {
     if (m_activeSessionIndex < 0
         || m_activeSessionIndex >= static_cast<int>(m_sessions.size())
         || host_path.empty() || document_id.empty()) {
@@ -2839,9 +2933,21 @@ void MainFrame::RecordLocalNoteIngestAccept(const std::string& host_path,
     auto& info = session.localNoteEngine[host_path];
     info.document_id = document_id;
     info.document_name = document_name;
+    if (!revision_id.empty()) {
+        info.revision_id = revision_id;
+    }
+    if (!content_hash.empty()) {
+        info.content_hash = content_hash;
+    } else {
+        std::string read_err;
+        if (const auto payload = Thoth::CorpusCreateLocal::readLocalNoteFile(host_path, read_err)) {
+            info.content_hash = payload->content_hash;
+        }
+    }
     info.indexing = true;
     info.chunk_count = -1;
     info.failed = false;
+    info.reconcile_verified = UseAlpGuiPicker();
     session.updatedAtMs = NowMs();
     SaveChatSessions();
     RefreshRagPanel();
@@ -2853,7 +2959,9 @@ void MainFrame::SyncLocalNotesFromCorpus(const nlohmann::json& corpus_body) {
         return;
     }
     auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
-    if (!Thoth::LocalNoteEngineSync::syncSessionFromCorpusList(session, corpus_body)) {
+    const nlohmann::json legacy_map = LoadLegacyIdMap();
+    if (!Thoth::LocalNoteEngineSync::syncSessionFromCorpusList(
+            session, corpus_body, legacy_map)) {
         return;
     }
     session.updatedAtMs = NowMs();
@@ -2875,14 +2983,15 @@ bool MainFrame::HasPendingLocalNoteIndexing() const {
     return false;
 }
 
-void MainFrame::ApplyLocalNoteIndexingStarted(const std::string& engine_file_path) {
+void MainFrame::ApplyLocalNoteIndexingStarted(
+    const Thoth::LocalNoteEngineSync::IndexingEventMetadata& event) {
     if (m_activeSessionIndex < 0
         || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
         return;
     }
     auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
-    const std::string host_path =
-        findSessionRagPathForIndexingEvent(session, engine_file_path);
+    const std::string host_path = Thoth::LocalNoteEngineSync::findHostPathForIndexingEvent(
+        session, event, Thoth::AlpFeatureFlags::alpGuiEnabled());
     if (host_path.empty()) {
         return;
     }
@@ -2893,16 +3002,17 @@ void MainFrame::ApplyLocalNoteIndexingStarted(const std::string& engine_file_pat
     RefreshRagPanel();
 }
 
-void MainFrame::ApplyLocalNoteIndexingCompleted(const std::string& engine_file_path,
-                                                bool success,
-                                                int chunk_count) {
+void MainFrame::ApplyLocalNoteIndexingCompleted(
+    const Thoth::LocalNoteEngineSync::IndexingEventMetadata& event,
+    bool success,
+    int chunk_count) {
     if (m_activeSessionIndex < 0
         || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
         return;
     }
     auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
-    const std::string host_path =
-        findSessionRagPathForIndexingEvent(session, engine_file_path);
+    const std::string host_path = Thoth::LocalNoteEngineSync::findHostPathForIndexingEvent(
+        session, event, Thoth::AlpFeatureFlags::alpGuiEnabled());
     if (host_path.empty()) {
         return;
     }
@@ -2920,9 +3030,11 @@ void MainFrame::MigrateFilesToSandbox(std::vector<std::string>& paths) {
     FileHandler fileHandler;
     const std::filesystem::path destDir = fileHandler.getRagDirectory();
     bool changed = false;
+    std::map<std::string, std::string> remaps;
     for (auto& path : paths) {
         if (path.find("agent_workspace/rag/") == std::string::npos) {
             try {
+                const std::string old_path = path;
                 std::filesystem::path src(path);
                 if (std::filesystem::exists(src)) {
                     if (!std::filesystem::exists(destDir)) {
@@ -2933,14 +3045,162 @@ void MainFrame::MigrateFilesToSandbox(std::vector<std::string>& paths) {
                         std::filesystem::copy_file(src, dest);
                     }
                     path = dest.string();
+                    if (path != old_path) {
+                        remaps[old_path] = path;
+                    }
                     changed = true;
                 }
             } catch (...) {}
         }
     }
+    if (!remaps.empty() && m_activeSessionIndex >= 0
+        && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+        auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+        Thoth::LocalNoteEngineSync::remapEngineCacheKeys(session.localNoteEngine, remaps);
+        changed = true;
+    }
     if (changed) {
         SaveChatSessions();
     }
+}
+
+bool MainFrame::UseAlpGuiPicker() const {
+    return Thoth::AlpFeatureFlags::alpGuiEnabled();
+}
+
+nlohmann::json MainFrame::LoadLegacyIdMap() const {
+    FileHandler fileHandler;
+    const std::string map_path = fileHandler.getAgentWorkspacePath("legacy_id_map.json");
+    std::ifstream in(map_path);
+    if (!in) {
+        return nlohmann::json::object();
+    }
+    try {
+        nlohmann::json map;
+        in >> map;
+        return map.is_object() ? map : nlohmann::json::object();
+    } catch (...) {
+        return nlohmann::json::object();
+    }
+}
+
+bool MainFrame::ConfirmForceReplace(const std::string& host_path,
+                                    const std::string& reason) const {
+    wxFileName fn(wxString::FromUTF8(host_path));
+    wxString message = wxString::FromUTF8(
+        "Local file may be older than the committed Engine revision for "
+        + fn.GetFullName().ToStdString()
+        + ".\n\nForce replace will create a new revision if you confirm.");
+    if (!reason.empty()) {
+        message += wxString::FromUTF8("\n\nEngine: " + reason);
+    }
+    return wxMessageBox(message,
+                        wxString::FromUTF8("Confirm force replace"),
+                        wxYES_NO | wxICON_WARNING,
+                        const_cast<MainFrame*>(this)) == wxYES;
+}
+
+void MainFrame::ReconcileLocalNotesEngine(const nlohmann::json& corpus_body) {
+    m_localNoteIntents.clear();
+    if (!UseAlpGuiPicker() || !agent || !agent->capabilities().supportsIngest) {
+        m_localNoteReconcileState =
+            Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
+        ApplyIngestControls(agent ? agent->eventStreamSnapshot()
+                                  : Thoth::localEventStreamSnapshot(NowMs()));
+        return;
+    }
+
+    const auto snap = agent->eventStreamSnapshot();
+    const bool engine_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
+    if (!engine_usable) {
+        m_localNoteReconcileState =
+            Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Unverified;
+        ApplyIngestControls(snap);
+        return;
+    }
+
+    if (m_activeSessionIndex < 0
+        || m_activeSessionIndex >= static_cast<int>(m_sessions.size())) {
+        m_localNoteReconcileState =
+            Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
+        ApplyIngestControls(snap);
+        return;
+    }
+
+    auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    const nlohmann::json legacy_map = LoadLegacyIdMap();
+    if (!legacy_map.empty()) {
+        if (Thoth::LocalNoteEngineSync::upgradeLegacyDocumentIds(session, legacy_map) > 0) {
+            session.updatedAtMs = NowMs();
+            SaveChatSessions();
+        }
+    }
+
+    const std::int64_t reconcile_started_ms = NowMs();
+    for (const auto& host_path : session.ragFilePaths) {
+        if (NowMs() - reconcile_started_ms
+            > Thoth::LocalNoteEngineSync::kReconcileTotalBudgetMs) {
+            Thoth::LocalNoteEngineSync::LocalNoteIntent intent;
+            intent.host_path = host_path;
+            intent.canonical_name = std::filesystem::path(host_path).filename().string();
+            intent.query_ok = false;
+            intent.reason = "reconcile total timeout";
+            m_localNoteIntents.push_back(std::move(intent));
+            continue;
+        }
+
+        Thoth::LocalNoteEngineSync::LocalNoteIntent intent;
+        intent.host_path = host_path;
+        intent.canonical_name = std::filesystem::path(host_path).filename().string();
+
+        std::string read_err;
+        const auto payload =
+            Thoth::CorpusCreateLocal::readLocalNoteFile(host_path, read_err);
+        if (!payload) {
+            intent.query_ok = false;
+            intent.reason = read_err;
+            m_localNoteIntents.push_back(std::move(intent));
+            continue;
+        }
+
+        const auto query = agent->queryCorpusDocumentIntent(host_path);
+        if (!query.success || !query.ingest_action) {
+            intent.query_ok = false;
+            intent.reason = query.technical_details.empty() ? query.user_message
+                                                            : query.technical_details;
+            m_localNoteIntents.push_back(std::move(intent));
+            continue;
+        }
+
+        intent.query_ok = true;
+        intent.action = *query.ingest_action;
+        if (query.ingest_reason) {
+            intent.reason = *query.ingest_reason;
+        }
+        if (query.ingest_document_id) {
+            intent.document_id = *query.ingest_document_id;
+        }
+        if (query.ingest_document_name) {
+            intent.document_name = *query.ingest_document_name;
+        }
+        m_localNoteIntents.push_back(intent);
+
+        auto& info = session.localNoteEngine[host_path];
+        Thoth::LocalNoteEngineSync::applyIntentToCache(
+            info, m_localNoteIntents.back(), payload->content_hash);
+    }
+
+    if (!session.localNoteEngine.empty()) {
+        Thoth::LocalNoteEngineSync::syncSessionFromCorpusList(
+            session, corpus_body, legacy_map);
+    }
+
+    m_localNoteReconcileState =
+        Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
+    session.updatedAtMs = NowMs();
+    SaveChatSessions();
+    ApplyIngestControls(snap);
+    RefreshRagPanel();
 }
 
 void MainFrame::ShowMenuStatus(const wxString& title, const wxString& message) {

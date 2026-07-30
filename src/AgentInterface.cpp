@@ -151,7 +151,8 @@ nlohmann::json AgentInterface::listCorpusDocuments() const {
     return backend->listCorpusDocuments();
 }
 
-void AgentInterface::createCorpusDocument(const std::string& sourceFilePath) {
+void AgentInterface::createCorpusDocument(const std::string& sourceFilePath,
+                                          const Thoth::CorpusCreateGuiOptions& options) {
     if (!backend) {
         return;
     }
@@ -159,18 +160,41 @@ void AgentInterface::createCorpusDocument(const std::string& sourceFilePath) {
     {
         std::lock_guard<std::mutex> lock(workersMutex);
         sessionId = activeSessionId;
-        taskQueue.push([this, sourceFilePath, sessionId]() {
+        taskQueue.push([this, sourceFilePath, sessionId, options]() {
             if (!backend) {
                 return;
             }
             backend->setSessionId(sessionId);
-            const auto result = backend->createCorpusDocument(sourceFilePath);
+            const auto result = backend->createCorpusDocument(sourceFilePath, options);
             if (onOperationComplete) {
                 onOperationComplete(result, {});
             }
         });
     }
     workersCv.notify_one();
+}
+
+Thoth::OperationResult AgentInterface::queryCorpusDocumentIntent(
+    const std::string& sourceFilePath) {
+    if (!backend) {
+        return Thoth::makeFailure(Thoth::kOpQueryDocumentIntent,
+                                  "Could not query send intent",
+                                  "backend not initialized");
+    }
+    if (!capabilities().supportsIngest) {
+        return Thoth::makeFailure(Thoth::kOpQueryDocumentIntent,
+                                  "Could not query send intent",
+                                  "ingest unavailable");
+    }
+    std::string sessionId;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex);
+        sessionId = activeSessionId;
+    }
+    if (!sessionId.empty()) {
+        backend->setSessionId(sessionId);
+    }
+    return backend->queryCorpusDocumentIntent(sourceFilePath);
 }
 
 nlohmann::json AgentInterface::createConversationSession() const {
