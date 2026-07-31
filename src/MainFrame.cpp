@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
@@ -1648,7 +1649,11 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
             const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
             m_requestToSession[requestId] = activeId;
             RegisterPendingChatRequest(requestId, activeId);
-            agent->appendConversationTurn(activeId, input.ToStdString(), requestId);
+            std::optional<std::string> activeGoal;
+            if (!session.activeGoal.empty()) {
+                activeGoal = session.activeGoal;
+            }
+            agent->appendConversationTurn(activeId, input.ToStdString(), requestId, activeGoal);
         } else {
             SyncBackendSessionIdentity();
             m_typingIndicator->Show();
@@ -2619,6 +2624,9 @@ void MainFrame::RefreshGoalBanner() {
             m_goalText->Wrap(wrapWidth);
         }
         if (m_goalBanner) m_goalBanner->Show();
+    }
+    if (m_planPanel) {
+        m_planPanel->SetSessionGoalDisplay(displayGoal);
     }
     m_auiManager.Update();
 }

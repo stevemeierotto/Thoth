@@ -73,8 +73,10 @@ public:
 
     /** Phase 10 — Engine-owned conversation authority. */
     virtual nlohmann::json createConversationSession() = 0;
-    virtual Thoth::OperationResult appendConversationTurn(const std::string& session_id,
-                                                          const std::string& content) = 0;
+    virtual Thoth::OperationResult appendConversationTurn(
+        const std::string& session_id,
+        const std::string& content,
+        const std::optional<std::string>& active_goal = std::nullopt) = 0;
     virtual nlohmann::json getConversation(const std::string& session_id) const = 0;
     virtual nlohmann::json getConversationSummary(const std::string& session_id) const = 0;
 

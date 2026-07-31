@@ -8,6 +8,7 @@
 #include <vector>
 #include <utility>
 #include <queue>
+#include <optional>
 #include <condition_variable>
 #include <future>
 #include <wx/stdpaths.h>
@@ -89,7 +90,8 @@ public:
     nlohmann::json createConversationSession() const;
     void appendConversationTurn(const std::string& sessionId,
                                 const std::string& content,
-                                const std::string& requestId = "");
+                                const std::string& requestId = "",
+                                const std::optional<std::string>& active_goal = std::nullopt);
     nlohmann::json getConversation(const std::string& sessionId) const;
     nlohmann::json getConversationSummary(const std::string& sessionId) const;
 

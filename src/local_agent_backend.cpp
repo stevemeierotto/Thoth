@@ -474,14 +474,16 @@ nlohmann::json LocalAgentBackend::createConversationSession() {
     }
 }
 
-Thoth::OperationResult LocalAgentBackend::appendConversationTurn(const std::string& session_id,
-                                                                 const std::string& content) {
+Thoth::OperationResult LocalAgentBackend::appendConversationTurn(
+    const std::string& session_id,
+    const std::string& content,
+    const std::optional<std::string>& active_goal) {
     using namespace Thoth;
     try {
         if (!plugin_) {
             return makeFailure(kOpChat, "Failed to send", "plugin not initialized");
         }
-        const nlohmann::json body = plugin_->appendUserTurn(session_id, content);
+        const nlohmann::json body = plugin_->appendUserTurn(session_id, content, active_goal);
         std::string err;
         if (!ConversationAuthority::hasRequiredAppendTurnFields(body, err)) {
             return makeFailure(kOpChat, "Failed to send", err);

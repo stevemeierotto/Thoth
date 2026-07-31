@@ -65,3 +65,21 @@ void PlanExecutionPanel::UpdateStepStatus(const std::string& stepId, const std::
 void PlanExecutionPanel::SetExecutionState(const std::string& state) {
     m_stateLabel->SetLabel("State: " + state);
 }
+
+void PlanExecutionPanel::SetSessionGoalDisplay(const std::string& goal) {
+    if (!m_goalLabel || !m_stateLabel) {
+        return;
+    }
+    // Do not clobber an in-flight executive plan view (steps listed).
+    if (m_stepList && m_stepList->GetItemCount() > 0) {
+        return;
+    }
+    if (goal.empty()) {
+        m_goalLabel->SetLabel("Active Goal: None");
+        m_stateLabel->SetLabel("State: Idle");
+    } else {
+        m_goalLabel->SetLabel("Active Goal: " + wxString::FromUTF8(goal));
+        m_stateLabel->SetLabel("State: Session (chat retrieval)");
+    }
+    Layout();
+}

@@ -11,6 +11,8 @@ public:
     void ResetPlan(const nlohmann::json& planJson);
     void UpdateStepStatus(const std::string& stepId, const std::string& status);
     void SetExecutionState(const std::string& state);
+    /** CSG-A — host session goal when no executive plan steps are shown. */
+    void SetSessionGoalDisplay(const std::string& goal);
 
 private:
     void InitializeUI();

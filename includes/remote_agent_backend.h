@@ -63,8 +63,10 @@ public:
         const std::string& sourceFilePath) override;
 
     nlohmann::json createConversationSession() override;
-    Thoth::OperationResult appendConversationTurn(const std::string& session_id,
-                                                  const std::string& content) override;
+    Thoth::OperationResult appendConversationTurn(
+        const std::string& session_id,
+        const std::string& content,
+        const std::optional<std::string>& active_goal = std::nullopt) override;
     nlohmann::json getConversation(const std::string& session_id) const override;
     nlohmann::json getConversationSummary(const std::string& session_id) const override;
 

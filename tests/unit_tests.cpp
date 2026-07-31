@@ -77,6 +77,8 @@
 #include "chat_retrieval_config.h"
 #include "chat_rag_observability.h"
 #include "chat_query_utils.h"
+#include "chat_retrieval_goal.h"
+#include "grag_diagnostics.h"
 #include "chat_prompt_config.h"
 #include "chat_generation_safety.h"
 #include "robustness_mock_responses.h"
@@ -344,6 +346,57 @@ static bool testInferenceEndpointResolution() {
     }
 
     return ok;
+}
+
+static bool testInferenceBackendMisconfigDetection() {
+    bool ok = true;
+
+    Thoth::InferenceEndpointConfig llamaEndpoints;
+    llamaEndpoints.base_url = "http://llama-server:8080";
+    llamaEndpoints.embed_base_url = "http://llama-embed-server:8081";
+
+    const auto ollamaOnLlama = Thoth::detectInferenceBackendMisconfigs("ollama", llamaEndpoints);
+    if (ollamaOnLlama.size() < 2) {
+        std::cerr << "testInferenceBackendMisconfigDetection: expected ollama+llama URL warnings\n";
+        ok = false;
+    }
+
+    const auto llamaOk = Thoth::detectInferenceBackendMisconfigs("llama_cpp", llamaEndpoints);
+    if (!llamaOk.empty()) {
+        std::cerr << "testInferenceBackendMisconfigDetection: false positive for llama_cpp stack\n";
+        ok = false;
+    }
+
+    Thoth::InferenceEndpointConfig ollamaEndpoints;
+    ollamaEndpoints.base_url = "http://127.0.0.1:11434";
+    ollamaEndpoints.embed_base_url = "http://127.0.0.1:11434";
+
+    const auto llamaOnOllama =
+        Thoth::detectInferenceBackendMisconfigs("llama_cpp", ollamaEndpoints);
+    if (llamaOnOllama.size() < 2) {
+        std::cerr << "testInferenceBackendMisconfigDetection: expected llama_cpp+Ollama URL warnings\n";
+        ok = false;
+    }
+
+    return ok;
+}
+
+static bool testEmbeddingProbeJsonShape() {
+    Thoth::EmbeddingProbeSnapshot snapshot;
+    snapshot.status = "ok";
+    snapshot.backend = "llama_cpp";
+    snapshot.embed_base_url = "http://llama-embed-server:8081";
+    snapshot.model = "nomic-embed-text";
+    snapshot.dimension = 768;
+
+    const auto json = Thoth::embeddingProbeJson(snapshot);
+    if (json.value("status", "") != "ok"
+        || json.value("backend", "") != "llama_cpp"
+        || json.value("dimension", 0) != 768) {
+        std::cerr << "testEmbeddingProbeJsonShape: ready embedding block shape failed\n";
+        return false;
+    }
+    return true;
 }
 
 static bool testInferenceBackendResolution() {
@@ -1113,10 +1166,120 @@ static bool testGuiR4ChatFailureSurfaces() {
 
 /** R4-G4 — conversation turn wire uses explicit session_id (Phase 10). */
 static bool testGuiR4ConversationTurnSessionWire() {
-    nlohmann::json req = {{"session_id", "session-tab-abc"}, {"content", "ping"}};
+    nlohmann::json req = {{"session_id", "session-tab-abc"},
+                          {"content", "ping"},
+                          {Thoth::ConversationAuthority::kTurnFieldActiveGoal, "Build website"}};
     if (req.value("session_id", "") != "session-tab-abc"
-        || req.value("content", "") != "ping") {
+        || req.value("content", "") != "ping"
+        || req.value(Thoth::ConversationAuthority::kTurnFieldActiveGoal, "") != "Build website") {
         std::cerr << "testGuiR4ConversationTurnSessionWire: turn JSON wire failed\n";
+        return false;
+    }
+    return true;
+}
+
+/** CSG-A — executive goal wins over session active_goal. */
+static bool testCsgAResolveExecutiveWins() {
+    namespace fs = std::filesystem;
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_csg_exec.db").string();
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto idx = new IndexManager(engine.get());
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx);
+    auto planner = std::make_shared<DefaultPlanner>();
+    auto registry = std::make_shared<ToolRegistry>();
+
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    Plan plan;
+    plan.plan_id = "csg-exec-plan";
+    plan.goal = "Build website";
+    controller.update_goal_embedding(plan.goal);
+    controller.resume_from_plan(plan);
+
+    Thoth::SessionGoalEmbedCache cache;
+    EmbeddingEngine session_embed(EmbeddingEngine::Method::TfIdf);
+    const auto result = Thoth::resolveChatRetrievalGoal(
+        &controller,
+        "session-123",
+        std::string("Analyze finances"),
+        cache,
+        &session_embed);
+
+    if (result.source != "executive") {
+        std::cerr << "testCsgAResolveExecutiveWins: expected executive, got " << result.source
+                  << "\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (result.embedding.empty()) {
+        std::cerr << "testCsgAResolveExecutiveWins: empty executive embedding\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+/** CSG-A — session active_goal fallback when no executive plan. */
+static bool testCsgAResolveSessionFallback() {
+    Thoth::SessionGoalEmbedCache cache;
+    EmbeddingEngine embed(EmbeddingEngine::Method::TfIdf);
+    const auto result = Thoth::resolveChatRetrievalGoal(
+        nullptr, "session-abc", std::string("Build website"), cache, &embed);
+    if (result.source != "session") {
+        std::cerr << "testCsgAResolveSessionFallback: source=" << result.source << "\n";
+        return false;
+    }
+    if (result.embedding.empty()) {
+        std::cerr << "testCsgAResolveSessionFallback: empty embedding\n";
+        return false;
+    }
+    return true;
+}
+
+/** CSG-A — none when no executive plan and no active_goal. */
+static bool testCsgAResolveNone() {
+    Thoth::SessionGoalEmbedCache cache;
+    EmbeddingEngine embed(EmbeddingEngine::Method::TfIdf);
+    const auto result =
+        Thoth::resolveChatRetrievalGoal(nullptr, "session-abc", std::nullopt, cache, &embed);
+    if (result.source != "none" || !result.embedding.empty()) {
+        std::cerr << "testCsgAResolveNone: unexpected result\n";
+        return false;
+    }
+    return true;
+}
+
+/** CSG-A — cache isolates goals within a session bucket. */
+static bool testCsgASessionGoalCacheIsolation() {
+    Thoth::SessionGoalEmbedCache cache;
+    EmbeddingEngine embed(EmbeddingEngine::Method::TfIdf);
+    (void)Thoth::resolveChatRetrievalGoal(
+        nullptr, "session-x", std::string("Build website"), cache, &embed);
+    (void)Thoth::resolveChatRetrievalGoal(
+        nullptr, "session-x", std::string("Analyze finances"), cache, &embed);
+    if (cache.entryCountForSession("session-x") != 2) {
+        std::cerr << "testCsgASessionGoalCacheIsolation: expected 2 entries, got "
+                  << cache.entryCountForSession("session-x") << "\n";
+        return false;
+    }
+    const auto first = cache.lookup("session-x", Thoth::normalizeSessionGoalText("Build website"));
+    if (!first || first->empty()) {
+        std::cerr << "testCsgASessionGoalCacheIsolation: first goal cache miss\n";
+        return false;
+    }
+    return true;
+}
+
+/** CSG-A — goal_source appears in GragDiagnostics JSON. */
+static bool testCsgAGoalSourceDiagnosticsJson() {
+    GragDiagnostics diagnostics;
+    diagnostics.goal_present = true;
+    diagnostics.goal_source = "session";
+    const nlohmann::json j = diagnostics.to_json();
+    if (j.value("goal_source", "") != "session" || !j.value("goal_present", false)) {
+        std::cerr << "testCsgAGoalSourceDiagnosticsJson: missing goal_source\n";
         return false;
     }
     return true;
@@ -1871,6 +2034,15 @@ static bool testEngineHttpSseRouteAndReady() {
     const auto capabilities = ready_json.value("capabilities", nlohmann::json::array());
     if (std::find(capabilities.begin(), capabilities.end(), "events") == capabilities.end()) {
         std::cerr << "testEngineHttpSseRouteAndReady: /ready missing events\n";
+        transport.requestStop();
+        server_thread.join();
+        runtime->shutdown();
+        return false;
+    }
+
+    const auto embedding = ready_json.value("embedding", nlohmann::json::object());
+    if (!embedding.contains("status") || !embedding["status"].is_string()) {
+        std::cerr << "testEngineHttpSseRouteAndReady: /ready missing embedding.status\n";
         transport.requestStop();
         server_thread.join();
         runtime->shutdown();
@@ -16413,6 +16585,76 @@ static bool testAlpTransactionalIndexPreservesOnEmptyReindex() {
     return true;
 }
 
+static bool testAlpTransactionalReindexSameContentSucceeds() {
+    setenv("THOTH_ALP_TX_INDEX", "1", 1);
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "alp_tx_reindex_same";
+    fs::create_directories(rag_dir);
+    const fs::path doc = rag_dir / "alp_tx_reindex_same.md";
+
+    std::string normalized = doc.string();
+    try {
+        normalized = fs::absolute(doc).lexically_normal().string();
+    } catch (...) {
+    }
+
+    auto countForFile = [&](const IndexManager& im) {
+        int n = 0;
+        for (const auto& c : im.getChunks()) {
+            if (c.fileName == normalized) {
+                ++n;
+            }
+        }
+        return n;
+    };
+
+    const std::string body =
+        "# ALP transactional reindex\n\n"
+        "Paragraph one with enough substantive text to index under ALP-B.\n\n"
+        "Paragraph two with enough substantive text to index under ALP-B.\n\n"
+        "Paragraph three with enough substantive text to index under ALP-B.\n";
+
+    {
+        std::ofstream out(doc);
+        out << body;
+    }
+
+    idx.indexFile(doc.string());
+    const int first = countForFile(idx);
+    if (first < 1) {
+        std::cerr << "testAlpTransactionalReindexSameContentSucceeds: initial index empty\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    idx.indexFile(doc.string());
+    const int second = countForFile(idx);
+    if (second < 1) {
+        std::cerr << "testAlpTransactionalReindexSameContentSucceeds: reindex produced no chunks\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+    if (second != first) {
+        std::cerr << "testAlpTransactionalReindexSameContentSucceeds: chunk count changed "
+                  << first << " -> " << second << "\n";
+        unsetenv("THOTH_ALP_TX_INDEX");
+        fs::remove(doc);
+        return false;
+    }
+
+    unsetenv("THOTH_ALP_TX_INDEX");
+    fs::remove(doc);
+    return true;
+}
+
 static bool testAlpValidateFailurePreservesPriorChunks() {
     setenv("THOTH_ALP_TX_INDEX", "1", 1);
 
@@ -18239,6 +18481,11 @@ int main() {
             if (!testGuiR3GoalSessionWire()) failures++;
             if (!testGuiR4ChatFailureSurfaces()) failures++;
             if (!testGuiR4ConversationTurnSessionWire()) failures++;
+    if (!testCsgAResolveExecutiveWins()) failures++;
+    if (!testCsgAResolveSessionFallback()) failures++;
+    if (!testCsgAResolveNone()) failures++;
+    if (!testCsgASessionGoalCacheIsolation()) failures++;
+    if (!testCsgAGoalSourceDiagnosticsJson()) failures++;
             if (!testGuiR5RetrievalSessionGate()) failures++;
             if (!testGuiR5ScopeGroundingDisplay()) failures++;
             if (!testGuiR5CorpusInventoryLabel()) failures++;
@@ -18547,6 +18794,11 @@ int main() {
     if (!testGuiR3GoalSessionWire()) failures++;
     if (!testGuiR4ChatFailureSurfaces()) failures++;
     if (!testGuiR4ConversationTurnSessionWire()) failures++;
+    if (!testCsgAResolveExecutiveWins()) failures++;
+    if (!testCsgAResolveSessionFallback()) failures++;
+    if (!testCsgAResolveNone()) failures++;
+    if (!testCsgASessionGoalCacheIsolation()) failures++;
+    if (!testCsgAGoalSourceDiagnosticsJson()) failures++;
     if (!testGuiR5RetrievalSessionGate()) failures++;
     if (!testGuiR5ScopeGroundingDisplay()) failures++;
     if (!testGuiR5CorpusInventoryLabel()) failures++;
@@ -18566,6 +18818,8 @@ int main() {
     if (!testEngineHttpGracefulShutdown()) failures++;
     if (!testConfigRoundTrip()) failures++;
     if (!testInferenceEndpointResolution()) failures++;
+    if (!testInferenceBackendMisconfigDetection()) failures++;
+    if (!testEmbeddingProbeJsonShape()) failures++;
     if (!testInferenceBackendResolution()) failures++;
     if (!testMockInferenceClient()) failures++;
     if (!testOllamaClientParse()) failures++;
@@ -18712,6 +18966,7 @@ int main() {
     if (!testAlpNamespacesCreatedOnInit()) failures++;
     if (!testAlpIndexManagerLoadsEmptyRegistry()) failures++;
     if (!testAlpTransactionalIndexPreservesOnEmptyReindex()) failures++;
+    if (!testAlpTransactionalReindexSameContentSucceeds()) failures++;
     if (!testAlpValidateFailurePreservesPriorChunks()) failures++;
     if (!testAlpEmbedFailurePreservesPriorChunks()) failures++;
     if (!testAlpPersistFailurePreservesOnDiskCommit()) failures++;

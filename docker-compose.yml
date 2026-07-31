@@ -78,6 +78,7 @@ services:
       THOTH_INFERENCE_BASE_URL: http://llama-server:8080
       THOTH_EMBED_BASE_URL: http://llama-embed-server:8081
       THOTH_INFERENCE_BACKEND: llama_cpp
+      THOTH_EMBED_STRICT: ${THOTH_EMBED_STRICT:-0}
       THOTH_ENGINE_BIND: "0.0.0.0"
       THOTH_ENGINE_PORT: "8090"
       THOTH_LOG_CONFIG: ${THOTH_LOG_CONFIG:-1}

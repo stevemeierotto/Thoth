@@ -1104,8 +1104,10 @@ nlohmann::json RemoteAgentBackend::createConversationSession() {
     }
 }
 
-Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(const std::string& session_id,
-                                                                  const std::string& content) {
+Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(
+    const std::string& session_id,
+    const std::string& content,
+    const std::optional<std::string>& active_goal) {
     using namespace Thoth;
     try {
         std::string ready_err;
@@ -1123,7 +1125,10 @@ Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(const std::str
         if (session_id.empty() || content.empty()) {
             return makeFailure(kOpChat, "Failed to send", "session_id and content required");
         }
-        const json req = {{"session_id", session_id}, {"content", content}};
+        nlohmann::json req = {{"session_id", session_id}, {"content", content}};
+        if (active_goal && !active_goal->empty()) {
+            req[ConversationAuthority::kTurnFieldActiveGoal] = *active_goal;
+        }
         const long chat_timeout = resolveRemoteRequestTimeoutSec(kChatTimeoutSec);
         const HttpResult http = httpPostJson(ConversationAuthority::kHttpPathTurns,
                                              req.dump(),

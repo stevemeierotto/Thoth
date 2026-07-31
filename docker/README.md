@@ -143,8 +143,58 @@ Use **named local volumes** for SQLite (`memory.db`). Do not mount workspace ove
 | `THOTH_INFERENCE_BASE_URL` | `http://llama-server:8080` |
 | `THOTH_EMBED_BASE_URL` | `http://llama-embed-server:8081` |
 | `THOTH_INFERENCE_BACKEND` | `llama_cpp` |
+| `THOTH_EMBED_STRICT` | `0` (set `1` after embed_probe stable — disables silent TF-IDF fallback) |
 | `THOTH_ENGINE_BIND` | `0.0.0.0` |
 | `THOTH_ENGINE_PORT` | `8090` |
+
+Example operator env: [`docker/embed.env.example`](embed.env.example) (inference + embedding) and [`docker/alp.env.example`](alp.env.example) (ALP flags).
+
+## Troubleshooting embeddings
+
+### `ollama embed failed: Couldn't connect to server`
+
+The Engine is using **`THOTH_INFERENCE_BACKEND=ollama`** (or unset — defaults to ollama) while URLs may point at llama.cpp or an unreachable host.
+
+1. Check startup logs / `/ready`:
+
+```bash
+docker compose logs thoth-engine 2>&1 | grep -E 'inference_backend=|embed_base=|embed_probe=|config_warning'
+curl -s http://127.0.0.1:8090/ready | jq '.embedding'
+```
+
+2. For the default Compose stack, ensure `.env` does **not** override backend to `ollama`. Required:
+
+```bash
+THOTH_INFERENCE_BACKEND=llama_cpp
+```
+
+3. Remove stale Ollama URLs from workspace `config.json` inside the volume if present:
+
+```bash
+docker exec thoth-thoth-engine-1 jq 'del(.inference_base_url,.embed_base_url)' /workspace/config.json
+```
+
+4. Verify embed server directly:
+
+```bash
+docker exec thoth-llama-embed-server-1 curl -sf -X POST http://127.0.0.1:8081/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nomic-embed-text","input":"probe"}' | head -c 200
+```
+
+Healthy startup: `embed_probe=ok backend=llama_cpp … dimension=768`. `/ready` reports `"embedding":{"status":"ok",…}`.
+
+### `Falling back micro-batch items to TfIdf`
+
+Embedding requests failed mid-index. Indexes built during fallback may contain TF-IDF vectors (not 768-dim semantic embeddings). After fixing embed connectivity:
+
+```bash
+docker exec thoth-thoth-engine-1 rm -f /workspace/rag/rag_index.bin
+docker compose restart thoth-engine
+# Re-index attachments
+```
+
+Enable `THOTH_EMBED_STRICT=1` once stable to surface failures instead of silent fallback.
 
 ## Ollama profile (optional, not default)
 

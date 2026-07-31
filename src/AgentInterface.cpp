@@ -209,7 +209,8 @@ nlohmann::json AgentInterface::createConversationSession() const {
 
 void AgentInterface::appendConversationTurn(const std::string& sessionId,
                                             const std::string& content,
-                                            const std::string& requestId) {
+                                            const std::string& requestId,
+                                            const std::optional<std::string>& active_goal) {
     if (!backend) {
         return;
     }
@@ -220,11 +221,11 @@ void AgentInterface::appendConversationTurn(const std::string& sessionId,
     }
     {
         std::lock_guard<std::mutex> lock(workersMutex);
-        taskQueue.push([this, sessionId, content, resolvedRequestId]() {
+        taskQueue.push([this, sessionId, content, active_goal, resolvedRequestId]() {
             if (!backend) {
                 return;
             }
-            const auto result = backend->appendConversationTurn(sessionId, content);
+            const auto result = backend->appendConversationTurn(sessionId, content, active_goal);
             if (onOperationComplete) {
                 onOperationComplete(result, resolvedRequestId);
             }
