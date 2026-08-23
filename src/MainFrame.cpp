@@ -444,8 +444,8 @@ void MainFrame::RefreshRagPanel() {
                     }
                 }
                 if (engineInfo
-                    && (!engineInfo->document_id.empty() || engineInfo->indexing
-                        || engineInfo->failed || engineInfo->chunk_count >= 0)) {
+                    && Thoth::LocalNoteEngineSync::localNoteEngineSlotShowsAttachedStatus(
+                           *engineInfo)) {
                     std::string label = Thoth::RemoteRagHonesty::formatLocalNoteEngineSlotLabel(
                             base,
                             engineInfo->document_id,
@@ -497,6 +497,22 @@ void MainFrame::RefreshRagPanel() {
 
     ApplyIngestControls(agent ? agent->eventStreamSnapshot()
                               : Thoth::localEventStreamSnapshot(NowMs()));
+    if (m_stateStrip && m_ragIndexingCount == 0 && !m_goalPlanningPending) {
+        if (hostOnlyNotes) {
+            const int attached =
+                Thoth::LocalNoteEngineSync::countAttachedLocalNotes(session);
+            const std::string strip =
+                Thoth::RemoteRagHonesty::formatLocalNoteStripActivity(
+                    static_cast<int>(files.size()), attached);
+            if (strip.empty()) {
+                m_stateStrip->ClearActivityMessage();
+            } else {
+                m_stateStrip->SetActivityMessage(wxString::FromUTF8(strip));
+            }
+        } else {
+            m_stateStrip->ClearActivityMessage();
+        }
+    }
     RefreshRagTabLayout();
 }
 
@@ -1798,10 +1814,18 @@ bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
             break;
         }
         
-        // Check for duplicates
+        // Check for duplicates (exact path or same basename slot)
         bool isDuplicate = false;
+        const std::string incoming_path = filename.ToStdString();
+        const std::string incoming_base =
+            std::filesystem::path(incoming_path).filename().string();
         for (const auto& existingPath : session.ragFilePaths) {
-            if (existingPath == filename.ToStdString()) {
+            if (existingPath == incoming_path) {
+                isDuplicate = true;
+                break;
+            }
+            if (!incoming_base.empty()
+                && std::filesystem::path(existingPath).filename().string() == incoming_base) {
                 isDuplicate = true;
                 break;
             }
@@ -1821,10 +1845,6 @@ bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
             agent && Thoth::RemoteRagHonesty::localNotesAreHostSideOnly(agent->isRemote());
         // Phase 5: never invent indexing from the drop itself.
         if (hostOnlyNotes) {
-            if (m_stateStrip) {
-                m_stateStrip->SetActivityMessage(wxString::FromUTF8(
-                    Thoth::RemoteRagHonesty::kHostOnlyTooltip));
-            }
             SetTransientStatus(wxString::FromUTF8(
                 Thoth::RemoteRagHonesty::formatHostOnlyAddStatus(filesAddedCount)));
         } else {
@@ -1835,9 +1855,15 @@ bool MainFrame::HandleFileDrop(const wxArrayString& filenames) {
             && Thoth::RemoteRagHonesty::shouldSyncRagFilesToBackend(agent->isRemote())) {
             agent->setRagFiles(session.ragFilePaths);
         }
+        if (hostOnlyNotes && agent && agent->capabilities().supportsIngest) {
+            RefreshCorpusPanel();
+        }
         return true;
     }
 
+    if (!filenames.IsEmpty()) {
+        SetTransientStatus(wxString::FromUTF8("File(s) already in this session"));
+    }
     return false;
 }
 

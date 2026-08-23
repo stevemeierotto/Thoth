@@ -40,3 +40,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+
+# Local GGUF downloads (seed into Docker llama-models volume)
+models/

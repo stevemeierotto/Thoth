@@ -57,7 +57,7 @@ Before making any changes:
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
-**Active work:** Remaining Phase 3–4 items (G2 subgoals, **G1e** KEEP@−0.05, **B1** Phase 1 Candidate awaiting freeze — [`B1_PROTOCOL.md`](B1_PROTOCOL.md) v1.1, M5). **M4 range restore ✅**. **E1 ✅**; **E2 Phases A–E ✅**. **GUI client/server:** Phase 0–12A 🔒 ([`GUI_integration.md`](GUI_integration.md)); Phase 1–12A ✅; Phase 12B placeholder. **CSG-A ✅ A.1–A.3 2026-07-30** — [`CHAT_SESSION_GOAL_PROTOCOL.md`](CHAT_SESSION_GOAL_PROTOCOL.md) (A.4 manual restart verify pending). Next forks: **B1** freeze → Phase 2, **E3**, **G2/M5**. See `cursor_list.md`.
+**Active work:** Remaining Phase 3–4 items (G2 subgoals, **G1e** KEEP@−0.05, **B1** Phase 1 Candidate awaiting freeze — [`B1_PROTOCOL.md`](B1_PROTOCOL.md) v1.1, M5). **M4 range restore ✅**. **E1 ✅**; **E2 Phases A–E ✅**. **GUI client/server:** Phase 0–12A 🔒 ([`GUI_integration.md`](GUI_integration.md)); Phase 1–12A ✅; Phase 12B placeholder. **CSG-A ✅ A.1–A.3 2026-07-30** — [`CHAT_SESSION_GOAL_PROTOCOL.md`](CHAT_SESSION_GOAL_PROTOCOL.md) (A.4 manual restart verify pending). **CSG-B ✅ B.1–B.3 2026-07-30** — [`CHAT_RESPONSE_REGURGITATION_PROTOCOL.md`](CHAT_RESPONSE_REGURGITATION_PROTOCOL.md) (B.4 manual verify pending). Next forks: **B1** freeze → Phase 2, **E3**, **G2/M5**. See `cursor_list.md`.
 
 ---
 

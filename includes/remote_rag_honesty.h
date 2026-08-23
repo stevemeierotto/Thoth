@@ -51,6 +51,18 @@ inline std::string formatHostOnlySlotLabel(const std::string& basename) {
 inline constexpr const char* kHostOnlyTooltip = "Host-only (not sent to Engine)";
 
 /**
+ * Center-strip copy for remote Local Notes.
+ * Host-only only while this chat has slots and none are attached.
+ * Empty string → leave the strip at its idle default.
+ */
+inline std::string formatLocalNoteStripActivity(int slot_count, int attached_count) {
+    if (slot_count <= 0 || attached_count > 0) {
+        return {};
+    }
+    return kHostOnlyTooltip;
+}
+
+/**
  * Local Note slot label after Send to Engine (drops host-only suffix).
  */
 inline std::string formatLocalNoteEngineSlotLabel(const std::string& basename,

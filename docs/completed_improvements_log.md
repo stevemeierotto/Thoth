@@ -4,7 +4,24 @@ Last updated: 2026-07-25 (llama.cpp dedicated embed server ✅; GUI Phase 12A �
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
-## 2026-07-27 — ALP-G certification harness (Attachment Lifecycle ALP1)
+## 2026-07-30 — CSG-B chat response regurgitation handling
+
+**Status:** ✅ B.1–B.3 implemented · B.4 manual verify pending
+
+**Protocol:** [`CHAT_RESPONSE_REGURGITATION_PROTOCOL.md`](CHAT_RESPONSE_REGURGITATION_PROTOCOL.md)
+
+**Delivered:**
+
+- Prompt anti-regurgitation rules + refined grounding (`chat_prompt_config.h`, `prompt_factory.cpp`)
+- Layer 1 scaffold assess + Layer 2 answer-quality assess + chunk sanitize (`chat_generation_safety.{h,cpp}`)
+- Quality-gated regurgitation retry (one max) + generation diagnostics (`regurgitation_retry_reason`, `retry_due_to_regurgitation`, etc.)
+- Unit tests: `testCsgB*` suite; all `thoth-core-tests` pass
+
+**Out of scope preserved:** retrieval ranking, GRAG scoring, CSG-A, `formatChunkForPrompt` unchanged.
+
+**Manual verify (B.4):** Reproduce `architectural_facts.md` query via Engine/GUI — expect concise conversational prose, not scaffold or pasted chunk collage.
+
+---
 
 **Status:** 🔶 Automated gates shipped; **full ALP1 certification pending G2b/G3 operator sign-off**
 

@@ -227,11 +227,11 @@ Each sub-phase requires `AGENTS.md` gate approval before starting. Do not skip o
 
 ---
 
-## §8 — Phase B (separate, not locked here)
+## §8 — Phase B (separate — see CSG-B)
 
 **Response regurgitation** (model echoing `Document:` / `source_span=` injection format) is **out of scope** for CSG-A.
 
-Deferred to Phase B: prompt rules + regurgitation detect/retry/sanitize in `chat_generation_safety.cpp`.
+**Locked separately:** [`CHAT_RESPONSE_REGURGITATION_PROTOCOL.md`](CHAT_RESPONSE_REGURGITATION_PROTOCOL.md) **CSG-B 🔒 2026-07-30** — generation pipeline only (prompt + assess + quality-gated sanitize/retry). No implementation until explicit approval.
 
 ---
 

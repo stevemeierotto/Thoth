@@ -79,7 +79,7 @@ struct LocalNoteIntent {
 
 inline bool isPickerEligibleAction(const std::string& action) {
     return action == "create" || action == "new_revision" || action == "retry"
-           || action == "conflict";
+           || action == "conflict" || action == "link_only";
 }
 
 inline std::string actionPickerLabel(const std::string& action) {
@@ -95,7 +95,27 @@ inline std::string actionPickerLabel(const std::string& action) {
     if (action == "conflict") {
         return "Replace (confirm)";
     }
+    if (action == "link_only") {
+        return "Attach to chat";
+    }
     return action;
+}
+
+/** True after Send to Engine accept (POST), not dry_run reconcile cache alone. */
+inline bool localNoteEngineSlotShowsAttachedStatus(const LocalNoteEngineInfo& info) {
+    return info.indexing || info.failed || !info.revision_id.empty();
+}
+
+inline int countAttachedLocalNotes(const ChatSession& session) {
+    int attached = 0;
+    for (const auto& path : session.ragFilePaths) {
+        const auto it = session.localNoteEngine.find(path);
+        if (it != session.localNoteEngine.end()
+            && localNoteEngineSlotShowsAttachedStatus(it->second)) {
+            ++attached;
+        }
+    }
+    return attached;
 }
 
 /** True after Send to Engine accept (document id recorded for this host path). */

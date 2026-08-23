@@ -357,7 +357,7 @@ The GUI always reflects the Engine’s **active goal**: set, display, completion
 | R3-G6 | Goal-bearing SSE: prefer `session_id`; `ResolveGoalEventSessionId` maps empty → active tab (legacy Engine exception) |
 | R3-G7 | Local: same sync + terminal clear; preserve RAG-on-goal behavior |
 
-**Follow-on (locked separately):** [`CHAT_SESSION_GOAL_PROTOCOL.md`](CHAT_SESSION_GOAL_PROTOCOL.md) **CSG-A 🔒 2026-07-30** — pass host `active_goal` on chat turns so Engine directional GRAG survives GUI restart; extends R3-G1 without changing banner ownership.
+**Follow-on (locked separately):** [`CHAT_SESSION_GOAL_PROTOCOL.md`](CHAT_SESSION_GOAL_PROTOCOL.md) **CSG-A 🔒 2026-07-30** — pass host `active_goal` on chat turns so Engine directional GRAG survives GUI restart; extends R3-G1 without changing banner ownership. [`CHAT_RESPONSE_REGURGITATION_PROTOCOL.md`](CHAT_RESPONSE_REGURGITATION_PROTOCOL.md) **CSG-B 🔒 2026-07-30** — chat reply prose vs RAG scaffold regurgitation (generation pipeline only).
 
 ### Phase R3 Implement Record
 

@@ -6192,7 +6192,7 @@ static bool testPlanMGreetingSkipTelemetryShape() {
     return true;
 }
 
-// Plan M G3 / T4 — cue B + anti-transcript; no open [Agent] slot.
+// Plan M G3 / Phase 3 — user block + explicit [Agent] completion cue + anti-transcript.
 static bool testPlanMChatPromptCueAndAntiTranscript() {
     Config cfg;
     cfg.database_path = makeTempPath("thoth_plan_m_g3_prompt.db").string();
@@ -6210,13 +6210,7 @@ static bool testPlanMChatPromptCueAndAntiTranscript() {
     const std::string expectedEnding = Thoth::ChatPrompt::formatUserBlock(input);
     if (plain.size() < expectedEnding.size() ||
         plain.compare(plain.size() - expectedEnding.size(), expectedEnding.size(), expectedEnding) != 0) {
-        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: ungrounded prompt must end with cue B user block\n";
-        fs::remove(cfg.database_path);
-        return false;
-    }
-    if (plain.find("\n[Agent] ") != std::string::npos ||
-        (plain.size() >= 8 && plain.compare(plain.size() - 8, 8, "\n[Agent]") == 0)) {
-        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: open [Agent] cue must not appear\n";
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: ungrounded prompt must end with completion boundary\n";
         fs::remove(cfg.database_path);
         return false;
     }
@@ -6225,8 +6219,13 @@ static bool testPlanMChatPromptCueAndAntiTranscript() {
         fs::remove(cfg.database_path);
         return false;
     }
+    if (plain.find(Thoth::ChatPrompt::kAntiRegurgitationRules) == std::string::npos) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: anti-regurgitation rules missing\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
 
-    // T2 offline — grounded assembly still injects RAG + grounding rules with cue B.
+    // T2 offline — grounded assembly still injects RAG + grounding rules with completion boundary.
     const std::string ragContextText =
         "Document: GRAG.md\nLines: 1-3\nGRAG means Goal-Relative Adaptive Graph Retrieval.\n---\n";
     PromptFactory::ConversationBuildOptions grounded;
@@ -6235,21 +6234,35 @@ static bool testPlanMChatPromptCueAndAntiTranscript() {
         factory.buildChatPrompt(input, ragContextText, false, grounded, nullptr);
     if (withRag.find(Thoth::ChatPrompt::kRagContextHeader) == std::string::npos ||
         withRag.find(Thoth::ChatPrompt::kGroundingRules) == std::string::npos ||
-        withRag.find(Thoth::ChatPrompt::kAntiTranscriptRules) == std::string::npos) {
+        withRag.find(Thoth::ChatPrompt::kAntiTranscriptRules) == std::string::npos ||
+        withRag.find(Thoth::ChatPrompt::kAntiRegurgitationRules) == std::string::npos) {
         std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded path missing RAG/rules\n";
         fs::remove(cfg.database_path);
         return false;
     }
-    if (withRag.size() < expectedEnding.size() ||
-        withRag.compare(withRag.size() - expectedEnding.size(), expectedEnding.size(), expectedEnding) !=
-            0) {
-        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded prompt must end with cue B\n";
+    if (withRag.find("Never reproduce internal retrieval formatting") == std::string::npos) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounding anti-regurgitation missing\n";
         fs::remove(cfg.database_path);
         return false;
     }
-    if (withRag.find("\n[Agent] ") != std::string::npos ||
-        (withRag.size() >= 8 && withRag.compare(withRag.size() - 8, 8, "\n[Agent]") == 0)) {
-        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded path still has [Agent] cue\n";
+    const std::string userQuerySection =
+        std::string(Thoth::ChatPrompt::kUserQueryHeader) + input + "\n";
+    if (withRag.find(userQuerySection) == std::string::npos) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded prompt must populate [User Query]\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    const std::string duplicateUserTurn = std::string(Thoth::ChatPrompt::kUserTurnPrefix) + input;
+    if (withRag.find(duplicateUserTurn) != std::string::npos) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded prompt must not duplicate [User] turn\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    const std::string groundedEnding = Thoth::ChatPrompt::formatAgentCompletionCue();
+    if (withRag.size() < groundedEnding.size() ||
+        withRag.compare(withRag.size() - groundedEnding.size(), groundedEnding.size(), groundedEnding) !=
+            0) {
+        std::cerr << "testPlanMChatPromptCueAndAntiTranscript: grounded prompt must end with [Agent] cue only\n";
         fs::remove(cfg.database_path);
         return false;
     }
@@ -6301,10 +6314,17 @@ static bool testPlanMChatStopPayloadSerialization() {
     return true;
 }
 
-// Plan N N3 / N-T6 — conversational stop policy is empty.
+// Plan N N3 / N-T6 — completions stop policy is empty; chat mode adds ChatML stops (A.1).
 static bool testPlanNChatStopSequencesEmpty() {
     if (!Thoth::ChatPrompt::chatStopSequences().empty()) {
-        std::cerr << "testPlanNChatStopSequencesEmpty: chatStopSequences must return {}\n";
+        std::cerr << "testPlanNChatStopSequencesEmpty: completions chatStopSequences must return {}\n";
+        return false;
+    }
+    const auto chatStops =
+        Thoth::ChatPrompt::chatStopSequences(Thoth::ChatPrompt::ChatInferenceMode::Chat);
+    if (chatStops.size() != 2 || chatStops[0] != Thoth::ChatPrompt::kChatMlStopImEnd ||
+        chatStops[1] != Thoth::ChatPrompt::kChatMlStopImStart) {
+        std::cerr << "testPlanNChatStopSequencesEmpty: chat mode ChatML stops wrong\n";
         return false;
     }
     return true;
@@ -6407,6 +6427,233 @@ static bool testPlanNFormatChunkSourceSpanOmitted() {
     return true;
 }
 
+// Investigation — metadata_off presentation: body only, --- segmentation at call site.
+static bool testChatRagMetadataOffPresentation() {
+    CodeChunk chunk;
+    chunk.fileName = "/workspace/rag/completed_improvements_log.md";
+    chunk.startLine = 10;
+    chunk.endLine = 20;
+    chunk.code = "Phase 12A graph statistics shipped.";
+
+    const std::string labeled = Thoth::ChatRetrieval::formatChunkForPrompt(
+        chunk, Thoth::ChatRetrieval::RagChunkPresentation::Labeled);
+    if (labeled.find("Document: completed_improvements_log.md") == std::string::npos ||
+        labeled.find("source_span=10-20") == std::string::npos ||
+        labeled.find(chunk.code) == std::string::npos) {
+        std::cerr << "testChatRagMetadataOffPresentation: labeled layout missing\n";
+        return false;
+    }
+
+    const std::string metadataOff = Thoth::ChatRetrieval::formatChunkForPrompt(
+        chunk, Thoth::ChatRetrieval::RagChunkPresentation::MetadataOff);
+    if (metadataOff != chunk.code) {
+        std::cerr << "testChatRagMetadataOffPresentation: metadata_off must return body only\n";
+        return false;
+    }
+    if (metadataOff.find("Document:") != std::string::npos ||
+        metadataOff.find("source_span=") != std::string::npos) {
+        std::cerr << "testChatRagMetadataOffPresentation: metadata_off must omit labels\n";
+        return false;
+    }
+
+    CodeChunk chunk2;
+    chunk2.fileName = "other.md";
+    chunk2.startLine = 1;
+    chunk2.endLine = 2;
+    chunk2.code = "Second chunk body.";
+    const std::string assembled =
+        Thoth::ChatRetrieval::formatChunkForPrompt(chunk, Thoth::ChatRetrieval::RagChunkPresentation::MetadataOff) +
+        "\n---\n" +
+        Thoth::ChatRetrieval::formatChunkForPrompt(chunk2, Thoth::ChatRetrieval::RagChunkPresentation::MetadataOff) +
+        "\n---\n";
+    if (assembled.find("\n---\n") == std::string::npos) {
+        std::cerr << "testChatRagMetadataOffPresentation: expected --- chunk boundaries\n";
+        return false;
+    }
+    if (assembled.find("Document:") != std::string::npos ||
+        assembled.find("source_span=") != std::string::npos) {
+        std::cerr << "testChatRagMetadataOffPresentation: assembled context must omit metadata\n";
+        return false;
+    }
+    if (assembled.find(chunk.code) == std::string::npos ||
+        assembled.find(chunk2.code) == std::string::npos) {
+        std::cerr << "testChatRagMetadataOffPresentation: chunk bodies missing\n";
+        return false;
+    }
+
+    if (std::string(Thoth::ChatRetrieval::ragChunkPresentationLabel(
+            Thoth::ChatRetrieval::RagChunkPresentation::MetadataOff)) != "metadata_off") {
+        std::cerr << "testChatRagMetadataOffPresentation: metadata_off label wrong\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testChatInferenceModeEnvDefault() {
+    if (Thoth::ChatPrompt::chatInferenceModeFromEnv() != Thoth::ChatPrompt::ChatInferenceMode::Chat) {
+        std::cerr << "testChatInferenceModeEnvDefault: expected chat default\n";
+        return false;
+    }
+    if (std::string(Thoth::ChatPrompt::chatInferenceModeLabel(
+            Thoth::ChatPrompt::ChatInferenceMode::Chat)) != "chat") {
+        std::cerr << "testChatInferenceModeEnvDefault: chat label wrong\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testLlamaChatPayloadSerialization() {
+    Thoth::InferenceChatRequest request;
+    request.model = "chat";
+    request.max_tokens = 512;
+    request.messages.push_back({"system", "Response Rules:\nYou are Thoth."});
+    request.messages.push_back({"user", "[RAG Context]\nchunk\n[User Query]\nhello"});
+
+    const auto payload =
+        nlohmann::json::parse(Thoth::LlamaServerClient::serializeChatPayload(request));
+    if (payload["model"] != "chat" || payload["max_tokens"] != 512) {
+        std::cerr << "testLlamaChatPayloadSerialization: model/max_tokens wrong\n";
+        return false;
+    }
+    if (!payload.contains("messages") || payload["messages"].size() != 2) {
+        std::cerr << "testLlamaChatPayloadSerialization: messages missing\n";
+        return false;
+    }
+    if (payload["messages"][0]["role"] != "system" || payload["messages"][1]["role"] != "user") {
+        std::cerr << "testLlamaChatPayloadSerialization: roles wrong\n";
+        return false;
+    }
+    if (payload.contains("prompt")) {
+        std::cerr << "testLlamaChatPayloadSerialization: must not send prompt field\n";
+        return false;
+    }
+
+    request.stop_sequences = Thoth::ChatPrompt::chatStopSequences(
+        Thoth::ChatPrompt::ChatInferenceMode::Chat);
+    const auto payloadWithStops =
+        nlohmann::json::parse(Thoth::LlamaServerClient::serializeChatPayload(request));
+    if (!payloadWithStops.contains("stop") || !payloadWithStops["stop"].is_array() ||
+        payloadWithStops["stop"].size() != 2 ||
+        payloadWithStops["stop"][0] != Thoth::ChatPrompt::kChatMlStopImEnd ||
+        payloadWithStops["stop"][1] != Thoth::ChatPrompt::kChatMlStopImStart) {
+        std::cerr << "testLlamaChatPayloadSerialization: ChatML stop list wrong\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testChatRolePromptAssembly() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_chat_role_prompt.db").string();
+    Memory memory(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto* idx = new IndexManager(engine.get());
+    RAGPipeline rag(std::move(engine), idx, &cfg, &memory);
+    PromptFactory factory(memory, rag);
+
+    const std::string input = "Explain GRAG.";
+    const std::string ragContextText =
+        "Document: GRAG.md\nsource_span=1-3\nGRAG means Goal-Relative Adaptive Graph Retrieval.\n---\n";
+    PromptFactory::ConversationBuildOptions grounded;
+    grounded.grounded = true;
+
+    const auto rolePrompt =
+        factory.buildChatRolePrompt(input, ragContextText, false, grounded, nullptr);
+
+    if (rolePrompt.system_content.find("Response Rules:") == std::string::npos ||
+        rolePrompt.system_content.find("You are Thoth") == std::string::npos) {
+        std::cerr << "testChatRolePromptAssembly: system rules missing\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (rolePrompt.system_content.size() >= Thoth::ChatPrompt::formatAgentCompletionCue().size() &&
+        rolePrompt.system_content.compare(
+            rolePrompt.system_content.size() - Thoth::ChatPrompt::formatAgentCompletionCue().size(),
+            Thoth::ChatPrompt::formatAgentCompletionCue().size(),
+            Thoth::ChatPrompt::formatAgentCompletionCue()) == 0) {
+        std::cerr << "testChatRolePromptAssembly: system must not end with [Agent] cue\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (rolePrompt.system_content.find(std::string(Thoth::ChatPrompt::kUserTurnPrefix) + input) !=
+        std::string::npos) {
+        std::cerr << "testChatRolePromptAssembly: system must not include user turn\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (rolePrompt.user_content.find(Thoth::ChatPrompt::kRagContextHeader) != 0) {
+        std::cerr << "testChatRolePromptAssembly: user must start with RAG header\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (rolePrompt.user_content.find(ragContextText) == std::string::npos ||
+        rolePrompt.user_content.find(std::string(Thoth::ChatPrompt::kUserQueryHeader) + input) ==
+            std::string::npos) {
+        std::cerr << "testChatRolePromptAssembly: user must contain RAG body and query\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (rolePrompt.user_content.find("Response Rules:") != std::string::npos) {
+        std::cerr << "testChatRolePromptAssembly: rules must not leak into user message\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
+static bool testChatMultiTurnMessageAssembly() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_chat_multi_turn.db").string();
+    Memory memory(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto* idx = new IndexManager(engine.get());
+    RAGPipeline rag(std::move(engine), idx, &cfg, &memory);
+    PromptFactory factory(memory, rag);
+
+    memory.addMessage("user", "What is EGAR and why is it important?");
+    memory.addMessage("assistant", "EGAR is the evaluation framework for retrieval quality.");
+    memory.save();
+
+    const auto prior = factory.getPriorChatTurnMessages();
+    if (prior.size() != 2 || prior[0].first != "user" || prior[1].first != "assistant") {
+        std::cerr << "testChatMultiTurnMessageAssembly: prior turn roles wrong\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    const std::string input = "what are some improvements that were made?";
+    const std::string ragContextText =
+        "Document: improvements.md\nsource_span=1-3\nPhase 3 memory work.\n---\n";
+    PromptFactory::ConversationBuildOptions grounded;
+    grounded.grounded = true;
+    grounded.includeConversationHistory = false;
+
+    const auto rolePrompt =
+        factory.buildChatRolePrompt(input, ragContextText, false, grounded, nullptr);
+    if (rolePrompt.user_content.find("[\"user\"]") != std::string::npos ||
+        rolePrompt.user_content.find("[\"assistant\"]") != std::string::npos) {
+        std::cerr << "testChatMultiTurnMessageAssembly: flattened JSON history leaked into user\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (rolePrompt.user_content.find("What is EGAR") != std::string::npos) {
+        std::cerr << "testChatMultiTurnMessageAssembly: prior user turn leaked into current user\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+    if (rolePrompt.user_content.find(
+            std::string(Thoth::ChatPrompt::kUserQueryHeader) + input) == std::string::npos) {
+        std::cerr << "testChatMultiTurnMessageAssembly: current query missing from user message\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    fs::remove(cfg.database_path);
+    return true;
+}
+
 // Plan N N6 / N-T9 — greeting-skip context telemetry unchanged; response has counts/flags only.
 static bool testPlanNGreetingSkipTelemetryUnchanged() {
     Thoth::ChatRagContextRecord greeting;
@@ -6448,6 +6695,145 @@ static bool testPlanNGreetingSkipTelemetryUnchanged() {
     }
     if (resp.contains("raw_text") || resp.contains("sanitized_text") || resp.contains("prompt")) {
         std::cerr << "testPlanNGreetingSkipTelemetryUnchanged: telemetry must not dump raw text\n";
+        return false;
+    }
+    if (!resp.contains("generation_attempt_count") || !resp.contains("turn_total_ms")
+        || !resp.contains("response_valid")) {
+        std::cerr << "testPlanNGreetingSkipTelemetryUnchanged: missing Phase 0 timing fields\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testChatRagPhase0ResponseTelemetryShape() {
+    Thoth::ChatRagResponseRecord response;
+    response.request_id = "phase0-shape";
+    response.generation_attempt_count = 2;
+    response.turn_total_ms = 1200;
+    response.queue_wait_ms = 50;
+    response.retrieval_latency_ms = 100;
+    response.prompt_build_latency_ms = 5;
+    response.generation_latency_ms = 1000;
+    response.post_processing_latency_ms = 3;
+    response.telemetry_accounted_ms = 1158;
+    response.telemetry_unaccounted_ms = 42;
+    response.response_valid = false;
+    response.invalid_reason = "query_echo";
+
+    Thoth::ChatGenerationAttemptRecord attempt;
+    attempt.attempt = 1;
+    attempt.latency_ms = 600;
+    attempt.prompt_tokens = 400;
+    attempt.completion_tokens = 120;
+    attempt.finish_reason = "length";
+    attempt.provider_ok = true;
+    attempt.raw_answer_chars = 800;
+    attempt.sanitize_reason = Thoth::ChatGeneration::kSanitizeTruncatedTranscriptMarker;
+    response.generation_attempts.push_back(attempt);
+
+    const auto json = Thoth::ChatRagLogger::responseToJson(response);
+    if (!json.contains("generation_attempts") || !json["generation_attempts"].is_array()
+        || json["generation_attempts"].size() != 1) {
+        std::cerr << "testChatRagPhase0ResponseTelemetryShape: generation_attempts missing\n";
+        return false;
+    }
+    const auto& row = json["generation_attempts"][0];
+    if (row.value("attempt", 0) != 1 || row.value("latency_ms", 0) != 600
+        || row.value("completion_tokens", 0) != 120) {
+        std::cerr << "testChatRagPhase0ResponseTelemetryShape: attempt row mismatch\n";
+        return false;
+    }
+    if (json.value("telemetry_unaccounted_ms", -1) != 42
+        || json.value("invalid_reason", "") != "query_echo") {
+        std::cerr << "testChatRagPhase0ResponseTelemetryShape: reconciliation fields wrong\n";
+        return false;
+    }
+    if (json.contains("raw_sample_first") || json.contains("raw_sample_last")) {
+        std::cerr << "testChatRagPhase0ResponseTelemetryShape: raw samples must be omitted when empty\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testChatPhase0GenerationAttemptCount() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("Hello from retry.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.max_tokens = 64;
+
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (out.generation_attempt_count != 2
+        || static_cast<int>(out.generation_attempts.size()) != 2) {
+        std::cerr << "testChatPhase0GenerationAttemptCount: expected 2 tracked attempts, got "
+                  << out.generation_attempt_count << "\n";
+        return false;
+    }
+    if (out.generation_attempts[0].attempt != 1 || out.generation_attempts[1].attempt != 2) {
+        std::cerr << "testChatPhase0GenerationAttemptCount: attempt indices wrong\n";
+        return false;
+    }
+    if (out.generation_latency_ms < 0) {
+        std::cerr << "testChatPhase0GenerationAttemptCount: generation_latency_ms invalid\n";
+        return false;
+    }
+    const std::int64_t summed = out.generation_attempts[0].latency_ms
+                              + out.generation_attempts[1].latency_ms;
+    if (out.generation_latency_ms != summed) {
+        std::cerr << "testChatPhase0GenerationAttemptCount: generation_latency_ms mismatch\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testChatPhase0ResponseValidityTelemetryOnly() {
+    const auto echo = Thoth::ChatGeneration::assessResponseValidityForTelemetry(
+        "What improvements have been completed?",
+        "What improvements have been completed?",
+        Thoth::ChatGeneration::kSanitizeTruncatedTranscriptMarker);
+    if (echo.valid || echo.invalid_reason != Thoth::ChatGeneration::kInvalidReasonQueryEcho) {
+        std::cerr << "testChatPhase0ResponseValidityTelemetryOnly: query echo not flagged\n";
+        return false;
+    }
+
+    const auto ok = Thoth::ChatGeneration::assessResponseValidityForTelemetry(
+        "Thoth completed GRAG integration and Plan N chat safety.",
+        "What improvements have been completed?",
+        Thoth::ChatGeneration::kSanitizeNone);
+    if (!ok.valid) {
+        std::cerr << "testChatPhase0ResponseValidityTelemetryOnly: valid answer flagged invalid\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testChatPhase0RawCompletionSampleEnv() {
+    const auto disabled = Thoth::ChatGeneration::buildRawCompletionSample(
+        "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-extra-tail");
+    if (!disabled.first.empty() || !disabled.last.empty()) {
+        std::cerr << "testChatPhase0RawCompletionSampleEnv: samples must be empty when env unset\n";
+        return false;
+    }
+
+#if defined(_WIN32)
+    _putenv("THOTH_LOG_RAW_CHAT_COMPLETION=1");
+#else
+    setenv("THOTH_LOG_RAW_CHAT_COMPLETION", "1", 1);
+#endif
+    const std::string long_text(200, 'x');
+    const auto enabled = Thoth::ChatGeneration::buildRawCompletionSample(long_text);
+#if defined(_WIN32)
+    _putenv("THOTH_LOG_RAW_CHAT_COMPLETION=");
+#else
+    unsetenv("THOTH_LOG_RAW_CHAT_COMPLETION");
+#endif
+
+    if (enabled.first.size() != 80 || enabled.last.size() != 80) {
+        std::cerr << "testChatPhase0RawCompletionSampleEnv: sample size wrong\n";
         return false;
     }
     return true;
@@ -6779,10 +7165,62 @@ static bool testGuiR1RemoteIngestHostOnlyPresentation() {
         return false;
     }
 
+    if (formatLocalNoteStripActivity(3, 0) != kHostOnlyTooltip) {
+        std::cerr << "testGuiR1: unsent slots must show host-only strip\n";
+        return false;
+    }
+    if (!formatLocalNoteStripActivity(3, 1).empty()
+        || !formatLocalNoteStripActivity(3, 3).empty()
+        || !formatLocalNoteStripActivity(0, 0).empty()) {
+        std::cerr << "testGuiR1: attached or empty slots must clear host-only strip\n";
+        return false;
+    }
+
     using namespace Thoth;
     if (progressSourceForBackendEvent(true) != ProgressSource::EngineEvent
         || progressSourceForBackendEvent(false) != ProgressSource::LocalBackendEvent) {
         std::cerr << "testGuiR1: progress source must follow isRemote not supportsIngest\n";
+        return false;
+    }
+
+    return true;
+}
+
+static bool testLocalNoteSlotHidesCorpusUntilSent() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    LocalNoteEngineInfo reconcile_only{
+        "doc-abc", "EGAR.md", {}, "hash-1", 95, false, false, true};
+    if (localNoteEngineSlotShowsAttachedStatus(reconcile_only)) {
+        std::cerr << "testLocalNoteSlotHidesCorpusUntilSent: reconcile cache must stay host-only\n";
+        return false;
+    }
+
+    LocalNoteEngineInfo attached{
+        "doc-abc", "EGAR.md", "rev-1", "hash-1", 95, false, false, true};
+    if (!localNoteEngineSlotShowsAttachedStatus(attached)) {
+        std::cerr << "testLocalNoteSlotHidesCorpusUntilSent: sent slot must show engine status\n";
+        return false;
+    }
+
+    LocalNoteEngineInfo indexing{
+        "doc-abc", "EGAR.md", "rev-1", "hash-1", -1, true, false, true};
+    if (!localNoteEngineSlotShowsAttachedStatus(indexing)) {
+        std::cerr << "testLocalNoteSlotHidesCorpusUntilSent: indexing slot must show engine status\n";
+        return false;
+    }
+
+    ChatSession session;
+    session.ragFilePaths = {"/host/a.md", "/host/b.md"};
+    session.localNoteEngine["/host/a.md"] = reconcile_only;
+    if (countAttachedLocalNotes(session) != 0) {
+        std::cerr << "testLocalNoteSlotHidesCorpusUntilSent: unsent slots must count 0 attached\n";
+        return false;
+    }
+    session.localNoteEngine["/host/b.md"] = attached;
+    if (countAttachedLocalNotes(session) != 1) {
+        std::cerr << "testLocalNoteSlotHidesCorpusUntilSent: one sent slot must count 1 attached\n";
         return false;
     }
 
@@ -9028,6 +9466,389 @@ static bool testPlanNGenerateFallback() {
     }
     if (out.sanitized_text.find("Empty completion") != std::string::npos) {
         std::cerr << "testPlanNGenerateFallback: Empty completion in result\n";
+        return false;
+    }
+    return true;
+}
+
+// CSG-B B.2 — Layer 1 scaffold assessment.
+static bool testCsgBScaffoldAssessment() {
+    const std::string regurgitated =
+        "Document: architectural_facts.md\n"
+        "source_span=29-33\n"
+        "Use AddCollapsiblePane for sidebar sections.\n"
+        "---\n"
+        "Document: architectural_facts.md\n"
+        "source_span=40-44\n"
+        "Never bypass the collapsible pane pattern.\n";
+
+    const auto positive = Thoth::ChatGeneration::assessChunkFormatRegurgitation(regurgitated);
+    if (!positive.detected || positive.document_header_count < 2) {
+        std::cerr << "testCsgBScaffoldAssessment: multi-chunk scaffold not detected\n";
+        return false;
+    }
+
+    const std::string prose =
+        "Per architectural_facts.md, sidebar sections must use AddCollapsiblePane.";
+    if (Thoth::ChatGeneration::assessChunkFormatRegurgitation(prose).detected) {
+        std::cerr << "testCsgBScaffoldAssessment: inline filename flagged\n";
+        return false;
+    }
+
+    const std::string jsonBody =
+        "{\"tool_call\":{\"name\":\"summarize_text\",\"input\":{\"text\":\"hello\"}}}";
+    if (Thoth::ChatGeneration::assessChunkFormatRegurgitation(jsonBody).detected) {
+        std::cerr << "testCsgBScaffoldAssessment: JSON flagged\n";
+        return false;
+    }
+
+    const std::string inlineDocument =
+        "This document explains the sidebar rules in plain language.";
+    if (Thoth::ChatGeneration::assessChunkFormatRegurgitation(inlineDocument).detected) {
+        std::cerr << "testCsgBScaffoldAssessment: prose 'document' flagged\n";
+        return false;
+    }
+    return true;
+}
+
+// CSG-B B.2 — Layer 2 answer quality assessment.
+static bool testCsgBAnswerQualityAssessment() {
+    const std::string pasted =
+        "Use AddCollapsiblePane for sidebar sections.\n"
+        "Never bypass the collapsible pane pattern.\n";
+    const auto pastedQuality = Thoth::ChatGeneration::assessAnswerQuality(pasted);
+    if (!pastedQuality.pasted_retrieval_context || pastedQuality.complete_assistant_answer) {
+        std::cerr << "testCsgBAnswerQualityAssessment: fragment collage not detected\n";
+        return false;
+    }
+
+    const std::string complete =
+        "The sidebar rules require AddCollapsiblePane so sections stay collapsible and scrollable.";
+    const auto completeQuality = Thoth::ChatGeneration::assessAnswerQuality(complete);
+    if (!completeQuality.complete_assistant_answer || completeQuality.pasted_retrieval_context) {
+        std::cerr << "testCsgBAnswerQualityAssessment: conversational answer not accepted\n";
+        return false;
+    }
+    return true;
+}
+
+// CSG-B B.3 — chunk sanitize strips scaffold and reassess passes.
+static bool testCsgBChunkSanitizeStripsScaffold() {
+    const std::string input =
+        "Document: architectural_facts.md\n"
+        "source_span=29-33\n"
+        "Use AddCollapsiblePane for sidebar sections.\n"
+        "---\n"
+        "Document: architectural_facts.md\n"
+        "source_span=40-44\n"
+        "Never bypass the collapsible pane pattern.\n";
+
+    const auto out = Thoth::ChatGeneration::sanitizeChunkFormatScaffold(input);
+    if (out.empty_after_sanitize
+        || out.sanitize_reason != Thoth::ChatGeneration::kSanitizeStrippedChunkScaffold) {
+        std::cerr << "testCsgBChunkSanitizeStripsScaffold: sanitize failed\n";
+        return false;
+    }
+    if (out.sanitized_text.find("Document:") != std::string::npos
+        || out.sanitized_text.find("source_span=") != std::string::npos) {
+        std::cerr << "testCsgBChunkSanitizeStripsScaffold: scaffold leaked\n";
+        return false;
+    }
+    if (Thoth::ChatGeneration::assessChunkFormatRegurgitation(out.sanitized_text).detected) {
+        std::cerr << "testCsgBChunkSanitizeStripsScaffold: reassess still positive\n";
+        return false;
+    }
+    return true;
+}
+
+// CSG-B B.3 — scaffold hides complete answer → return without regurgitation retry.
+static bool testCsgBGenerateScaffoldWrappedCompleteAnswer() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push(
+        "Document: architectural_facts.md\n"
+        "source_span=29-33\n"
+        "The sidebar rules require AddCollapsiblePane so sections stay collapsible.\n");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    const auto out =
+        Thoth::ChatGeneration::generateAndSanitizeChat(llm, "Explain sidebar rules.", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.provider_ok || out.retry_due_to_regurgitation || out.fallback_used) {
+        std::cerr << "testCsgBGenerateScaffoldWrappedCompleteAnswer: unexpected flags\n";
+        return false;
+    }
+    if (out.sanitized_text.find("Document:") != std::string::npos
+        || out.sanitized_text.find("AddCollapsiblePane") == std::string::npos) {
+        std::cerr << "testCsgBGenerateScaffoldWrappedCompleteAnswer: bad sanitized text\n";
+        return false;
+    }
+    return true;
+}
+
+// CSG-B B.3 — pasted chunk bodies after strip → Phase 1 returns usable stripped prose (one attempt).
+static bool testCsgBGeneratePastedContextRetry() {
+    const std::string regurgitated =
+        "Document: architectural_facts.md\n"
+        "source_span=29-33\n"
+        "Use AddCollapsiblePane for sidebar sections.\n"
+        "---\n"
+        "Document: architectural_facts.md\n"
+        "source_span=40-44\n"
+        "Never bypass the collapsible pane pattern.\n";
+
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push(regurgitated);
+    Thoth::RobustnessMockResponses::push(
+        "Sidebar sections must use AddCollapsiblePane and remain scrollable.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.user_query = "Explain sidebar rules.";
+    const auto out =
+        Thoth::ChatGeneration::generateAndSanitizeChat(llm, "Explain sidebar rules.", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.provider_ok || out.fallback_used || !out.response_valid) {
+        std::cerr << "testCsgBGeneratePastedContextRetry: expected usable single-attempt return\n";
+        return false;
+    }
+    if (out.generation_attempt_count != 1) {
+        std::cerr << "testCsgBGeneratePastedContextRetry: expected one generation attempt, got "
+                  << out.generation_attempt_count << "\n";
+        return false;
+    }
+    if (out.sanitized_text.find("Document:") != std::string::npos
+        || out.sanitized_text.find("AddCollapsiblePane") == std::string::npos) {
+        std::cerr << "testCsgBGeneratePastedContextRetry: returned stripped paste\n";
+        return false;
+    }
+    return true;
+}
+
+// CSG-B B.3 — persistent invalid output → Phase 1 fallback after two attempts.
+static bool testCsgBGenerateRegurgitationFallback() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("[User] Explain sidebar rules.");
+    Thoth::RobustnessMockResponses::push("[User] Explain sidebar rules.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.use_greeting_fallback = false;
+    opts.user_query = "Explain sidebar rules.";
+    const auto out =
+        Thoth::ChatGeneration::generateAndSanitizeChat(llm, "Explain sidebar rules.", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.fallback_used || out.response_valid
+        || out.invalid_reason != Thoth::ChatGeneration::kInvalidReasonNoUsableGeneration) {
+        std::cerr << "testCsgBGenerateRegurgitationFallback: fallback flags wrong\n";
+        return false;
+    }
+    if (out.generation_attempt_count != 2) {
+        std::cerr << "testCsgBGenerateRegurgitationFallback: expected 2 attempts\n";
+        return false;
+    }
+    if (out.sanitized_text != Thoth::ChatGeneration::kFallbackGeneric) {
+        std::cerr << "testCsgBGenerateRegurgitationFallback: wrong fallback text\n";
+        return false;
+    }
+    return true;
+}
+
+// Phase 1 — query echo rejected; second attempt returned when first echoes user query.
+static bool testPhase1QueryEchoRejected() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("Tell me about completed improvements.");
+    Thoth::RobustnessMockResponses::push(
+        "Thoth completed GRAG integration and memory consolidation.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.user_query = "Tell me about completed improvements.";
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(
+        llm, "Tell me about completed improvements.", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.provider_ok || out.fallback_used || !out.response_valid || !out.retried_without_stops) {
+        std::cerr << "testPhase1QueryEchoRejected: expected retry success\n";
+        return false;
+    }
+    if (out.generation_attempt_count != 2) {
+        std::cerr << "testPhase1QueryEchoRejected: expected 2 attempts\n";
+        return false;
+    }
+    if (out.sanitized_text.find("GRAG integration") == std::string::npos) {
+        std::cerr << "testPhase1QueryEchoRejected: unexpected text: " << out.sanitized_text << "\n";
+        return false;
+    }
+    return true;
+}
+
+// Phase 1 — truncated transcript short prefix rejected; valid body on retry accepted.
+static bool testPhase1TruncateShortPrefixRejected() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push(
+        "Tell me about completed improvements.\n[User] Tell me about completed improvements.\n");
+    Thoth::RobustnessMockResponses::push("Completed improvements include GRAG and Plan N safety.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.user_query = "Tell me about completed improvements.";
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(
+        llm, "Tell me about completed improvements.", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.provider_ok || out.fallback_used || !out.response_valid) {
+        std::cerr << "testPhase1TruncateShortPrefixRejected: expected valid retry\n";
+        return false;
+    }
+    if (out.sanitized_text.find("GRAG") == std::string::npos) {
+        std::cerr << "testPhase1TruncateShortPrefixRejected: bad sanitized text\n";
+        return false;
+    }
+    return true;
+}
+
+// Phase 1 — empty then empty → fallback with accurate invalid telemetry.
+static bool testPhase1EmptyOutputFallback() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.use_greeting_fallback = false;
+    opts.user_query = "hello";
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (!out.fallback_used || out.response_valid
+        || out.invalid_reason != Thoth::ChatGeneration::kInvalidReasonNoUsableGeneration) {
+        std::cerr << "testPhase1EmptyOutputFallback: fallback telemetry wrong\n";
+        return false;
+    }
+    if (out.sanitized_text != Thoth::ChatGeneration::kFallbackGeneric) {
+        std::cerr << "testPhase1EmptyOutputFallback: wrong fallback text\n";
+        return false;
+    }
+    return true;
+}
+
+// Phase 1 — non-empty sanitized output preferred over generic fallback (CSG-B paste).
+static bool testPhase1PreferUsableOverFallback() {
+    const std::string regurgitated =
+        "Document: completed_improvements_log.md\n"
+        "source_span=10-20\n"
+        "The system completed GRAG Phase 3 routing and graph memory prototype work.\n";
+
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push(regurgitated);
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.use_greeting_fallback = false;
+    opts.user_query = "Tell me about completed improvements.";
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(
+        llm, "Tell me about completed improvements.", opts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (out.fallback_used || !out.response_valid || out.generation_attempt_count != 1) {
+        std::cerr << "testPhase1PreferUsableOverFallback: should accept usable attempt 1\n";
+        return false;
+    }
+    if (out.sanitized_text.find("GRAG Phase 3") == std::string::npos) {
+        std::cerr << "testPhase1PreferUsableOverFallback: prose missing\n";
+        return false;
+    }
+    return true;
+}
+
+// Phase 1 — hard cap at two queryDetailed() calls even when a third mock is queued.
+static bool testPhase1MaxTwoGenerationAttempts() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("This third response must never run.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.user_query = "hello";
+    const auto out = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", opts);
+
+    if (out.generation_attempt_count != 2) {
+        std::cerr << "testPhase1MaxTwoGenerationAttempts: expected 2 attempts, got "
+                  << out.generation_attempt_count << "\n";
+        Thoth::RobustnessMockResponses::reset();
+        return false;
+    }
+    if (Thoth::RobustnessMockResponses::size() != 1) {
+        std::cerr << "testPhase1MaxTwoGenerationAttempts: third mock should remain unused\n";
+        Thoth::RobustnessMockResponses::reset();
+        return false;
+    }
+    Thoth::RobustnessMockResponses::reset();
+    return true;
+}
+
+// Phase 1 — regurgitation path must not spawn a third generation with reminder prompt.
+static bool testPhase1NoThirdRetry() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("[User] Explain sidebar rules.");
+    Thoth::RobustnessMockResponses::push("[User] Explain sidebar rules.");
+    Thoth::RobustnessMockResponses::push("Third generation must not run.");
+
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions opts;
+    opts.user_query = "Explain sidebar rules.";
+    const auto out =
+        Thoth::ChatGeneration::generateAndSanitizeChat(llm, "Explain sidebar rules.", opts);
+
+    if (out.generation_attempt_count != 2) {
+        std::cerr << "testPhase1NoThirdRetry: expected exactly 2 attempts\n";
+        Thoth::RobustnessMockResponses::reset();
+        return false;
+    }
+    if (Thoth::RobustnessMockResponses::size() != 1) {
+        std::cerr << "testPhase1NoThirdRetry: third mock must remain queued\n";
+        Thoth::RobustnessMockResponses::reset();
+        return false;
+    }
+    Thoth::RobustnessMockResponses::reset();
+    return true;
+}
+
+// Phase 1 — response_valid / fallback_used reflect the final returned text.
+static bool testPhase1TelemetryFlagsAccurate() {
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("A helpful answer about improvements.");
+    LLMInterface llm(LLMBackend::Ollama, nullptr);
+    Thoth::ChatGeneration::ChatGenerateOptions okOpts;
+    okOpts.user_query = "Tell me about improvements.";
+    const auto okOut = Thoth::ChatGeneration::generateAndSanitizeChat(
+        llm, "Tell me about improvements.", okOpts);
+    if (!okOut.response_valid || okOut.fallback_used
+        || okOut.invalid_reason != Thoth::ChatGeneration::kInvalidReasonNone) {
+        std::cerr << "testPhase1TelemetryFlagsAccurate: success flags wrong\n";
+        return false;
+    }
+
+    Thoth::RobustnessMockResponses::reset();
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::RobustnessMockResponses::push("");
+    Thoth::ChatGeneration::ChatGenerateOptions failOpts;
+    failOpts.user_query = "hello";
+    const auto failOut = Thoth::ChatGeneration::generateAndSanitizeChat(llm, "hello", failOpts);
+    Thoth::RobustnessMockResponses::reset();
+
+    if (failOut.response_valid || !failOut.fallback_used
+        || failOut.invalid_reason != Thoth::ChatGeneration::kInvalidReasonNoUsableGeneration) {
+        std::cerr << "testPhase1TelemetryFlagsAccurate: fallback flags wrong\n";
+        return false;
+    }
+    if (failOut.sanitized_text != Thoth::ChatGeneration::kFallbackGeneric) {
+        std::cerr << "testPhase1TelemetryFlagsAccurate: fallback text mismatch\n";
         return false;
     }
     return true;
@@ -17934,6 +18755,117 @@ static bool testAlpEPickerIncludesRetryAndConflict() {
     return true;
 }
 
+static bool testAlpEPickerIncludesLinkOnly() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+
+    std::vector<LocalNoteIntent> intents;
+    intents.push_back(LocalNoteIntent{
+        "/host/a.md", "a.md", "no_op", "hash_matches_committed", "doc-a", "a.md", true});
+    intents.push_back(LocalNoteIntent{
+        "/host/b.md", "b.md", "link_only", "hash_matches_committed", "doc-b", "b.md", true});
+
+    const auto picker = collectPickerCandidates(intents);
+    if (picker.size() != 1 || picker.front().host_path != "/host/b.md") {
+        std::cerr << "testAlpEPickerIncludesLinkOnly: expected only link_only candidate\n";
+        return false;
+    }
+    if (actionPickerLabel(picker.front().action) != "Attach to chat") {
+        std::cerr << "testAlpEPickerIncludesLinkOnly: label wrong\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testAlpEDryRunLinkOnlyForUnlinkedSession() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    const fs::path reg_path = Thoth::DocumentRegistry::defaultRegistryPath();
+    const fs::path reg_backup = reg_path.string() + ".bak." + std::to_string(getpid());
+    std::error_code ec;
+    const bool had_registry = fs::exists(reg_path, ec);
+    if (had_registry) {
+        fs::copy(reg_path, reg_backup, fs::copy_options::overwrite_existing, ec);
+    }
+    auto restore_registry = [&]() {
+        if (had_registry) {
+            fs::copy(reg_backup, reg_path, fs::copy_options::overwrite_existing, ec);
+            fs::remove(reg_backup, ec);
+        } else if (fs::exists(reg_path, ec)) {
+            fs::remove(reg_path, ec);
+        }
+    };
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    const std::string slot_name =
+        "alp_e_linkonly_" + std::to_string(getpid()) + ".md";
+    const fs::path attachment_path =
+        Thoth::AlpStoragePaths::operatorAttachmentPath(slot_name);
+    if (fs::exists(attachment_path)) {
+        fs::remove(attachment_path);
+    }
+
+    FileHandler fh;
+    const std::string body =
+        "ALP-E dry_run link_only for unlinked session token ALPELINK.\n";
+
+    const auto created = idx.createCorpusDocument(
+        fh.getRagDirectory(), slot_name, body, "session-alp-e-link-a");
+    if (!created.ok) {
+        std::cerr << "testAlpEDryRunLinkOnlyForUnlinkedSession: create failed\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+    if (!waitAlpCommittedRevision(created.document_id, idx)) {
+        std::cerr << "testAlpEDryRunLinkOnlyForUnlinkedSession: not committed\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    IndexManager::CreateCorpusDocumentOptions dry_opts;
+    dry_opts.dry_run = true;
+    dry_opts.content_hash = Thoth::sha256Hex(body);
+
+    const auto linked_intent = idx.createCorpusDocument(
+        fh.getRagDirectory(), slot_name, body, "session-alp-e-link-a", dry_opts);
+    if (!linked_intent.ok || linked_intent.action != "no_op") {
+        std::cerr << "testAlpEDryRunLinkOnlyForUnlinkedSession: linked session expected "
+                     "no_op, got "
+                  << linked_intent.action << "\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    const auto unlinked_intent = idx.createCorpusDocument(
+        fh.getRagDirectory(), slot_name, body, "session-alp-e-link-b", dry_opts);
+    if (!unlinked_intent.ok || unlinked_intent.action != "link_only") {
+        std::cerr << "testAlpEDryRunLinkOnlyForUnlinkedSession: unlinked session expected "
+                     "link_only, got "
+                  << unlinked_intent.action << "\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+    if (unlinked_intent.document_id != created.document_id) {
+        std::cerr << "testAlpEDryRunLinkOnlyForUnlinkedSession: document_id mismatch\n";
+        restore_registry();
+        fs::remove(attachment_path);
+        return false;
+    }
+
+    restore_registry();
+    fs::remove(attachment_path);
+    return true;
+}
+
 static bool testAlpERemapSandboxCacheKeys() {
     using namespace Thoth;
     using namespace Thoth::LocalNoteEngineSync;
@@ -18931,7 +19863,16 @@ int main() {
     if (!testPlanNFormatChunkSourceSpanRange()) failures++;
     if (!testPlanNFormatChunkSourceSpanSingle()) failures++;
     if (!testPlanNFormatChunkSourceSpanOmitted()) failures++;
+    if (!testChatRagMetadataOffPresentation()) failures++;
+    if (!testChatInferenceModeEnvDefault()) failures++;
+    if (!testLlamaChatPayloadSerialization()) failures++;
+    if (!testChatRolePromptAssembly()) failures++;
+    if (!testChatMultiTurnMessageAssembly()) failures++;
     if (!testPlanNGreetingSkipTelemetryUnchanged()) failures++;
+    if (!testChatRagPhase0ResponseTelemetryShape()) failures++;
+    if (!testChatPhase0GenerationAttemptCount()) failures++;
+    if (!testChatPhase0ResponseValidityTelemetryOnly()) failures++;
+    if (!testChatPhase0RawCompletionSampleEnv()) failures++;
     if (!testPlanNMemoryOncePerTurn()) failures++;
     if (!testPlanNCpScaffoldSanitizedToMemory()) failures++;
     if (!testPlanNCpProviderFailure()) failures++;
@@ -18943,6 +19884,7 @@ int main() {
     if (!testGuiPhase1RemoteRagHonestyPolicy()) failures++;
     if (!testGuiR1RemoteIngestHostOnlyPresentation()) failures++;
     if (!testLocalNoteEngineCorpusSync()) failures++;
+    if (!testLocalNoteSlotHidesCorpusUntilSent()) failures++;
     if (!testLocalNoteSendSelectionFilter()) failures++;
     if (!testGuiPhase2BackendCapabilitiesAndPresentation()) failures++;
     if (!testGuiPhase3CognitiveDiagnosticsAuthority()) failures++;
@@ -18991,6 +19933,8 @@ int main() {
     if (!testAlpFOrphanAttachmentExcluded()) failures++;
     if (!testAlpEPickerExcludesNoOpSameHash()) failures++;
     if (!testAlpEPickerIncludesRetryAndConflict()) failures++;
+    if (!testAlpEPickerIncludesLinkOnly()) failures++;
+    if (!testAlpEDryRunLinkOnlyForUnlinkedSession()) failures++;
     if (!testAlpERemapSandboxCacheKeys()) failures++;
     if (!testAlpEUpgradeLegacyDocumentIds()) failures++;
     if (!testAlpELocalNoteDeleteClearsCacheOnly()) failures++;
@@ -19023,6 +19967,19 @@ int main() {
     if (!testPlanNGenerateRetrySuccess()) failures++;
     if (!testPlanNGenerateSanitizeEmptyThenRetry()) failures++;
     if (!testPlanNGenerateFallback()) failures++;
+    if (!testCsgBScaffoldAssessment()) failures++;
+    if (!testCsgBAnswerQualityAssessment()) failures++;
+    if (!testCsgBChunkSanitizeStripsScaffold()) failures++;
+    if (!testCsgBGenerateScaffoldWrappedCompleteAnswer()) failures++;
+    if (!testCsgBGeneratePastedContextRetry()) failures++;
+    if (!testCsgBGenerateRegurgitationFallback()) failures++;
+    if (!testPhase1QueryEchoRejected()) failures++;
+    if (!testPhase1TruncateShortPrefixRejected()) failures++;
+    if (!testPhase1EmptyOutputFallback()) failures++;
+    if (!testPhase1PreferUsableOverFallback()) failures++;
+    if (!testPhase1MaxTwoGenerationAttempts()) failures++;
+    if (!testPhase1NoThirdRetry()) failures++;
+    if (!testPhase1TelemetryFlagsAccurate()) failures++;
     if (!testPlanNGenerateTransportFailure()) failures++;
     if (!testPlanNQueryCompatibility()) failures++;
     if (!testE1GragBenchmarkSmoke()) failures++;
