@@ -179,12 +179,9 @@ inline std::optional<std::string> formatDecisionLine(EventType type,
                                                      const std::string& controller_state_name,
                                                      const std::string& step_id) {
     switch (type) {
-    case EventType::COGNITION_STAGE:
-        return formatCognitionStageLine(metadata);
-
     case EventType::STATE_CHANGED:
         if (controller_state_name == "PLANNING") {
-            // Align with optimistic / COGNITION_STAGE planning started.
+            // Align with optimistic planning started.
             return std::string(kOptimisticPlanningStartedLine);
         }
         if (controller_state_name == "REVISING_PLAN") {
@@ -199,35 +196,6 @@ inline std::optional<std::string> formatDecisionLine(EventType type,
         }
         std::ostringstream oss;
         oss << "Plan reuse search finished: found " << count << " similar past plan(s)";
-        return oss.str();
-    }
-
-    case EventType::TRAJECTORY_INJECTION: {
-        const bool injected = metadata.value("injected", false);
-        if (!injected && metadata.value("trajectory_count", 0) <= 0) {
-            return std::string("Trajectory search finished: not found");
-        }
-        std::ostringstream oss;
-        oss << "Trajectory search finished: found "
-            << metadata.value("trajectory_count", 1) << " (injecting)";
-        return oss.str();
-    }
-
-    case EventType::STRATEGY_INJECTION: {
-        const bool injected = metadata.value("injected", false);
-        const float sim = metadata.value("similarity", 0.0f);
-        const float min_sim = metadata.value("min_similarity", 0.40f);
-        if (!injected) {
-            std::ostringstream oss;
-            oss << "Strategy lookup finished: no match ≥ " << std::fixed;
-            oss.precision(2);
-            oss << min_sim;
-            return oss.str();
-        }
-        std::ostringstream oss;
-        oss << "Strategy lookup finished: matched (sim " << std::fixed;
-        oss.precision(2);
-        oss << sim << " ≥ " << min_sim << ") — injecting into prompt";
         return oss.str();
     }
 
@@ -362,14 +330,11 @@ inline std::optional<std::string> formatDecisionLine(EventType type,
 inline std::string formatPhaseForEvent(EventType type,
                                        const std::string& controller_state_name,
                                        const nlohmann::json& metadata = nlohmann::json::object()) {
+    (void)metadata; // Reserved for future cognition-stage phase labels (not in Phase A EventType set).
     switch (type) {
-    case EventType::COGNITION_STAGE:
-        return formatPhaseForCognitionStage(metadata);
     case EventType::REFLECTION_REPLAN:
         return "Reflection → Planning";
     case EventType::PLAN_REUSE_INJECTION:
-    case EventType::STRATEGY_INJECTION:
-    case EventType::TRAJECTORY_INJECTION:
         return "Planning";
     case EventType::PLAN_CREATED:
         return "Plan ready";
