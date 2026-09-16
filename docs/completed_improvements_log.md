@@ -1,8 +1,233 @@
 # Completed Improvements Log
 
-Last updated: 2026-07-25 (llama.cpp dedicated embed server ✅; GUI Phase 12A ✅ graph statistics; Phase 1–11 ✅ · 12A ✅; Phase 0–12A 🔒; B1 Phase 1 Candidate `b1_v1`; G1e Phase 4 ✅ KEEP@−0.05)
+Last updated: 2026-09-15 (inference default → llama_cpp)
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
+
+## 2026-09-15 — Inference default llama_cpp; backend-neutral test gates
+
+**Status:** ✅ Implemented
+
+Aligned library/test preflight with the Compose/GUI stack:
+
+- Empty `THOTH_INFERENCE_BACKEND` → `llama_cpp`; default URLs `127.0.0.1:8080` / `:8081` (Ollama `:11434` only when backend is `ollama`)
+- Full test suite / episodic / chat-RAG / E2 gates use `probeInferenceBackend` / `isInferenceBackendReachable` instead of Ollama `/api/tags`
+- `OLLAMA_MODEL` / `OLLAMA_EMBED_MODEL` kept (historical names); documented as API model names for llama-server too
+- `OllamaClient` retained; nightly CI forces `THOTH_INFERENCE_BACKEND=ollama` until GGUFs exist on runners
+
+---
+
+## 2026-09-13 — Banner Run goal control
+
+**Status:** ✅ Implemented
+
+The active-goal banner now provides **Run**, which starts or restarts an
+executive plan using the already displayed session goal without opening the
+Revise dialog. Run and Revise share the same session-identity, optimistic
+planning, and `executeGoal` dispatch path. Plain **Send** remains chat-only;
+it does not automatically execute the banner goal.
+
+---
+
+## 2026-09-13 — CSG-B manual acceptance; remaining manual status clarified
+
+**CSG-B B.4:** ✅ Operator accepted the `architectural_facts.md` regression
+scenario: chat responses were coherent, used RAG files, did not expose retrieval
+scaffold, and showed almost no hallucination. The locked CSG-B protocol now
+records B.4 as manually accepted.
+
+**CSG-A A.4:** 🔶 Not closed. The post-restart banner persists and the GUI sends
+`active_goal`, but observed chat retrieval does not use it; live diagnostics must
+show `goal_source: "session"` and non-zero directional magnitude before close-out.
+
+**ALP-G:** ⏸️ Full ALP1 certification is owner-deferred. G2b/G3 manual operator
+sign-off has not been performed; the existing automated harness remains available.
+
+---
+
+## 2026-09-12 — Observability right-column notebook (tabs)
+
+**Status:** ✅ Implemented
+
+**Problem:** Stacked independent AUI panes on the right crushed/hid panels; no reliable column scroll. User wanted full height per panel (like System State tabs) while staying on the right.
+
+**Changes:**
+- Single right AUI pane `Observability` → `wxNotebook` tabs: Cognitive State, Plan Execution, GRAG Diagnostics, Strategy Engine
+- Each tab gets full column height (inner list/tape scroll + wheel)
+- Future panels = new tabs; bottom System State notebook unchanged
+- `architectural_facts.md` §8 / `AGENTS.md` updated
+
+---
+
+## 2026-09-12 — GTK-1 Observability AUI geometry (dual column + sash room)
+
+**Status:** ✅ Implemented (superseded for layout by Observability notebook above)
+
+**Problem:** Four panes stacked on one Right dock (large MinSize) crushed to 1px → `GtkScrolledWindow` negative height / pixman invalid rect; vertical sashes dead; no outer scroll column.
+
+**Changes:**
+- Right Observability: **two columns** (`Row(0)` Cognitive+Plan, `Row(1)` GRAG+Strategy)
+- Observability MinSize **220×100**; larger BestSizes; default frame **1280×900** (min 1100×750)
+- System State bottom MinSize **200** (was 300) to leave vertical room for sashes
+
+---
+
+### 2026-09-12 — Day rollup (Cognitive GUI + GTK + AUI)
+
+| Item | Status |
+|------|--------|
+| Cognitive State panel (decision tape) | ✅ |
+| Phase 1 optimistic “Planning started” + Phase 2a `COGNITION_STAGE` schema | ✅ |
+| Phase 2b live mid-plan stages (unlock / epoch / planner progress) | ✅ |
+| Engine image rebuild for remote live stages | ✅ (ops) |
+| GTK-0 Class A–D hardening (buttons, mins, FitInside defer) | ✅ (partial; nested B/C remained until AUI) |
+| Observability → top-level AUI panes; tape → `wxTextCtrl` | ✅ (hosting → notebook) |
+| GTK-1 dual-column right AUI + sash room | ✅ superseded by notebook |
+| Observability right `wxNotebook` (4 tabs, full height) | ✅ |
+| Bottom System State notebook | unchanged (held) |
+
+---
+
+## 2026-09-12 — Observability panels → top-level AUI (post-GTK-0)
+
+**Status:** ✅ Implemented
+
+**Problem:** Nested Observability collapsibles under a right `wxScrolledWindow` caused GTK Class B/C scrollbar assertions and limited independent resize. User requirement: panels stay visible (no collapse-to-hide).
+
+**Changes:**
+- Cognitive State, Plan Execution, GRAG Diagnostics, Strategy Engine registered as **top-level AUI panes** (`CloseButton(false)`)
+- Removed right Observability `wxScrolledWindow` host + `DeferRightSidebarFit`
+- Cognitive decision tape: `wxListBox` → read-only `wxTextCtrl`
+- Bottom **System State** notebook unchanged (explicitly held)
+- Docs: `architectural_facts.md` §8, `AGENTS.md` (left-sidebar `AddCollapsiblePane` only), `GUI_RESTORATION_PROTOCOL.md` pointer
+
+---
+
+## 2026-09-12 — GTK layout warning hardening (Classes A–D)
+
+**Status:** ✅ Implemented (Class A improved; nested Class B/C fully addressed by AUI promotion above)
+
+**Problem:** Pre-existing wxGTK stderr noise (`GtkButton` negative content width, `GtkScrollbar` gadget distribute, negative height allocate, `GtkNotebook`/`GtkScrolledWindow` at 1px) — not introduced by Cognitive State Phase 2b. Captured in `logs/chat_send_trace.log`.
+
+**Changes:**
+- Goal-banner / Local Note **X** buttons: `wxDefaultSize` (restore theme-aware sizing from 2026-03-26)
+- Observability host AUI `MinSize` **150 → 350** (later removed with host); System State bottom notebook `MinSize` **280 → 300**
+- Collapsible toggle (left sidebar): `FitInside` + `m_auiManager.Update()` (§8)
+- Defer right-sidebar `FitInside` via `CallAfter` (superseded when right host removed)
+
+---
+
+## 2026-09-12 — Cognitive State Phase 2b (live mid-plan COGNITION_STAGE)
+
+**Status:** ✅ Implemented
+
+**Behavior:** `ExecutiveController` unlocks around plan-reuse search and `create_plan`; `planning_epoch_` + `planning_in_progress_` commit/discard aborted or superseded plans; progress hook on `IPlanner` → live `COGNITION_STAGE` for strategy / trajectory / llm_plan during planning (and reflection). Planner never takes controller `mutex_`.
+
+**Tests:** `testPhase2bCognitionStagesBeforePlanCreated`, `testPhase2bAbortDuringPlanningDiscardsCommit` (`THOTH_PHASE2B_ONLY=1`)
+
+**Note:** Remote Docker Engine must be rebuilt to surface live stages in the GUI (done same day).
+
+---
+
+## 2026-09-12 — Cognitive State Phase 1 + 2a (optimistic Planning + COGNITION_STAGE schema)
+
+**Status:** ✅ Implemented (Phase 2b live mid-plan emits — see entry above)
+
+**Phase 1:** Goal submit (`/goal`, Run Goal, Revise Goal) immediately paints **Planning started** on the Cognitive State panel (clears prior tape); consecutive duplicate Engine echo is suppressed; paint forced before deferred `RefreshAllPanels`.
+
+**Phase 2a:** `EventType::COGNITION_STAGE` + SSE map; display helpers for stage/phase started|finished (planning, plan_reuse, trajectory, strategy, llm_plan); timeline capacity 24; step lines prefer description; unit tests extended.
+
+---
+
+## 2026-09-12 — GUI cognitive-state panel (goal / executive decision tape)
+
+**Status:** ✅ Implemented (hosting later moved to top-level AUI — see Observability AUI entry)
+
+**Problem:** During `/goal` runs, operators only saw chat “Waiting for Engine…” / thin status lines — not live cognitive decision points (trajectory/strategy inject, plan context, step revise vs fail, reflection score).
+
+**Behavior:**
+
+- **Cognitive State** panel: current phase + decision tape (capacity 24; originally right-sidebar collapsible, now top-level AUI)
+- Distinct from chat-turn waiting chrome (conversation HTTP); goal events still must not blank an owned chat turn
+- Session-scoped: chat switch clears panel + executive strip
+- Engine now always emits plan-reuse (including miss), `STRATEGY_INJECTION` / `TRAJECTORY_INJECTION` (hit and miss), `STEP_FAILED.next_action`, terminal `trajectory_score`, and `STATE_CHANGED` on revise
+
+**Thresholds (display from events / headers — semantics unchanged):** strategy floor 0.40, reflection 0.6, trajectory inject floor 0.55
+
+**Delivered:** `CognitiveStatusPanel`, `cognitive_status_display.h`, Engine event promotions + SSE map, unit test `testCognitiveStatusDisplayHelpers`
+
+---
+
+## 2026-09-11 — Late Engine success paints transcript (watchdog unlock-only)
+
+**Status:** ✅ Implemented
+
+**Problem:** Slow chat turns (>3 min) unlocked Send via watchdog, marked the turn terminal, then ignored Engine success — reply existed on Engine but GUI stayed blank until restart.
+
+**Delivered:**
+
+- Watchdog / Esc: unlock Send **without** dropping `request_id` or terminal-failing the turn (`UnlockSendKeepInFlightTurn`)
+- Watchdog timeout **900s** (aligned with chat HTTP)
+- Late success still refreshes originating session; second GET verify attempt
+- Optimistic local **user** bubble on Engine send so chat isn’t only “Waiting for Engine…”
+
+---
+
+## 2026-09-11 — Chat-turn status chrome (Engine success ≠ transcript visibility)
+
+**Status:** ✅ Implemented
+
+**Problem:** Long Engine chat turns could clear “Agent thinking…” while the transcript was still blank — HTTP success arrived before the assistant row was visible (or refresh raced), so the UI looked finished with no reply.
+
+**Behavior (what you see):**
+
+- After Send: **Waiting for Engine… (elapsed)** while the turn is in flight
+- After Engine success: **Loading reply…** until that turn’s assistant text appears in the originating session
+- Then chrome clears; if the reply never appears after one short retry → explicit failure status
+- Send blocked while a reply is in progress: **Waiting — another reply is in progress.**
+- Goal/executive events do not blank an owned chat turn
+
+**Delivered:** `includes/chat_turn_ui_status.h`, MainFrame owner + refresh/verify/retry, unit tests `testChatTurnUiStatusHelpers`
+
+---
+
+## 2026-09-10 — Raise chat prompt budget (stop RAG truncation)
+
+**Status:** ✅ Implemented
+
+**Problem:** Chat RAG retrieved ~10k chars of `completed_improvements_log.md` (correctly ranked) but `PromptFactory` truncated injection to ~500 chars because `maxContextLength = max_tokens * 4` → **2048** chars. Model never saw “Test Suite Expansion”.
+
+**Delivered:**
+
+- `Config::chat_max_context_chars` default **16384** (JSON load/save); decoupled from `max_tokens`
+- `CommandProcessor::syncPromptConfig` uses `chat_max_context_chars`
+- `PromptFactory::PromptConfig::maxContextLength` default **16384**
+- `docker-compose.yml` llama-server `-c` **8192** (`LLAMA_CHAT_CTX`, was 2048)
+
+**Ops:** Rebuild Engine image; recreate `llama-server` + `thoth-engine` so n_ctx and new binary are live.
+
+---
+
+## 2026-09-10 — ALP amend: Local Note X unlinks session + Send reset
+
+**Status:** ✅ Implemented
+
+**Problem:** After removing a Local Note and re-adding the same file, **Send to Engine** stayed disabled (`no_op` excluded from picker) while the chat still retrieved the document via a **persisting session link**.
+
+**Protocol amend:** `ATTACHMENT_LIFECYCLE_PROTOCOL.md` ALP1 P0 — Local Note **X** now removes the **session↔document link** for the active chat (document/storage/chunks unchanged). Re-add + Send restores via `link_only`. Picker also treats `no_op` as eligible (“Already on Engine — confirm”).
+
+**Delivered:**
+
+- `DocumentRegistry::removeSessionLink` + `IndexManager::unlinkSessionDocument`
+- Engine `POST /v1/rag/session-links/remove` (`CorpusCreate::kHttpPathSessionLinkRemove`)
+- GUI/Remote/Local backends + `AgentInterface::unlinkSessionDocument`
+- MainFrame Local Note **X** → unlink + reconcile / Send chrome refresh
+- `isPickerEligibleAction` includes `no_op`
+- Unit tests: `testAlpFLocalNoteDeleteUnlinksSession`, picker/`EGAR` lifecycle updates
+
+**Ops:** Rebuild **Engine image** and **GUI** so unlink HTTP is live; restart Engine container after deploy.
+
+---
 
 ## 2026-07-30 — CSG-B chat response regurgitation handling
 
@@ -2689,3 +2914,27 @@ End-to-end chat Q&A pipeline: observability → benchmark → retrieval tuning �
 
 ### 2026-03-08
 ...
+
+
+## 2026-09-15 — Shared fifteen-minute LLM timeout budget
+
+- Added `llm_timeout_policy.h`: text generation defaults to 900 seconds and honors `THOTH_LLM_TIMEOUT_SECONDS`; malformed, nonpositive, or values too large for integer milliseconds fall back to 900 seconds.
+- Both llama-server and Ollama text-generation clients use the shared policy. Goal workflow LLM steps now use the configured budget as a floor, replacing the former 120/180-second rules; longer explicit step limits are preserved, including on saved plans. Other step types retain their existing limits.
+- The workflow budget still covers the entire step, including retries. Timeout does not cancel underlying asynchronous execution; this change does not alter cancellation or reflection policy.
+- Verification: `cmake --build --preset build-debug -j2` passed (core library, engine, GUI, and test executables); focused `THOTH_LLM_TIMEOUT_TESTS=1` tests passed; full `thoth-core-tests` and `reflection-ab-benchmark` passed with local network access. Initial sandbox-only HTTP endpoint failures were resolved by rerunning outside the network sandbox, without code changes.
+- Regression coverage includes default and overridden budgets, malformed/overflowing overrides, legacy short limits, longer explicit limits, non-LLM behavior, and successful/expired asynchronous execution using short mock delays.
+
+## 2026-09-16 — Phase A: deploy 900s timeout alignment (Docker Engine)
+
+**Status:** ✅ Deployed (runtime-aligned). Phase B (std::future destructor-join / cancellation) remains open.
+
+**Problem:** Running Docker Engine (Sep 12 image) still soft-timed LLM steps at **120s** while HTTP honored `THOTH_LLM_TIMEOUT_SECONDS=900`, producing `timeout_failure` after the model had already generated tokens.
+
+**Delivered:**
+- Submodule `813c14c`: `llm_timeout_policy.h` tracked; shared 900s budget; synthesis `max_retries=0`; `timeout_ms` on step events.
+- Parent `b9c58fa` + repair `7216f2b`: compose env `THOTH_LLM_TIMEOUT_SECONDS=900`; remote goals HTTP **2820s** (plan + plan-retry + synthesis + overhead); Decision Tape shows `[timeout_ms=…]` and raw error; Decision Tape no longer depends on unreleased `STRATEGY`/`TRAJECTORY`/`COGNITION` EventTypes.
+- Docker image `thoth-engine:local` (`sha256:1f625454…`) recreated with volumes `thoth_thoth-workspace` / `thoth_thoth-logs` preserved.
+- Runtime verify: env `900`; `nm` shows `Thoth::LlmTimeoutPolicy::timeoutSeconds()`; live goal `phase-a-timeout-verify` emitted `STEP_STARTED synthesize [timeout_ms=900000]`, synthesis `max_retries=0`, **PLAN_COMPLETED** (no `120000ms` failure). Synthesis wall for that run was ~47.7s (under 120s); a longer >120s generation pass was not completed in this session.
+- Focused tests: `THOTH_LLM_TIMEOUT_TESTS=1` on `thoth-core-tests` passed after EventType isolation repair.
+- **Explicitly deferred to Phase B:** `std::async` future destructor blocking after soft timeout (late work still joins before `STEP_FAILED` emission).
+
