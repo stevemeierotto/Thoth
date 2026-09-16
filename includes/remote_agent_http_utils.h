@@ -19,14 +19,16 @@ namespace ThothRemoteHttp {
 /**
  * Named timeouts for RemoteAgentBackend (libcurl).
  *
- * Chat/goals defaults align with engine→llama LLM budget (default 600s via
- * THOTH_LLM_TIMEOUT_SECONDS). Goals allow two planner LLM attempts + margin.
+ * Chat aligns with one engine→llama LLM budget (default 900s via
+ * THOTH_LLM_TIMEOUT_SECONDS). Goals must cover planner + optional planner
+ * retry + synthesis + transport/retrieval overhead — not merely 1× LLM budget.
  * Override both request timeouts with THOTH_REMOTE_HTTP_TIMEOUT_SECONDS.
  */
 inline constexpr long kConnectTimeoutSec = 10L;
 inline constexpr long kControlTimeoutSec = 30L;
-inline constexpr long kChatTimeoutSec = 600L;
-inline constexpr long kGoalsTimeoutSec = 1260L; // 2 * 600 + 60 planner-retry margin
+inline constexpr long kChatTimeoutSec = 900L;
+/** 3×900 (plan, plan retry, synthesis) + 120s transport/retrieval overhead. */
+inline constexpr long kGoalsTimeoutSec = 2820L;
 inline constexpr long kHealthReadyTimeoutSec = 10L;
 
 /**

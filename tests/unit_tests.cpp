@@ -19,6 +19,9 @@
 #include "AgentInterface.h"
 #include "remote_agent_backend.h"
 #endif
+#include "llm_timeout_policy.h"
+#include "plan_validator.h"
+#include "cognitive_status_display.h"
 #include "remote_agent_http_utils.h"
 #include "remote_agent_sse_utils.h"
 #include "command_processor.h"
@@ -995,6 +998,65 @@ static bool testEngineSessionNormalization() {
 }
 
 /** Plan K2 — offline only (no Docker / network). */
+
+static bool testLlmTimeoutPolicy() {
+    using namespace Thoth::LlmTimeoutPolicy;
+    ScopedEnvVar unset("THOTH_LLM_TIMEOUT_SECONDS", nullptr);
+    if (timeoutSeconds() != 900) return false;
+    for (int requested : {-1, 0, 1, 30000, 120000, 180000, 900000}) {
+        if (stepTimeoutMs(StepType::LLM, requested) != 900000) return false;
+    }
+    if (stepTimeoutMs(StepType::LLM, 1200000) != 1200000) return false;
+    {
+        ScopedEnvVar longer("THOTH_LLM_TIMEOUT_SECONDS", "1200");
+        if (timeoutSeconds() != 1200 || stepTimeoutMs(StepType::LLM, 30000) != 1200000)
+            return false;
+    }
+    return true;
+}
+
+static bool testLlmSynthesisRetriesDisabled() {
+    Plan fallback = Thoth::PlanValidator::createFallbackPlan("phase-a-plan", "goal");
+    for (const auto& step : fallback.steps) {
+        if (step.type == StepType::LLM && step.failure_policy.max_retries != 0) {
+            return false;
+        }
+    }
+    Plan repaired = fallback;
+    repaired.steps.back().failure_policy.max_retries = 3;
+    const auto validation = Thoth::PlanValidator::validateAndRepair(repaired, false);
+    if (!validation.valid) return false;
+    for (const auto& step : repaired.steps) {
+        if (step.type == StepType::LLM && step.failure_policy.max_retries != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool testDecisionTapeTimeoutDisplay() {
+    using namespace Thoth::CognitiveStatusDisplay;
+    auto step_started = formatDecisionLine(
+        EventType::STEP_STARTED,
+        {{"description", "Summarize findings"}, {"timeout_ms", 900000}},
+        "EXECUTING_STEP",
+        "synthesize");
+    if (!step_started || step_started->find("timeout_ms=900000") == std::string::npos) {
+        return false;
+    }
+    auto step_fail = formatDecisionLine(
+        EventType::STEP_FAILED,
+        {{"next_action", "continue"},
+         {"error", "Step execution timed out after 900000ms"},
+         {"timeout_ms", 900000},
+         {"description", "Summarize findings"}},
+        "FAILED",
+        "synthesize");
+    return step_fail
+        && step_fail->find("timeout_ms=900000") != std::string::npos
+        && step_fail->find("timed out after 900000ms") != std::string::npos;
+}
+
 static bool testRemoteHttpUtilsOffline() {
     using namespace ThothRemoteHttp;
 
@@ -1053,8 +1115,8 @@ static bool testRemoteHttpUtilsOffline() {
         std::cerr << "testRemoteHttpUtilsOffline: timeout constants invalid\n";
         return false;
     }
-    // Chat/goals must cover a full engine LLM wait (default 600s), not the old 120s trap.
-    if (kChatTimeoutSec < 600 || kGoalsTimeoutSec < kChatTimeoutSec) {
+    // Chat covers one LLM wait (900s). Goals cover planner + optional retry + synthesis.
+    if (kChatTimeoutSec < 900 || kGoalsTimeoutSec < (3 * kChatTimeoutSec)) {
         std::cerr << "testRemoteHttpUtilsOffline: chat/goals timeouts misaligned with LLM budget\n";
         return false;
     }
@@ -19377,6 +19439,16 @@ static bool testAlpEDryRunIntentIntegration() {
 }
 
 int main() {
+    if (const char* focused = std::getenv("THOTH_LLM_TIMEOUT_TESTS")) {
+        if (std::string(focused) == "1") {
+            const bool ok = testLlmTimeoutPolicy() && testLlmSynthesisRetriesDisabled()
+                            && testDecisionTapeTimeoutDisplay()
+                            && testRemoteHttpUtilsOffline();
+            std::cout << (ok ? "LLM timeout tests passed.\n" : "LLM timeout tests failed.\n");
+            return ok ? 0 : 1;
+        }
+    }
+
     if (const char* egarOnly = std::getenv("THOTH_ALP_EGAR_LIFECYCLE_ONLY")) {
         if (egarOnly[0] != '0' && std::string(egarOnly) != "false") {
             if (!testAlpEEgarOperatorLifecycle()) {
@@ -19408,6 +19480,9 @@ int main() {
             int failures = 0;
             if (!testEngineErrorSchema()) failures++;
             if (!testEngineSessionNormalization()) failures++;
+            if (!testLlmTimeoutPolicy()) failures++;
+            if (!testLlmSynthesisRetriesDisabled()) failures++;
+            if (!testDecisionTapeTimeoutDisplay()) failures++;
             if (!testRemoteHttpUtilsOffline()) failures++;
             if (!testRemoteChatGoalMappingOffline()) failures++;
             if (!testGuiR3GoalSessionWire()) failures++;
@@ -19721,6 +19796,9 @@ int main() {
     if (!testConfigEnvironmentOverrides()) failures++;
     if (!testEngineErrorSchema()) failures++;
     if (!testEngineSessionNormalization()) failures++;
+    if (!testLlmTimeoutPolicy()) failures++;
+    if (!testLlmSynthesisRetriesDisabled()) failures++;
+    if (!testDecisionTapeTimeoutDisplay()) failures++;
     if (!testRemoteHttpUtilsOffline()) failures++;
     if (!testRemoteChatGoalMappingOffline()) failures++;
     if (!testGuiR3GoalSessionWire()) failures++;
