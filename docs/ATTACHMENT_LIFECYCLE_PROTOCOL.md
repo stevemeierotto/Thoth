@@ -77,10 +77,10 @@ Locked **2026-07-26**. All implementation MUST conform.
 
 | Rule | Decision |
 |------|----------|
-| **Remove Local Note (X)** | Removes **GUI reference only** (`ragFilePaths`, local cache binding for that host path). |
+| **Remove Local Note (X)** | Removes **GUI reference** (`ragFilePaths`, local cache binding for that host path) **and** the **session↔document link** for the active chat (`POST /v1/rag/session-links/remove`). |
 | **Engine document** | Unchanged — registry row, revisions, storage, chunks persist. |
-| **Session links** | **Remain** after Local Note delete unless explicitly removed (future **Remove from Engine** or session-link admin). |
-| **Semantics** | Session links are **retrieval context metadata**, not document ownership. |
+| **Session links** | **Removed** for the active session when Local Note X is pressed (operator intent: stop retrieving this doc in this chat). Other sessions' links are untouched. |
+| **Semantics** | Session links are **retrieval context metadata**, not document ownership. Re-adding the Local Note + Send restores the link (`link_only` / confirm). |
 
 ## Document identity 🔒
 
@@ -265,7 +265,7 @@ Chat **`session_id`** records **which sessions have linked or uploaded** a docum
 | `session_id` link | Many sessions may link to same `document_id` |
 | Upload event | `(session_id, document_id, revision_id, local_source_path, timestamp)` |
 
-**Remove Local Note:** removes GUI slot only; **session links persist** (ALP1 P0).
+**Remove Local Note (X):** removes GUI slot **and** the **session↔document link** for the active chat (ALP amend 2026-09-10). Engine document/storage/chunks remain. Re-add + Send restores the link.
 
 **Retrieval (TCB-ALP amendment — §1.5):** A chunk is visible in session **S** default scope iff:
 
@@ -460,8 +460,8 @@ Local hash != committed hash
 
 | Action | Scope | Normative effect |
 |--------|-------|------------------|
-| **Remove Local Note** (X on slot) | GUI only | **A) Remove GUI reference only** — default delete |
-| **Remove from Engine** (future explicit command) | Engine | Evict document from registry + index + storage |
+| **Remove Local Note** (X on slot) | GUI + Engine session link | Remove GUI slot/cache **and** unlink `(session_id, document_id)` via `POST /v1/rag/session-links/remove` |
+| **Remove from Engine** (future explicit command) | Engine document | Evict document from registry + index + storage |
 
 ## 5.2 Remove Local Note (default X button)
 
@@ -469,11 +469,12 @@ Local hash != committed hash
 |-------|--------|
 | GUI `ragFilePaths` | Remove host path slot |
 | GUI `local_note_engine` cache | Remove binding for that path |
-| Engine document registry | **Unchanged** |
+| Engine document registry | **Unchanged** (document/revision rows) |
 | Engine chunks / files | **Unchanged** |
-| Session link | **Unchanged** 🔒 — retrieval context preserved (ALP1 P0) |
+| Session link | **Removed** for the active `session_id` 🔒 (ALP amend 2026-09-10) |
+| Send to Engine | Re-enabled after re-add: dry_run → `link_only` (or picker allows `no_op` confirm) |
 
-**Rationale:** Local Notes are **convenience slots** for host files to send, not Engine lifecycle control. Accidental X must not destroy indexed knowledge.
+**Rationale:** X means “stop using this attachment in **this** chat.” Accidental X must not destroy indexed knowledge for other sessions; it must reset Send eligibility and retrieval for the current session.
 
 ## 5.3 Remove from Engine (explicit, deferred UI)
 

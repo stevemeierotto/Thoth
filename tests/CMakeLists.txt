@@ -46,6 +46,7 @@ if(THOTH_BUILD_GUI)
     )
     target_link_libraries(thoth-gui-tests PRIVATE
         basic_agent
+        alp_migration
         ${wxWidgets_LIBRARIES}
         ${CURL_LIBRARIES}
     )

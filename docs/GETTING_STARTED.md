@@ -284,9 +284,10 @@ Full hybrid notes: [`docker/README.md` § Hybrid development](../docker/README.m
 - `THOTH_WORKSPACE_PATH` — workspace (`memory.db`, `rag/`, config)
 - `THOTH_LOGS_PATH` — benchmark and metrics JSONL logs
 - `THOTH_INFERENCE_BASE_URL` — chat/completion service (`http://127.0.0.1:8080` for host llama-server; **not** `:8090`, which is `thoth-engine`)
-- `THOTH_INFERENCE_BACKEND` — `ollama` (default) or `llama_cpp`
-- `THOTH_EMBED_BASE_URL` — embedding service (defaults to inference base; Compose uses `http://llama-embed-server:8081`)
-- `THOTH_EMBEDDING_MODEL` / `OLLAMA_EMBED_MODEL` — override `config.embedding_model` API name
+- `THOTH_INFERENCE_BACKEND` — `llama_cpp` (default) or `ollama`
+- `THOTH_EMBED_BASE_URL` — embedding service (llama_cpp default `http://127.0.0.1:8081`; Compose uses `http://llama-embed-server:8081`)
+- `THOTH_EMBEDDING_MODEL` / `OLLAMA_EMBED_MODEL` — override `config.embedding_model` API name (historical `OLLAMA_*` names; also used with llama-server)
+- `OLLAMA_MODEL` — override `config.llm_model` API name (also used with llama-server, e.g. `chat`)
 - `THOTH_EMBED_STRICT=1` — disable silent TF-IDF fallback on embed failure (returns empty / throws in batch)
 
 **Tests on engine-only builds:** `ctest -L pr` runs the full PR suite (core unit tests + cognitive/Python tests) without wxWidgets.
@@ -375,14 +376,21 @@ THOTH_LOG_CONFIG=1 ./build/debug/external/basic_agent/thoth-engine --version
 # .env file (DO NOT COMMIT)
 THOTH_WORKSPACE_PATH=          # optional: override agent_workspace location
 THOTH_LOGS_PATH=               # optional: override logs/ directory
-THOTH_INFERENCE_BASE_URL=http://127.0.0.1:11434
-THOTH_INFERENCE_BACKEND=ollama   # ollama | llama_cpp
+THOTH_INFERENCE_BASE_URL=http://127.0.0.1:8080   # llama-server (default backend)
+THOTH_EMBED_BASE_URL=http://127.0.0.1:8081       # llama-embed-server
+THOTH_INFERENCE_BACKEND=llama_cpp   # default when unset; use ollama for Ollama daemon
 THOTH_LOG_CONFIG=0             # set to 1 to print resolved startup paths
-OLLAMA_HOST=localhost:11434    # compat alias for inference host
-OLLAMA_MODEL=qwen2.5:3b
+# OLLAMA_MODEL / OLLAMA_EMBED_MODEL: historical names — API model names for any backend
+OLLAMA_MODEL=chat
 OLLAMA_EMBED_MODEL=nomic-embed-text
 
-# Optional: OpenAI (if not using Ollama)
+# Optional: Ollama instead of llama.cpp
+# THOTH_INFERENCE_BACKEND=ollama
+# THOTH_INFERENCE_BASE_URL=http://127.0.0.1:11434
+# OLLAMA_HOST=localhost:11434
+# OLLAMA_MODEL=qwen2.5:3b
+
+# Optional: OpenAI (if not using local inference)
 # OPENAI_API_KEY=sk-...
 ```
 

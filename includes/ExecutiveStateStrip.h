@@ -27,6 +27,8 @@ public:
     /** Shown when there is no plan yet but background work is in progress. */
     void SetActivityMessage(const wxString& message);
     void ClearActivityMessage();
+    /** Drop plan steps + activity (session switch). */
+    void ClearPlan();
 
 private:
     struct VisualStep {

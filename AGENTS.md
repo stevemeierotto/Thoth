@@ -187,8 +187,9 @@ always requires explicit authorization.
            │
 ┌──────────▼──────────┐
 │   External Services  │
-│  - Ollama (LLM)     │
-│  - Ollama (Embed)   │
+│  - llama.cpp server │
+│    (chat + embed)   │
+│  - (Optional) Ollama│
 │  - (Optional) OpenAI│
 └─────────────────────┘
 ```
@@ -305,7 +306,7 @@ Thoth/
 - `grag_scorer.cpp` — Implements directional scoring (`D = G - C`)
 - `vector_store.cpp` / `i_vector_store.h` — Vector store abstraction (enables future migration to production databases)
 - `index_manager.cpp` — Handles index lifecycle with selective re-indexing
-- `embedding_engine.cpp` — Generates embeddings via Ollama REST API (`nomic-embed-text`)
+- `embedding_engine.cpp` — Generates embeddings via InferenceClient (`llama_cpp` default; Ollama adapter retained)
 
 **Key Features**:
 
@@ -431,10 +432,11 @@ Assembles the final prompt sent to the model, including:
 
 **File**: `llm_interface.cpp`
 
-Abstracts the model backend. Currently supports Ollama local models.
+Abstracts the model backend via Plan H `InferenceClient` (`llama_cpp` default, optional `ollama`).
 
-**Current Model**: Small Qwen model (hardware-constrained)  
-**Embedding Model**: `nomic-embed-text` (768 dimensions) via Ollama REST API  
+**Default backend**: `llama_cpp` (llama-server) when `THOTH_INFERENCE_BACKEND` is unset  
+**Embedding Model**: `nomic-embed-text` (768 dimensions) via embed server / InferenceClient  
+**Ollama**: retained adapter; set `THOTH_INFERENCE_BACKEND=ollama`  
 **Future**: Hardware upgrade and model upgrade planned
 
 **⚠️ Do not hardcode model-specific behavior. The interface is designed to support model upgrades without changing agent logic.**
@@ -548,9 +550,9 @@ These files track project progress. Append to them; do not overwrite.
 
 `src/MainFrame.cpp`, `src/AgentInterface.cpp`, and `src/VisualizationFrame.cpp` interact with the core through `AgentInterface`. Changes require understanding this boundary.
 
-### 🚫 DO NOT bypass the AddCollapsiblePane pattern
+### 🚫 DO NOT bypass the AddCollapsiblePane pattern (left Knowledge Base)
 
-The UI sidebars must remain stable and scrollable. Never add sections to sidebars without using the `AddCollapsiblePane` helper and following the rules in `docs/architectural_facts.md §8`.
+The left Knowledge Base sidebar must remain stable and scrollable. Never add sections there without using the `AddCollapsiblePane` helper. Observability lives in the right **tabbed notebook** (not scrolled collapsible children) — see `docs/architectural_facts.md §8`.
 
 ---
 

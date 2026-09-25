@@ -176,6 +176,7 @@ inline constexpr const char* kOpResume = "resume";
 inline constexpr const char* kOpAbort = "abort";
 inline constexpr const char* kOpCreateDocument = "create_document";
 inline constexpr const char* kOpQueryDocumentIntent = "query_document_intent";
+inline constexpr const char* kOpUnlinkSessionDocument = "unlink_session_document";
 
 /** R4-G1 — Engine-mode Phase 10 chat failures must not use the silent Panel+isChat path. */
 inline bool engineConversationChatFailureNeedsStatusBar(const OperationResult& result,

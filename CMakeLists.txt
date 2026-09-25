@@ -71,6 +71,7 @@ if(THOTH_BUILD_GUI)
         src/GragDiagnosticsPanel.cpp
         src/StrategyPanel.cpp
         src/PlanExecutionPanel.cpp
+        src/CognitiveStatusPanel.cpp
         src/TrajectoryViewer.cpp
         src/ExperimentLabPanel.cpp
         src/GraphPanel.cpp

@@ -96,9 +96,11 @@ Do not use an all-LLM mock plan to test reflection unless you also mock failure 
    cmake --build --preset build-debug
    ```
 
-2. **Ensure Ollama is running** (some tests require it):
+2. **Ensure the inference backend is reachable** when running full/integration tests:
    ```bash
-   ollama list  # Verify Ollama is accessible
+   # Default: llama_cpp (Compose llama-server :8080 + llama-embed-server :8081)
+   curl -sf http://127.0.0.1:8080/health
+   # Or explicit Ollama: THOTH_INFERENCE_BACKEND=ollama and ollama list
    ```
 
 3. **Workspace directory must be writable:**
@@ -186,9 +188,9 @@ static fs::path makeTempPath(const std::string& name) {
 - No interference with production `agent_workspace/`
 
 **Mock Services:**
-- Some tests require Ollama (embedding tests)
-- Tests that don't need LLM use mocks or skip LLM calls
-- No external API calls in unit tests (except Ollama local)
+- PR unit tests use mocks / TfIdf; full-tier and some integration paths need a live inference backend
+- Default backend is `llama_cpp`; set `THOTH_INFERENCE_BACKEND=ollama` for the Ollama adapter
+- No external cloud API calls in unit tests
 
 ### Assertion Pattern
 
@@ -319,7 +321,7 @@ Tests run automatically in CI/CD pipelines:
 
 ### Test Requirements for CI
 
-1. **No external dependencies** (except Ollama, which CI must provide)
+1. **No external dependencies** for PR (`ctest -L pr`); full/nightly needs a configured inference backend (nightly CI still uses Ollama until GGUFs are available on runners)
 2. **Deterministic** - Tests must produce same results every run
 3. **Fast** - Complete test suite should run in < 5 minutes
 4. **Isolated** - No shared state between test runs

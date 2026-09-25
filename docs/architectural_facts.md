@@ -90,14 +90,15 @@ No cross-dependency; correlatable via shared `request_id` when present.
 
 ---
 
-## 8. UI Sidebar Architecture (Stable & Scrollable)
+## 8. UI Sidebar & Observability Architecture
 
-Mandatory pattern for MainFrame sidebars (see also `AGENTS.md`):
+Mandatory patterns for MainFrame (see also `AGENTS.md`):
 
-1. **Containers:** `m_leftSidebar` and `m_rightSidebar` are permanent `wxScrolledWindow` objects — never hidden.
-2. **AUI flags:** `.CloseButton(false)`, `.MaximizeButton(false)`, `.PaneBorder(true)`.
-3. **AddCollapsiblePane:** All sections use the helper; toggle events must call `FitInside()` + `m_auiManager.Update()`.
-4. **Layout:** Sidebar sizers must be assigned before adding collapsible panes.
+1. **Left Knowledge Base:** `m_leftSidebar` is a permanent `wxScrolledWindow` — never hidden. Sections use `AddCollapsiblePane`; toggle events must call `FitInside()` + `m_auiManager.Update()`.
+2. **Observability:** one right AUI pane hosting `m_observabilityNotebook` (tabs: Cognitive State, Plan Execution, GRAG Diagnostics, Strategy Engine). Each tab gets full column height; add future panels as new tabs. `CloseButton(false)`.
+3. **System State:** bottom AUI `wxNotebook` (RAG / Trajectories / Experiments / Graph / Logs) — stays bottom-docked.
+4. **AUI flags:** `.PaneBorder(true)` on side docks; left sidebar `.CloseButton(false)`.
+5. **Layout:** Left sidebar sizer must be assigned before adding collapsible panes.
 
 ---
 

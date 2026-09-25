@@ -257,3 +257,37 @@ void GragDiagnosticsPanel::UpdateLastEventAgeLabel(const wxString& label) {
         m_lastEventLabel->SetLabel(label);
     }
 }
+
+void GragDiagnosticsPanel::ClearForSessionSwitch() {
+    if (m_chunksList) {
+        m_chunksList->DeleteAllItems();
+    }
+    if (m_scopeLabel) {
+        m_scopeLabel->SetLabel("Scope layer — —");
+    }
+    if (m_requestIdLabel) {
+        m_requestIdLabel->SetLabel("request_id: —");
+    }
+    if (m_groundedLabel) {
+        m_groundedLabel->SetLabel("Grounded layer — —");
+    }
+    if (m_warmMemoryNote) {
+        m_warmMemoryNote->SetLabel(wxEmptyString);
+    }
+    if (m_alphaLabel) {
+        m_alphaLabel->SetLabel("N/A (chat)");
+    }
+    if (m_alphaGauge) {
+        m_alphaGauge->SetValue(0);
+    }
+    if (m_magnitudeValue) {
+        m_magnitudeValue->SetLabel("0.000");
+    }
+    if (m_scoringTypeValue) {
+        m_scoringTypeValue->SetLabel("Conversational");
+    }
+    if (m_lastEventLabel) {
+        m_lastEventLabel->SetLabel("Last event: —");
+    }
+    Layout();
+}

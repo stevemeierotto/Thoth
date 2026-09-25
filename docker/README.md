@@ -153,7 +153,7 @@ Example operator env: [`docker/embed.env.example`](embed.env.example) (inference
 
 ### `ollama embed failed: Couldn't connect to server`
 
-The Engine is using **`THOTH_INFERENCE_BACKEND=ollama`** (or unset — defaults to ollama) while URLs may point at llama.cpp or an unreachable host.
+The Engine is using **`THOTH_INFERENCE_BACKEND=ollama`** while URLs may point at llama.cpp or an unreachable host. (Unset backend now defaults to **`llama_cpp`**.)
 
 1. Check startup logs / `/ready`:
 

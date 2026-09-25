@@ -86,6 +86,10 @@ public:
     /** ALP-E — synchronous dry_run intent query for Send picker / reconcile. */
     Thoth::OperationResult queryCorpusDocumentIntent(const std::string& sourceFilePath);
 
+    /** ALP amend — unlink session↔document after Local Note X. */
+    Thoth::OperationResult unlinkSessionDocument(const std::string& document_id,
+                                                 const std::string& session_id);
+
     /** Phase 10 — Engine conversation authority. */
     nlohmann::json createConversationSession() const;
     void appendConversationTurn(const std::string& sessionId,

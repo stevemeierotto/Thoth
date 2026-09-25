@@ -1,7 +1,7 @@
 # Chat Response Regurgitation Protocol
 
 **Document type:** Architecture protocol (chat generation — RAG scaffold echo prevention)  
-**Status:** **CSG-B** 🔒 **LOCKED** **2026-07-30** · **B.1–B.3 ✅ Implement 2026-07-30** · B.4 manual verify pending  
+**Status:** **CSG-B** 🔒 **LOCKED** **2026-07-30** · **B.1–B.3 ✅ Implement 2026-07-30** · **B.4 ✅ Manual acceptance 2026-09-13**
 **Created:** 2026-07-30  
 **Related:** [`CHAT_SESSION_GOAL_PROTOCOL.md`](CHAT_SESSION_GOAL_PROTOCOL.md) (CSG-A · separate concern) · [`GUI_RESTORATION_PROTOCOL.md`](GUI_RESTORATION_PROTOCOL.md) · [`GRAG.md`](GRAG.md) · [`AGENTS.md`](../AGENTS.md)
 
@@ -302,6 +302,11 @@ Reproduce the query that produced chunk-format echo. **Success example:**
 - De-scaffolded but still reads as pasted indexed-doc excerpt
 - Verbatim bullet list from source without synthesis
 
+**Acceptance record (2026-09-13):** Operator verified coherent, corpus-grounded
+answers with no observed retrieval-scaffold echo and almost no hallucination. This
+closes B.4 for the captured failure class; it does not change the locked
+generation or retrieval contracts.
+
 ---
 
 ## §13 — Implementation phases
@@ -347,6 +352,6 @@ CSG-A and CSG-B are independent. CSG-B may be implemented without CSG-A A.4 manu
 - [ ] B.2 assessment tests pass (conservative negatives)
 - [ ] B.3 pipeline tests pass; Plan N transcript tests pass
 - [ ] `chat_rag.jsonl` includes regurgitation fields with meaningful `regurgitation_retry_reason`
-- [ ] Manual: `architectural_facts.md` query → §12 success example
+- [x] Manual: `architectural_facts.md` query → §12 success example (operator acceptance, 2026-09-13)
 - [ ] Retrieval diagnostics unchanged vs pre-CSG-B baseline
 - [ ] No edits to `formatChunkForPrompt` or GRAG scoring paths

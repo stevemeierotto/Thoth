@@ -79,7 +79,7 @@ struct LocalNoteIntent {
 
 inline bool isPickerEligibleAction(const std::string& action) {
     return action == "create" || action == "new_revision" || action == "retry"
-           || action == "conflict" || action == "link_only";
+           || action == "conflict" || action == "link_only" || action == "no_op";
 }
 
 inline std::string actionPickerLabel(const std::string& action) {
@@ -97,6 +97,9 @@ inline std::string actionPickerLabel(const std::string& action) {
     }
     if (action == "link_only") {
         return "Attach to chat";
+    }
+    if (action == "no_op") {
+        return "Already on Engine — confirm";
     }
     return action;
 }

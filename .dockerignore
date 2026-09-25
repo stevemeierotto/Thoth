@@ -26,6 +26,10 @@ docs/
 *.md
 !external/basic_agent/include/json.hpp
 
+# Local GGUF downloads (served via llama-models volume, not image)
+models/
+*.gguf
+
 # Python / analysis
 __pycache__/
 *.py[cod]

@@ -62,6 +62,10 @@ public:
     Thoth::OperationResult queryCorpusDocumentIntent(
         const std::string& sourceFilePath) override;
 
+    Thoth::OperationResult unlinkSessionDocument(
+        const std::string& document_id,
+        const std::string& session_id) override;
+
     nlohmann::json createConversationSession() override;
     Thoth::OperationResult appendConversationTurn(
         const std::string& session_id,

@@ -71,6 +71,11 @@ public:
     virtual Thoth::OperationResult queryCorpusDocumentIntent(
         const std::string& sourceFilePath) = 0;
 
+    /** ALP amend — unlink session↔document (Local Note X). */
+    virtual Thoth::OperationResult unlinkSessionDocument(
+        const std::string& document_id,
+        const std::string& session_id) = 0;
+
     /** Phase 10 — Engine-owned conversation authority. */
     virtual nlohmann::json createConversationSession() = 0;
     virtual Thoth::OperationResult appendConversationTurn(

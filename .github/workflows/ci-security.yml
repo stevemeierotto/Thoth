@@ -204,5 +204,7 @@ jobs:
 
       - name: Run full Ollama TEST_SUITE
         env:
+          # Library default is llama_cpp; nightly still uses Ollama until GGUFs are on runners.
+          THOTH_INFERENCE_BACKEND: ollama
           OLLAMA_MODEL: qwen2.5:3b
         run: ctest --test-dir build/debug -R test-suite-full --output-on-failure --timeout 3600

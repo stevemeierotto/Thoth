@@ -18,6 +18,8 @@ public:
     void UpdateDiagnostics(const nlohmann::json& metadata);
     /** Phase 6 — diagnostics-only last SSE event age (Engine mode). */
     void UpdateLastEventAgeLabel(const wxString& label);
+    /** Phase A — clear stale retrieval UI when switching chat sessions. */
+    void ClearForSessionSwitch();
 
 private:
     wxStaticText* m_layerHintLabel = nullptr;

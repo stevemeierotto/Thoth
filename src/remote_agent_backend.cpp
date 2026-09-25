@@ -16,6 +16,7 @@
 #include "graph_statistics.h"
 #include "engine_connection_state.h"
 #include "operation_result.h"
+#include "chat_send_trace.h"
 
 #include <curl/curl.h>
 
@@ -965,6 +966,60 @@ Thoth::OperationResult RemoteAgentBackend::queryCorpusDocumentIntent(
     return postCorpusDocumentRequest(sourceFilePath, {}, true);
 }
 
+Thoth::OperationResult RemoteAgentBackend::unlinkSessionDocument(
+    const std::string& document_id,
+    const std::string& session_id) {
+    using namespace Thoth;
+    try {
+        std::string ready_err;
+        if (!ensureReady(ready_err)) {
+            return makeFailure(kOpUnlinkSessionDocument,
+                               "Could not unlink document from chat",
+                               ready_err,
+                               true);
+        }
+        {
+            std::lock_guard<std::mutex> lock(ready_mutex_);
+            if (!ingest_allowed_) {
+                return makeFailure(kOpUnlinkSessionDocument,
+                                   "Could not unlink document from chat",
+                                   "ingest capability missing from /ready");
+            }
+        }
+        if (document_id.empty() || session_id.empty()) {
+            return makeFailure(kOpUnlinkSessionDocument,
+                               "Could not unlink document from chat",
+                               "document_id and session_id required");
+        }
+        const json req = {{"document_id", document_id}, {"session_id", session_id}};
+        const HttpResult http = httpPostJson(CorpusCreate::kHttpPathSessionLinkRemove,
+                                             req.dump(),
+                                             ThothRemoteHttp::kControlTimeoutSec);
+        if (!http.transport_ok) {
+            return makeFailure(kOpUnlinkSessionDocument,
+                               "Could not unlink document from chat",
+                               "[RemoteEngine] unlink transport: " + http.transport_error,
+                               true);
+        }
+        if (http.status < 200 || http.status >= 300) {
+            return makeFailure(kOpUnlinkSessionDocument,
+                               "Could not unlink document from chat",
+                               formatHttpErrorMessage(http.status, http.body),
+                               http.status >= 500,
+                               http.status);
+        }
+        return makeSuccess(kOpUnlinkSessionDocument, "Document unlinked from chat");
+    } catch (const std::exception& ex) {
+        logRemoteError("unlinkSessionDocument", ex.what());
+        return makeFailure(kOpUnlinkSessionDocument,
+                           "Could not unlink document from chat",
+                           ex.what());
+    } catch (...) {
+        logRemoteError("unlinkSessionDocument", "unknown error");
+        return makeFailure(kOpUnlinkSessionDocument, "Could not unlink document from chat");
+    }
+}
+
 Thoth::OperationResult RemoteAgentBackend::createCorpusDocument(
     const std::string& sourceFilePath,
     const Thoth::CorpusCreateGuiOptions& options) {
@@ -1112,17 +1167,30 @@ Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(
     try {
         std::string ready_err;
         if (!ensureReady(ready_err)) {
+            ChatSendTrace::log(
+                11, "http_dispatch",
+                "NOT_DISPATCHED reason=ensureReady_failed detail=" + ready_err);
             return makeFailure(kOpChat, "Failed to send", ready_err, true);
         }
         {
             std::lock_guard<std::mutex> lock(ready_mutex_);
             if (!conversation_allowed_) {
+                ChatSendTrace::log(
+                    11, "http_dispatch",
+                    "NOT_DISPATCHED reason=conversation_capability_missing");
                 return makeFailure(kOpChat,
                                    "Failed to send",
                                    "conversation capability missing from /ready");
             }
         }
         if (session_id.empty() || content.empty()) {
+            ChatSendTrace::log(
+                11, "http_dispatch",
+                "NOT_DISPATCHED reason=session_or_content_empty session_empty="
+                    + std::string(session_id.empty() ? "yes" : "no") + " content_empty="
+                    + std::string(content.empty() ? "yes" : "no")
+                    + " content_len=" + std::to_string(content.size()));
+            ChatSendTrace::logPayload("payload_b11_remote_reject_content", content);
             return makeFailure(kOpChat, "Failed to send", "session_id and content required");
         }
         nlohmann::json req = {{"session_id", session_id}, {"content", content}};
@@ -1130,16 +1198,33 @@ Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(
             req[ConversationAuthority::kTurnFieldActiveGoal] = *active_goal;
         }
         const long chat_timeout = resolveRemoteRequestTimeoutSec(kChatTimeoutSec);
+        const std::string request_body = req.dump();
+        ChatSendTrace::logPayload("payload_b12_http_json_body", request_body);
+        // Also log the JSON "content" field alone for comparison.
+        ChatSendTrace::logPayload("payload_b12_http_json_content_field",
+                                  req.at("content").get<std::string>());
+        ChatSendTrace::log(
+            11, "http_dispatch",
+            std::string("DISPATCHED path=") + ConversationAuthority::kHttpPathTurns
+                + " session=" + session_id + " timeout_sec=" + std::to_string(chat_timeout)
+                + " content_len=" + std::to_string(content.size())
+                + " body_len=" + std::to_string(request_body.size()));
         const HttpResult http = httpPostJson(ConversationAuthority::kHttpPathTurns,
-                                             req.dump(),
+                                             request_body,
                                              chat_timeout);
         if (!http.transport_ok) {
+            ChatSendTrace::log(
+                12, "engine_response",
+                "received=transport_error detail=" + http.transport_error);
             return makeFailure(kOpChat,
                                "Failed to send",
                                "[RemoteEngine] turn transport: " + http.transport_error,
                                true);
         }
         if (http.status < 200 || http.status >= 300) {
+            ChatSendTrace::log(
+                12, "engine_response",
+                "received=http_error status=" + std::to_string(http.status));
             return makeFailure(kOpChat,
                                "Failed to send",
                                formatHttpErrorMessage(http.status, http.body),
@@ -1150,18 +1235,32 @@ Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(
         try {
             body = json::parse(http.body);
         } catch (const std::exception& ex) {
+            ChatSendTrace::log(
+                12, "engine_response",
+                std::string("received=json_parse_error detail=") + ex.what());
             return makeFailure(kOpChat, "Failed to send", ex.what());
         }
         std::string err;
         if (!ConversationAuthority::hasRequiredAppendTurnFields(body, err)) {
+            ChatSendTrace::log(
+                12, "engine_response",
+                "received=schema_invalid detail=" + err);
             return makeFailure(kOpChat, "Failed to send", err);
         }
         const std::string assistant = body["assistant"]["content"].get<std::string>();
+        ChatSendTrace::log(
+            12, "engine_response",
+            "received=ok http_status=" + std::to_string(http.status)
+                + " assistant_len=" + std::to_string(assistant.size()));
         return makeSuccess(kOpChat, "Response received", assistant);
     } catch (const std::exception& ex) {
+        ChatSendTrace::log(
+            12, "engine_response",
+            std::string("received=exception detail=") + ex.what());
         logRemoteError("appendConversationTurn", ex.what());
         return makeFailure(kOpChat, "Failed to send", ex.what());
     } catch (...) {
+        ChatSendTrace::log(12, "engine_response", "received=unknown_exception");
         logRemoteError("appendConversationTurn", "unknown error");
         return makeFailure(kOpChat, "Failed to send");
     }

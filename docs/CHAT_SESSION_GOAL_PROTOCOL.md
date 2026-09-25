@@ -1,7 +1,7 @@
 # Chat Session Goal Retrieval Protocol
 
 **Document type:** Architecture protocol (session goal → Engine chat retrieval)  
-**Status:** **CSG-A** 🔒 **LOCKED** **2026-07-30** · **A.1–A.3 ✅ Implement 2026-07-30** · A.4 manual verify pending  
+**Status:** **CSG-A** 🔒 **LOCKED** **2026-07-30** · **A.1–A.3 ✅ Implement 2026-07-30** · **A.4 unresolved live-integration verification (2026-09-13)**
 **Created:** 2026-07-30  
 **Related:** [`GUI_RESTORATION_PROTOCOL.md`](GUI_RESTORATION_PROTOCOL.md) (R3-G1 banner/cache vs Engine) · [`THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md`](THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md) · [`GUI_integration.md`](GUI_integration.md) · [`GRAG.md`](GRAG.md) · [`AGENTS.md`](../AGENTS.md)
 
@@ -214,6 +214,12 @@ Each sub-phase requires `AGENTS.md` gate approval before starting. Do not skip o
 3. **Restart GUI** (Engine may keep running)  
 4. Send question (no re-execute goal)  
 5. Confirm §1 success criteria
+
+**Latest result (2026-09-13):** The GUI restores the banner and its send trace
+shows `active_goal` in the outgoing chat JSON, but the observed post-restart
+chat retrieval does not use the goal. A.4 is not complete. Treat this as a
+live Engine deployment/integration issue until diagnostics show
+`goal_source: "session"` with a non-zero directional magnitude.
 
 ---
 

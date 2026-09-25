@@ -419,6 +419,36 @@ Thoth::OperationResult LocalAgentBackend::queryCorpusDocumentIntent(
     }
 }
 
+Thoth::OperationResult LocalAgentBackend::unlinkSessionDocument(
+    const std::string& document_id,
+    const std::string& session_id) {
+    using namespace Thoth;
+    try {
+        if (!plugin_) {
+            return makeFailure(kOpUnlinkSessionDocument,
+                               "Could not unlink document from chat",
+                               "plugin not initialized");
+        }
+        if (document_id.empty() || session_id.empty()) {
+            return makeFailure(kOpUnlinkSessionDocument,
+                               "Could not unlink document from chat",
+                               "document_id and session_id required");
+        }
+        plugin_->unlinkSessionDocument(document_id, session_id);
+        return makeSuccess(kOpUnlinkSessionDocument, "Document unlinked from chat");
+    } catch (const Thoth::EngineException& ex) {
+        return makeFailure(kOpUnlinkSessionDocument,
+                           "Could not unlink document from chat",
+                           ex.what());
+    } catch (const std::exception& ex) {
+        return makeFailure(kOpUnlinkSessionDocument,
+                           "Could not unlink document from chat",
+                           ex.what());
+    } catch (...) {
+        return makeFailure(kOpUnlinkSessionDocument, "Could not unlink document from chat");
+    }
+}
+
 Thoth::OperationResult LocalAgentBackend::createCorpusDocument(
     const std::string& sourceFilePath,
     const Thoth::CorpusCreateGuiOptions& options) {

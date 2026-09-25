@@ -3,11 +3,13 @@
  * Uses BasicAgentPlugin — no GUI.
  *
  * Tiers:
- *   --dev   Fast path: TfIdf embeddings, mock LLM, tiny corpus, cached index (no Ollama).
- *   --full  Production regression: real Ollama LLM + external embeddings (~40 min).
+ *   --dev   Fast path: TfIdf embeddings, mock LLM, tiny corpus, cached index (no live LLM).
+ *   --full  Production regression: configured inference backend (default llama_cpp) +
+ *           external embeddings (~40 min). Requires reachable chat + embed servers.
  */
 #include "basic_agent_plugin.h"
 #include "file_handler.h"
+#include "inference_backend_probe.h"
 #include "inference_endpoint.h"
 #include "runtime_bootstrap.h"
 #include "executive_controller.h"
@@ -56,14 +58,6 @@ static void configureFullTier() {
     unsetenv("THOTH_TEST_SUITE_DEV");
     unsetenv("THOTH_MOCK_LLM");
     unsetenv("THOTH_TEST_SUITE_INDEX");
-}
-
-static bool ollamaReachable() {
-    const auto endpoints = Thoth::resolveInferenceEndpoints();
-    const std::string tagsUrl = Thoth::inferenceUrl(endpoints.base_url, "/api/tags");
-    const std::string cmd = "curl -sf \"" + tagsUrl + "\" >/dev/null 2>&1";
-    const int code = std::system(cmd.c_str());
-    return code == 0;
 }
 
 static void truncateLog(const std::string& path) {
@@ -286,13 +280,22 @@ int main(int argc, char** argv) {
         std::cout << "TEST_SUITE tier: dev (mock LLM, TfIdf, cached index)\n";
     } else {
         configureFullTier();
-        if (!ollamaReachable()) {
-            const auto endpoints = Thoth::resolveInferenceEndpoints();
-            std::cerr << "TEST_SUITE: Ollama not reachable at "
-                      << endpoints.base_url << " — start Ollama first.\n";
+        const auto probe = Thoth::probeInferenceBackend();
+        if (!probe.reachable) {
+            std::cerr << "TEST_SUITE: inference backend not reachable"
+                      << " (backend=" << (probe.backend_name.empty() ? "unknown" : probe.backend_name)
+                      << " base=" << probe.base_url
+                      << " embed=" << probe.embed_base_url << ")";
+            if (!probe.error.empty()) {
+                std::cerr << " — " << probe.error;
+            }
+            std::cerr << "\n"
+                      << "  Start llama-server + llama-embed-server (Compose), or set "
+                         "THOTH_INFERENCE_BACKEND=ollama with Ollama running.\n";
             return 2;
         }
-        std::cout << "TEST_SUITE tier: full (Ollama required)\n";
+        std::cout << "TEST_SUITE tier: full (backend=" << probe.backend_name
+                  << " at " << probe.base_url << ")\n";
     }
 
     const std::string tracePath = fh.getAgentWorkspacePath("decision_trace.jsonl");

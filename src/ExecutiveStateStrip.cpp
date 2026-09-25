@@ -32,6 +32,12 @@ void ExecutiveStateStrip::ClearActivityMessage() {
     Refresh();
 }
 
+void ExecutiveStateStrip::ClearPlan() {
+    m_steps.clear();
+    m_activityMessage.clear();
+    Refresh();
+}
+
 void ExecutiveStateStrip::ResetPlan(const nlohmann::json& planJson) {
     std::cerr << "[ExecutiveStateStrip] ResetPlan called.\n";
     m_steps.clear();

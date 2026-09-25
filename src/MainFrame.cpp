@@ -7,6 +7,7 @@
 #include "GragDiagnosticsPanel.h"
 #include "StrategyPanel.h"
 #include "PlanExecutionPanel.h"
+#include "CognitiveStatusPanel.h"
 #include "TrajectoryViewer.h"
 #include "ExperimentLabPanel.h"
 #include "GraphPanel.h"
@@ -27,6 +28,9 @@
 #include "alp_feature_flags.h"
 #include "corpus_create_local.h"
 #include "conversation_authority.h"
+#include "chat_send_chrome.h"
+#include "chat_send_trace.h"
+#include "chat_turn_ui_status.h"
 #include "research_resources.h"
 #include "graph_statistics.h"
 #include "../external/basic_agent/include/memory_pruning_config.h"
@@ -39,6 +43,7 @@
 #include <wx/timer.h>
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -63,6 +68,48 @@ using json = nlohmann::json;
 using namespace Thoth; // Bring ChatSession and ChatMessage into scope
 
 namespace {
+
+/** Diagnostic: dump wxString without changing conversion used for send. */
+void TraceWxStringBoundary(const char* boundary, const wxString& s) {
+    if (!Thoth::ChatSendTrace::enabled()) {
+        return;
+    }
+    const std::string viaToStd = s.ToStdString();
+    std::string viaUtf8;
+    {
+        const wxScopedCharBuffer buf = s.ToUTF8();
+        if (buf.data() != nullptr) {
+            viaUtf8.assign(buf.data(), buf.length());
+        } else {
+            viaUtf8 = "<ToUTF8_null>";
+        }
+    }
+    std::string viaMbUtf8;
+    {
+        const wxCharBuffer buf = s.mb_str(wxConvUTF8);
+        if (buf.data() != nullptr) {
+            viaMbUtf8.assign(buf.data(), std::strlen(buf.data()));
+        } else {
+            viaMbUtf8 = "<mb_str_UTF8_null>";
+        }
+    }
+
+    std::ostringstream oss;
+    oss << "wx_length=" << s.length()
+        << " wx_IsEmpty=" << (s.IsEmpty() ? "yes" : "no")
+        << " ToStdString_len=" << viaToStd.size()
+        << " ToUTF8_len=" << (viaUtf8 == "<ToUTF8_null>" ? -1 : static_cast<long>(viaUtf8.size()))
+        << " mb_str(UTF8)_len="
+        << (viaMbUtf8 == "<mb_str_UTF8_null>" ? -1 : static_cast<long>(viaMbUtf8.size()));
+    Thoth::ChatSendTrace::log(0, boundary, oss.str());
+    Thoth::ChatSendTrace::logPayload((std::string(boundary) + ".ToStdString").c_str(), viaToStd);
+    if (viaUtf8 != "<ToUTF8_null>") {
+        Thoth::ChatSendTrace::logPayload((std::string(boundary) + ".ToUTF8").c_str(), viaUtf8);
+    }
+    if (viaMbUtf8 != "<mb_str_UTF8_null>") {
+        Thoth::ChatSendTrace::logPayload((std::string(boundary) + ".mb_str_UTF8").c_str(), viaMbUtf8);
+    }
+}
 
 void TrimSessionMessagesForPersistence(Thoth::ChatSession& session) {
     const std::size_t maxHot = Thoth::MemoryPruning::kMaxHotMessages;
@@ -340,12 +387,19 @@ void MainFrame::CreateNewSession(const std::string& title) {
 
 void MainFrame::RefreshSessionConversationFromEngine(const std::string& sessionId) {
     if (!agent || !agent->capabilities().supportsConversation || sessionId.empty()) {
+        Thoth::ChatSendTrace::log(
+            16, "transcript_refresh",
+            "early_return reason=refresh_preconditions_failed agent="
+                + std::string(agent ? "yes" : "no") + " session=" + sessionId);
         return;
     }
 
     const nlohmann::json body = agent->getConversation(sessionId);
     std::string err;
     if (!Thoth::ConversationAuthority::hasRequiredConversationFields(body, err)) {
+        Thoth::ChatSendTrace::log(
+            16, "transcript_refresh",
+            "early_return reason=conversation_fields_invalid detail=" + err);
         return;
     }
 
@@ -354,9 +408,13 @@ void MainFrame::RefreshSessionConversationFromEngine(const std::string& sessionI
                                return session.id == sessionId;
                            });
     if (it == m_sessions.end()) {
+        Thoth::ChatSendTrace::log(
+            16, "transcript_refresh",
+            "early_return reason=session_not_in_local_list session=" + sessionId);
         return;
     }
 
+    const std::size_t beforeCount = it->messages.size();
     it->messages.clear();
     for (const auto& msg : body["messages"]) {
         Thoth::ChatMessage message;
@@ -366,9 +424,20 @@ void MainFrame::RefreshSessionConversationFromEngine(const std::string& sessionI
         it->messages.push_back(std::move(message));
     }
     it->updatedAtMs = NowMs();
+    Thoth::ChatSendTrace::log(
+        16, "transcript_refresh",
+        "ok session=" + sessionId + " messages_before=" + std::to_string(beforeCount)
+            + " messages_after=" + std::to_string(it->messages.size()));
 
     if (m_sessionId == sessionId && m_activeSessionIndex >= 0) {
         RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
+        Thoth::ChatSendTrace::log(16, "transcript_render",
+                                  "RenderSession called for active session");
+    } else {
+        Thoth::ChatSendTrace::log(
+            16, "transcript_render",
+            "skipped reason=session_not_active active=" + m_sessionId
+                + " target=" + sessionId);
     }
 }
 
@@ -811,6 +880,18 @@ void MainFrame::OnChatContainerSize(wxSizeEvent& evt) {
         m_chatInnerPanel->Layout();
         m_chatContainer->FitInside();
     }
+    // Do not refresh chrome synchronously here: Layout inside RefreshChatTurnChromeText
+    // re-enters wxSizeEvent and overflows the stack. Defer one shot after this size pass.
+    if (ChatTurnOwnsTypingIndicator()) {
+        CallAfter([this]() {
+            if (wxPendingDelete.Member(this) || !wxWindow::FindWindowById(GetId())) {
+                return;
+            }
+            if (ChatTurnOwnsTypingIndicator()) {
+                RefreshChatTurnChromeText();
+            }
+        });
+    }
     evt.Skip();
 }
 
@@ -891,6 +972,21 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
         agent->setSessionId(m_sessionId);
     }
 
+    // Phase A — Observability is session-scoped: drop prior chat's plan steps and
+    // GRAG snapshot so SetSessionGoalDisplay / banner bind to this session only.
+    if (m_planPanel) {
+        m_planPanel->ClearForSessionSwitch();
+    }
+    if (m_cognitivePanel) {
+        m_cognitivePanel->ClearForSessionSwitch();
+    }
+    if (m_stateStrip) {
+        m_stateStrip->ClearPlan();
+    }
+    if (m_gragPanel) {
+        m_gragPanel->ClearForSessionSwitch();
+    }
+
     RefreshSessionConversationFromEngine(m_sessionId);
 
     RenderSession(sessionIndex);
@@ -907,12 +1003,13 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
     RefreshGoalBanner();
     RefreshAllPanels();
     UpdateChatSendChrome();
+    RefreshChatTurnChromeText();
 }
 
 MainFrame::MainFrame()
-    : wxFrame(nullptr, wxID_ANY, "Thoth Control Panel", wxDefaultPosition, wxSize(1000, 700))
+    : wxFrame(nullptr, wxID_ANY, "Thoth Control Panel", wxDefaultPosition, wxSize(1280, 900))
 {
-    SetMinSize(wxSize(800, 600));
+    SetMinSize(wxSize(1000, 700));
     FileHandler fileHandler;
     m_chatSessionsPath = fileHandler.getAgentWorkspacePath("chat_sessions.json");
 
@@ -939,6 +1036,18 @@ MainFrame::MainFrame()
                 const bool retrievalForTab =
                     Thoth::RetrievalVerificationDisplay::retrievalDiagnosticsTargetsSession(
                         eventSessionId, this->m_sessionId);
+
+                // Cognitive spine tape — session-gated; never owns chat-turn typing chrome.
+                if (this->m_cognitivePanel) {
+                    ControllerEvent cognitiveEv;
+                    cognitiveEv.type = type;
+                    cognitiveEv.session_id = eventSessionId;
+                    cognitiveEv.step_id = stepId;
+                    cognitiveEv.controller_state_name = controllerState;
+                    cognitiveEv.metadata = metadata;
+                    cognitiveEv.timestamp_ms = 0;
+                    this->m_cognitivePanel->ApplyEvent(cognitiveEv, this->m_sessionId);
+                }
                 
                 std::cerr << "[MainFrame] onEvent: type=" << (int)type 
                           << ", evSid=" << eventSessionId 
@@ -1110,52 +1219,92 @@ MainFrame::MainFrame()
                     }
                 } else if (type == EventType::PLAN_COMPLETED) {
                     m_goalPlanningPending = false;
-                    this->ApplyWorkStatus(
-                        "Goal completed successfully",
-                        this->ActiveBackendProgressSource());
-                    ClearSessionGoal(this->ResolveGoalEventSessionId(eventSessionId));
+                    if (metadata.contains("trajectory_score")) {
+                        this->ApplyWorkStatus(
+                            wxString::Format(
+                                "Goal completed (trajectory score %.2f)",
+                                metadata.value("trajectory_score", 0.0f)),
+                            this->ActiveBackendProgressSource());
+                    } else {
+                        this->ApplyWorkStatus(
+                            "Goal completed successfully",
+                            this->ActiveBackendProgressSource());
+                    }
+                    // CSG-A Phase 1: keep session.activeGoal / banner for chat GRAG.
+                    // Operator clears via banner X only (ClearActiveGoal).
                     if (isActiveSession) {
-                        if (this->m_typingIndicator) {
-                            this->m_typingIndicator->Hide();
-                        }
+                        this->HideTypingIndicatorIfChatTurnIdle();
                         if (this->m_planPanel) {
                             this->m_planPanel->SetExecutionState("Completed");
                         }
                         if (this->m_inputCtrl) {
                             this->m_inputCtrl->SetFocus();
                         }
+                        this->RefreshGoalBanner();
                     }
                     this->RefreshAllPanels();
                 } else if (type == EventType::PLAN_FAILED) {
-                    ClearSessionGoal(this->ResolveGoalEventSessionId(eventSessionId));
+                    // CSG-A Phase 1: do not ClearSessionGoal — banner goal drives post-plan chat GRAG.
                     if (isActiveSession) {
                         m_goalPlanningPending = false;
                         RefreshExecutiveStripActivity();
-                        if (this->m_typingIndicator) {
-                            this->m_typingIndicator->Hide();
-                        }
+                        this->HideTypingIndicatorIfChatTurnIdle();
                         if (this->m_planPanel) this->m_planPanel->SetExecutionState("Failed");
+                        this->RefreshGoalBanner();
                     }
                 } else if (type == EventType::PLAN_ABORTED) {
-                    ClearSessionGoal(this->ResolveGoalEventSessionId(eventSessionId));
+                    // CSG-A Phase 1: do not ClearSessionGoal — banner goal drives post-plan chat GRAG.
                     if (isActiveSession) {
                         m_goalPlanningPending = false;
                         RefreshExecutiveStripActivity();
-                        if (this->m_typingIndicator) {
-                            this->m_typingIndicator->Hide();
-                        }
+                        this->HideTypingIndicatorIfChatTurnIdle();
                         if (this->m_planPanel) this->m_planPanel->SetExecutionState("Aborted");
+                        this->RefreshGoalBanner();
                     }
                 } else if (type == EventType::PLAN_REUSE_INJECTION) {
                     std::cerr << "[MainFrame] PLAN_REUSE_INJECTION source="
                               << metadata.value("source", "unknown")
                               << " count=" << metadata.value("plan_count", 0) << "\n";
                     if (isActiveSession) {
-                        this->ApplyWorkStatus(wxString::Format(
-                            "Plan reuse: %d similar past plan(s) from %s",
-                            metadata.value("plan_count", 0),
-                            wxString::FromUTF8(metadata.value("source", "unknown"))),
-                            this->ActiveBackendProgressSource());
+                        const int count = metadata.value("plan_count", 0);
+                        if (count <= 0) {
+                            this->ApplyWorkStatus(
+                                "Plan reuse: no similar past plans",
+                                this->ActiveBackendProgressSource());
+                        } else {
+                            this->ApplyWorkStatus(wxString::Format(
+                                "Plan reuse: %d similar past plan(s) from %s",
+                                count,
+                                wxString::FromUTF8(metadata.value("source", "unknown"))),
+                                this->ActiveBackendProgressSource());
+                        }
+                    }
+                } else if (type == EventType::STRATEGY_INJECTION) {
+                    if (isActiveSession) {
+                        if (metadata.value("injected", false)) {
+                            this->ApplyWorkStatus(wxString::Format(
+                                "Strategy inject (sim %.2f)",
+                                metadata.value("similarity", 0.0f)),
+                                this->ActiveBackendProgressSource());
+                        } else {
+                            this->ApplyWorkStatus(
+                                "Strategy lookup: no match",
+                                this->ActiveBackendProgressSource());
+                        }
+                    }
+                } else if (type == EventType::TRAJECTORY_INJECTION) {
+                    if (isActiveSession) {
+                        if (metadata.value("injected", false)
+                            || metadata.value("trajectory_count", 0) > 0) {
+                            this->ApplyWorkStatus(wxString::Format(
+                                "Trajectory found (%d)",
+                                metadata.value("trajectory_count", 0)),
+                                this->ActiveBackendProgressSource());
+                        } else {
+                            this->ApplyWorkStatus(
+                                "Trajectory search: not found",
+                                this->ActiveBackendProgressSource());
+                        }
                     }
                 } else if (type == EventType::REFLECTION_REPLAN) {
                     std::cerr << "[MainFrame] REFLECTION_REPLAN score="
@@ -1236,10 +1385,15 @@ MainFrame::MainFrame()
     m_goalText = new wxStaticText(m_goalBanner, wxID_ANY, "Current Goal: None");
     m_goalText->SetFont(m_goalText->GetFont().Bold());
     
-    m_reviseGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "Revise", wxDefaultPosition, wxSize(60, 24));
-    m_clearGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "X", wxDefaultPosition, wxSize(24, 24));
+    // wxDefaultSize — fixed 24×24 / 60×24 undersize GTK theme padding (extents 13×13).
+    m_runGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "Run", wxDefaultPosition, wxDefaultSize);
+    m_runGoalBtn->SetToolTip(
+        "Start or restart an executive plan for this goal. Send remains chat.");
+    m_reviseGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "Revise", wxDefaultPosition, wxDefaultSize);
+    m_clearGoalBtn = new wxButton(m_goalBanner, wxID_ANY, "X", wxDefaultPosition, wxDefaultSize);
     
     goalSizer->Add(m_goalText, 1, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+    goalSizer->Add(m_runGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
     goalSizer->Add(m_reviseGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
     goalSizer->Add(m_clearGoalBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
     m_goalBanner->SetSizer(goalSizer);
@@ -1261,12 +1415,14 @@ MainFrame::MainFrame()
     m_chatContainer->SetSizer(chatScrollSizer);
     m_chatContainer->Bind(wxEVT_SIZE, &MainFrame::OnChatContainerSize, this);
 
-    m_typingIndicator = new wxStaticText(centerPanel, wxID_ANY, "Agent thinking...");
+    m_typingIndicator = new wxStaticText(centerPanel, wxID_ANY, "Waiting for Engine…");
     m_typingIndicator->SetForegroundColour(wxColour(100, 100, 100));
     m_typingIndicator->Hide();
 
     // Input Control - spanning full width
     m_inputCtrl = new wxTextCtrl(centerPanel, wxID_ANY, "", wxDefaultPosition, wxSize(-1, 80), wxTE_MULTILINE);
+    m_inputCtrl->SetToolTip(
+        wxString::FromUTF8("Enter sends. Shift+Enter inserts a newline. Esc unlocks Send if locked."));
     
     // Buttons in a horizontal sizer
     wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -1293,19 +1449,16 @@ MainFrame::MainFrame()
     
     centerPanel->SetSizer(centerSizer);
 
-    // --- Right Observability Panel ---
-    m_rightSidebar = new wxScrolledWindow(this, wxID_ANY);
-    m_rightSidebar->SetScrollRate(0, 10);
-    wxBoxSizer* rightSizer = new wxBoxSizer(wxVERTICAL);
-    m_rightSidebar->SetSizer(rightSizer); // Initialize sizer early
-    
-    m_planPanel = new PlanExecutionPanel(this);
-    m_gragPanel = new GragDiagnosticsPanel(this);
-    m_strategyPanel = new StrategyPanel(this);
-    
-    AddCollapsiblePane(m_rightSidebar, "Plan Execution", m_planPanel);
-    AddCollapsiblePane(m_rightSidebar, "GRAG Diagnostics", m_gragPanel);
-    AddCollapsiblePane(m_rightSidebar, "Strategy Engine", m_strategyPanel);
+    // --- Observability (right column notebook — full height per tab) ---
+    m_observabilityNotebook = new wxNotebook(this, wxID_ANY);
+    m_cognitivePanel = new CognitiveStatusPanel(m_observabilityNotebook);
+    m_planPanel = new PlanExecutionPanel(m_observabilityNotebook);
+    m_gragPanel = new GragDiagnosticsPanel(m_observabilityNotebook);
+    m_strategyPanel = new StrategyPanel(m_observabilityNotebook);
+    m_observabilityNotebook->AddPage(m_cognitivePanel, "Cognitive State");
+    m_observabilityNotebook->AddPage(m_planPanel, "Plan Execution");
+    m_observabilityNotebook->AddPage(m_gragPanel, "GRAG Diagnostics");
+    m_observabilityNotebook->AddPage(m_strategyPanel, "Strategy Engine");
 
     // --- Bottom Tabbed Notebook ---
     m_bottomNotebook = new wxNotebook(this, wxID_ANY);
@@ -1352,19 +1505,24 @@ MainFrame::MainFrame()
         slot = new wxStaticText(localNotesPanel, wxID_ANY, wxString::Format("Empty Slot %d", index),
                                 wxDefaultPosition, wxDefaultSize,
                                 wxST_ELLIPSIZE_END);
-        btn = new wxButton(localNotesPanel, wxID_ANY, "X", wxDefaultPosition, wxSize(28, 28));
+        btn = new wxButton(localNotesPanel, wxID_ANY, "X", wxDefaultPosition, wxDefaultSize);
         btn->SetToolTip("Remove file");
         slot->SetMinSize(wxSize(80, 22));
 
         sizer->Add(slot, 1, wxALIGN_CENTER_VERTICAL | wxALL, 5);
         sizer->Add(btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-        sizer->SetMinSize(wxSize(-1, 32));
 
         btn->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) {
             if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) return;
             auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
             if (static_cast<size_t>(index - 1) < session.ragFilePaths.size()) {
                 const std::string removed = session.ragFilePaths[static_cast<std::size_t>(index - 1)];
+                std::string document_id;
+                const auto cacheIt = session.localNoteEngine.find(removed);
+                if (cacheIt != session.localNoteEngine.end()
+                    && !cacheIt->second.document_id.empty()) {
+                    document_id = cacheIt->second.document_id;
+                }
                 session.ragFilePaths.erase(session.ragFilePaths.begin() + (index - 1));
                 session.localNoteEngine.erase(removed);
                 SaveChatSessions();
@@ -1373,6 +1531,27 @@ MainFrame::MainFrame()
                     && Thoth::RemoteRagHonesty::shouldSyncRagFilesToBackend(agent->isRemote())) {
                     agent->setRagFiles(session.ragFilePaths);
                 }
+                // ALP amend: Local Note X also drops session↔document link so chat
+                // retrieval and Send-to-Engine eligibility reset for this session.
+                if (agent && agent->capabilities().supportsIngest && !document_id.empty()
+                    && !m_sessionId.empty()) {
+                    const auto unlink =
+                        agent->unlinkSessionDocument(document_id, m_sessionId);
+                    if (!unlink.success) {
+                        SetTransientStatus(wxString::FromUTF8(
+                            unlink.user_message.empty()
+                                ? "Local Note removed; Engine unlink failed"
+                                : unlink.user_message));
+                    } else {
+                        SetTransientStatus(wxString::FromUTF8(
+                            "Local Note removed and unlinked from this chat"));
+                    }
+                }
+                if (agent && agent->capabilities().supportsIngest) {
+                    RefreshCorpusPanel();
+                }
+                ApplyIngestControls(agent ? agent->eventStreamSnapshot()
+                                          : Thoth::localEventStreamSnapshot(NowMs()));
             }
         });
 
@@ -1453,21 +1632,22 @@ MainFrame::MainFrame()
         .Bottom()
         .Name("SystemState")
         .Layer(1)
-        .BestSize(-1, 350)
-        .MinSize(-1, 280)
+        .BestSize(-1, 280)
+        .MinSize(-1, 200)
         .Caption("System State")
         .CloseButton(true)
         .Resizable(true)
         .Dockable(true)
         .PinButton(true));
 
-    m_auiManager.AddPane(m_rightSidebar, wxAuiPaneInfo()
+    // One right column: tabbed Observability (full pane height per panel; add tabs later).
+    m_auiManager.AddPane(m_observabilityNotebook, wxAuiPaneInfo()
         .Right()
         .Name("Observability")
         .Caption("Observability")
         .Layer(1)
-        .BestSize(350, -1)
-        .MinSize(150, -1)
+        .BestSize(420, -1)
+        .MinSize(280, 200)
         .CloseButton(false)
         .MaximizeButton(true)
         .Resizable(true)
@@ -1479,17 +1659,15 @@ MainFrame::MainFrame()
     m_auiManager.Update();
 
     // Event bindings
-    m_sendButton->Bind(wxEVT_BUTTON, &MainFrame::OnSend, this);
+    m_sendButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent& evt) {
+        Thoth::ChatSendTrace::log(
+            1, "enter_or_send_event",
+            "source=send_button session=" + m_sessionId);
+        OnSend(evt);
+    });
     m_retrievalExplainBtn->Bind(wxEVT_BUTTON, &MainFrame::OnMenuViewShowGrag, this);
     m_planExplainBtn->Bind(wxEVT_BUTTON, &MainFrame::OnShowDecisionTrace, this);
-    m_inputCtrl->Bind(wxEVT_KEY_DOWN, [this](wxKeyEvent& event) {
-        if (event.ControlDown() && event.GetKeyCode() == WXK_RETURN) {
-            wxCommandEvent evt(wxEVT_BUTTON, m_sendButton->GetId());
-            OnSend(evt);
-        } else {
-            event.Skip();
-        }
-    });
+    m_inputCtrl->Bind(wxEVT_KEY_DOWN, &MainFrame::OnChatInputKeyDown, this);
 
     m_chatList->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED, &MainFrame::OnChatSelected, this);
     m_newChatButton->Bind(wxEVT_BUTTON, &MainFrame::OnNewChat, this);
@@ -1497,6 +1675,10 @@ MainFrame::MainFrame()
     m_copyChatButton->Bind(wxEVT_BUTTON, &MainFrame::OnCopyChat, this);
 
     // Goal Banner bindings
+    m_runGoalBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        RunActiveBannerGoal();
+    });
+
     m_clearGoalBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (agent && agent->isRemote()) {
             SetTransientStatus(
@@ -1511,13 +1693,9 @@ MainFrame::MainFrame()
         auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
         wxString newGoal = wxGetTextFromUser("Revise active goal:", "Revise Goal", wxString::FromUTF8(session.activeGoal), this);
         if (!newGoal.IsEmpty()) {
-            SetTransientStatus(wxString::FromUTF8(Thoth::kGoalSubmittedChrome));
             const std::string goalStd = newGoal.ToStdString();
             SetSessionGoal(m_sessionId, goalStd);
-            SyncBackendSessionIdentity();
-            if (agent) {
-                agent->executeGoal(goalStd);
-            }
+            RunActiveBannerGoal();
         }
     });
 
@@ -1535,6 +1713,17 @@ MainFrame::MainFrame()
     Bind(wxEVT_TIMER, &MainFrame::OnConnectionPollTimer, this, m_connectionPollTimer.GetId());
     m_connectionPollTimer.Start(1000);
 
+    m_chatPendingWatchdogTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, &MainFrame::OnChatPendingWatchdogTimer, this,
+         m_chatPendingWatchdogTimer.GetId());
+    m_chatPendingWatchdogTimer.Start(5000);
+    m_chatTurnElapsedTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, &MainFrame::OnChatTurnElapsedTimer, this,
+         m_chatTurnElapsedTimer.GetId());
+    m_chatTurnRefreshRetryTimer.SetOwner(this);
+    Bind(wxEVT_TIMER, &MainFrame::OnChatTurnRefreshRetryTimer, this,
+         m_chatTurnRefreshRetryTimer.GetId());
+
     LoadChatSessions();
     if (m_sessions.empty()) {
         CreateNewSession("New Chat");
@@ -1546,10 +1735,40 @@ MainFrame::MainFrame()
 
     UpdateBackendModeBanner();
     SetTransientStatus("Ready");
+
+    // Diagnostic one-shot: synthesize OnSend once for CHAT_SEND_TRACE (no product UX change).
+    if (const char* probe = Thoth::ChatSendTrace::onceMessage()) {
+        const std::string probeMsg(probe);
+        Thoth::ChatSendTrace::log(
+            0, "probe_armed",
+            "THOTH_CHAT_SEND_TRACE_ONCE set; will CallAfter OnSend msg_len="
+                + std::to_string(probeMsg.size()) + " session=" + m_sessionId);
+        CallAfter([this, probeMsg]() {
+            if (wxPendingDelete.Member(this) || !wxWindow::FindWindowById(GetId())) {
+                Thoth::ChatSendTrace::log(0, "probe_aborted",
+                                          "reason=frame_destroyed_before_probe");
+                return;
+            }
+            Thoth::ChatSendTrace::log(
+                1, "enter_or_send_event",
+                "source=synthetic_probe key=none button=none session=" + m_sessionId);
+            if (!m_inputCtrl) {
+                Thoth::ChatSendTrace::log(1, "enter_or_send_event",
+                                         "early_return reason=input_ctrl_null");
+                return;
+            }
+            m_inputCtrl->SetValue(wxString::FromUTF8(probeMsg));
+            wxCommandEvent evt(wxEVT_BUTTON, m_sendButton ? m_sendButton->GetId() : wxID_ANY);
+            OnSend(evt);
+        });
+    }
 }
 
 MainFrame::~MainFrame() {
     m_connectionPollTimer.Stop();
+    m_chatPendingWatchdogTimer.Stop();
+    m_chatTurnElapsedTimer.Stop();
+    m_chatTurnRefreshRetryTimer.Stop();
     m_auiManager.UnInit();
     if (agent) {
         agent->onOperationComplete = nullptr;
@@ -1577,38 +1796,135 @@ void MainFrame::OnCopyChat(wxCommandEvent& WXUNUSED(evt)) {
 }
 
 void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
-    wxString input = m_inputCtrl->GetValue();
-    input.Trim(true).Trim(false);
-    if (input.IsEmpty()) return;
-    m_inputCtrl->Clear();
+    Thoth::ChatSendTrace::log(2, "OnSend_entered", "ok");
+
+    if (!m_inputCtrl) {
+        Thoth::ChatSendTrace::log(4, "input_gate",
+                                  "rejected reason=input_ctrl_null");
+        return;
+    }
+
+    // --- payload boundary 1–3: raw ctrl → local wxString (copy) ---
+    const wxString rawFromCtrl = m_inputCtrl->GetValue(); // copy from control
+    Thoth::ChatSendTrace::log(
+        0, "payload_b1_raw_GetValue",
+        "ctrl_ptr_ok=yes");
+    TraceWxStringBoundary("payload_b1_raw_wx", rawFromCtrl);
+
+    wxString input = rawFromCtrl; // copy into mutable local
+    TraceWxStringBoundary("payload_b2_after_local_copy", input);
+
+    input.Trim(true).Trim(false); // in-place trim on local only (control untouched)
+    TraceWxStringBoundary("payload_b3_after_Trim", input);
+
+    if (input.IsEmpty()) {
+        Thoth::ChatSendTrace::log(4, "input_gate",
+                                  "rejected reason=empty_after_trim wx_IsEmpty=yes");
+        return;
+    }
+    {
+        // Keep historical step-4 line; also show wx_length vs ToStdString_len discrepancy.
+        const std::string viaToStd = input.ToStdString();
+        Thoth::ChatSendTrace::log(
+            4, "input_gate",
+            "accepted wx_length=" + std::to_string(input.length())
+                + " wx_IsEmpty=no ToStdString_len=" + std::to_string(viaToStd.size())
+                + (viaToStd.empty() && input.length() > 0
+                       ? " DISCREPANCY=wx_nonempty_ToStdString_empty"
+                       : ""));
+        Thoth::ChatSendTrace::logPayload("payload_b4_ToStdString_at_accept", viaToStd);
+    }
 
     // Ensure we have a valid session and it's active
     if (m_activeSessionIndex < 0 || m_activeSessionIndex >= static_cast<int>(m_sessions.size()) || m_sessionId.empty()) {
+        Thoth::ChatSendTrace::log(
+            3, "session_resolve",
+            "creating_new_session reason=invalid_active index="
+                + std::to_string(m_activeSessionIndex) + " sessionId_empty="
+                + std::string(m_sessionId.empty() ? "yes" : "no"));
         CreateNewSession("New Chat");
         ActivateSession(m_sessions.size() - 1);
     }
 
     const std::string activeId = m_sessionId;
+    Thoth::ChatSendTrace::log(3, "session_resolve", "ok session=" + activeId);
     
     auto it = std::find_if(m_sessions.begin(), m_sessions.end(),
         [&activeId](const Thoth::ChatSession& s) { return s.id == activeId; });
     
     if (it == m_sessions.end()) {
+        Thoth::ChatSendTrace::log(
+            4, "input_gate",
+            "rejected reason=active_session_lost session=" + activeId);
         SetTransientStatus("Error: Active session lost");
         return;
     }
 
     Thoth::ChatSession& session = *it;
-    const bool isGoal = InputStartsGoal(input);
-    const wxString goalText = isGoal ? ExtractGoalText(input) : wxString();
-    const bool engineConversation =
-        agent && agent->capabilities().supportsConversation && !isGoal;
+    const bool isGoal = InputStartsGoal(input); // const wxString& — no mutate
+    const wxString goalText = isGoal ? ExtractGoalText(input) : wxString(); // const& read
+    const bool agentPresent = static_cast<bool>(agent);
+    const bool supportsConversation =
+        agentPresent && agent->capabilities().supportsConversation;
+    const bool engineConversation = supportsConversation && !isGoal;
+    Thoth::ChatSendTrace::log(
+        5, "agent_presence",
+        std::string("agent=") + (agentPresent ? "present" : "absent")
+            + " is_remote=" + (agentPresent && agent->isRemote() ? "yes" : "no")
+            + " supportsConversation=" + (supportsConversation ? "yes" : "no"));
+    TraceWxStringBoundary("payload_b5_after_goal_classify", input);
 
-    if (session.messages.empty()) {
-        session.title = BuildSessionTitle(input);
+    const int pendingBefore = Thoth::ChatSendChrome::pendingCountForSession(
+        m_inFlightChatBySession, activeId);
+    Thoth::ChatSendTrace::log(
+        6, "pending_before_send",
+        "session=" + activeId + " pending_count=" + std::to_string(pendingBefore));
+
+    // S4 — do not stack another pending turn while Send is locked.
+    if (engineConversation
+        && !Thoth::ChatSendChrome::sendEnabledForSession(m_inFlightChatBySession, activeId)) {
+        Thoth::ChatSendTrace::log(
+            7, "pending_gate",
+            "rejected reason=send_locked_pending_nonzero pending_count="
+                + std::to_string(pendingBefore));
+        SetTransientStatus(wxString::FromUTF8(Thoth::ChatTurnUi::kAnotherReplyInProgressStatus));
+        return;
+    }
+    Thoth::ChatSendTrace::log(7, "pending_gate", "passed");
+
+    {
+        std::string path = "unknown";
+        if (isGoal) {
+            path = "goal_execute";
+        } else if (engineConversation) {
+            path = "engine_conversation_turns";
+        } else if (agentPresent) {
+            path = "local_processUserInput";
+        } else {
+            path = "no_agent";
+        }
+        Thoth::ChatSendTrace::log(
+            8, "capability_path",
+            "selected=" + path + " isGoal=" + std::string(isGoal ? "yes" : "no")
+                + " engineConversation=" + std::string(engineConversation ? "yes" : "no"));
     }
 
-    if (!engineConversation) {
+    // Clears the control widget only — local `input` must remain intact.
+    TraceWxStringBoundary("payload_b6_BEFORE_ctrl_Clear", input);
+    m_inputCtrl->Clear();
+    {
+        const wxString ctrlAfterClear = m_inputCtrl->GetValue();
+        TraceWxStringBoundary("payload_b6_ctrl_AFTER_Clear", ctrlAfterClear);
+        TraceWxStringBoundary("payload_b6_local_input_AFTER_ctrl_Clear", input);
+    }
+
+    if (session.messages.empty()) {
+        session.title = BuildSessionTitle(input); // const wxString& — ToStdString inside title builder only
+    }
+
+    // Always show the user turn locally (Engine path used to leave the chat blank
+    // until refresh — only "Waiting for Engine…" was visible).
+    if (!isGoal) {
         session.messages.push_back({"user", input.ToStdString(), NowMs()});
     }
     session.updatedAtMs = NowMs();
@@ -1617,10 +1933,11 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
     // Sync conversation memory after the new message is stored. Skip RAG re-index for
     // goals so /goal is not blocked behind bulk indexing on the worker thread.
     SyncAgentMemoryFromActiveSession(!isGoal && !engineConversation);
+    TraceWxStringBoundary("payload_b7_after_Save_and_SyncMemory", input);
     
     // Refresh UI
     RefreshChatList();
-    if (!engineConversation) {
+    if (!isGoal) {
         RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
     }
 
@@ -1637,16 +1954,18 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
 
     if (agent) {
         if (isGoal) {
-            if (m_typingIndicator) {
-                m_typingIndicator->Hide();
-            }
+            HideTypingIndicatorIfChatTurnIdle();
             const std::string goalStd = goalText.ToStdString();
             if (goalStd.empty()) {
+                Thoth::ChatSendTrace::log(
+                    8, "capability_path",
+                    "early_return reason=goal_text_empty");
                 SetTransientStatus("Goal text empty — use \"goal: …\" or \"/goal …\"");
             } else {
                 std::cerr << "[MainFrame] executeGoal for session " << activeId << "\n";
                 SetSessionGoal(activeId, goalStd);
                 SyncBackendSessionIdentity();
+                BeginCognitiveGoalPlanningOptimistic();
                 agent->executeGoal(goalStd);
                 if (!agent->isRemote() && !session.ragFilePaths.empty()) {
                     auto sessionCopy = session;
@@ -1656,38 +1975,65 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
             }
         } else if (engineConversation) {
             SyncBackendSessionIdentity();
-            if (agent->workerHasContentionBeforeEnqueue()) {
-                SetTransientStatus(
-                    wxString::FromUTF8("Waiting for Engine… (message queued behind prior work)"));
+            TraceWxStringBoundary("payload_b7b_after_SyncBackendSessionIdentity", input);
+            SetTransientStatus(
+                wxString::FromUTF8(Thoth::ChatSendChrome::kWaitingForEngineStatus));
+            if (m_cognitivePanel) {
+                m_cognitivePanel->NoteChatTurnWaiting();
             }
-            m_typingIndicator->Show();
             ++m_requestCounter;
             const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
             m_requestToSession[requestId] = activeId;
             RegisterPendingChatRequest(requestId, activeId);
+            const std::string contentForAgent = input.ToStdString();
+            BeginChatTurnUi(requestId, activeId, contentForAgent);
             std::optional<std::string> activeGoal;
             if (!session.activeGoal.empty()) {
                 activeGoal = session.activeGoal;
             }
-            agent->appendConversationTurn(activeId, input.ToStdString(), requestId, activeGoal);
+            TraceWxStringBoundary("payload_b8_wx_immediately_before_agent_call", input);
+            Thoth::ChatSendTrace::logPayload("payload_b8_std_immediately_before_agent_call",
+                                            contentForAgent);
+            std::cerr << "[MainFrame] appendConversationTurn request=" << requestId
+                      << " session=" << activeId << "\n";
+            Thoth::ChatSendTrace::log(
+                11, "http_dispatch_requested",
+                "calling AgentInterface::appendConversationTurn request=" + requestId
+                    + " session=" + activeId
+                    + " has_active_goal=" + std::string(activeGoal ? "yes" : "no")
+                    + " contentForAgent_len=" + std::to_string(contentForAgent.size()));
+            agent->appendConversationTurn(activeId, contentForAgent, requestId, activeGoal);
         } else {
             SyncBackendSessionIdentity();
-            m_typingIndicator->Show();
             ++m_requestCounter;
             const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
             m_requestToSession[requestId] = activeId;
             RegisterPendingChatRequest(requestId, activeId);
+            const std::string contentForAgent = input.ToStdString();
+            BeginChatTurnUi(requestId, activeId, contentForAgent);
             std::cerr << "[MainFrame] Sending request " << requestId << " for session "
                       << activeId << "\n";
-            agent->processUserInput(input.ToStdString(), requestId);
+            agent->processUserInput(contentForAgent, requestId);
         }
     } else {
+        Thoth::ChatSendTrace::log(
+            5, "agent_presence",
+            "early_return reason=agent_null_after_gates (no pending registered)");
         wxMessageBox("Agent not initialized.", "Error", wxOK | wxICON_ERROR, this);
     }
     if (m_inputCtrl) {
         m_inputCtrl->SetFocus();
     }
-    RefreshAllPanels();
+    // Defer panel refresh so Cognitive State / chat chrome can paint first.
+    // Sync RefreshAllPanels on the GUI thread can block for a long time (Engine HTTP).
+    wxTheApp->CallAfter([this]() {
+        if (!wxPendingDelete.Member(this) && wxWindow::FindWindowById(GetId())) {
+            RefreshAllPanels();
+        }
+    });
+    if (ChatTurnOwnsTypingIndicator()) {
+        RefreshChatTurnChromeText();
+    }
 }
 
 void MainFrame::OnShowDecisionTrace(wxCommandEvent& WXUNUSED(evt)) {
@@ -1780,6 +2126,8 @@ void MainFrame::OnDeleteChat(wxCommandEvent& WXUNUSED(evt)) {
         return entry.second == deletedSessionId;
     });
     m_inFlightChatBySession.erase(deletedSessionId);
+    m_chatPendingStartedAtMsBySession.erase(deletedSessionId);
+    ClearChatTurnChromeForSession(deletedSessionId, Thoth::ChatTurnUi::Phase::Failed);
 
     m_sessions.erase(m_sessions.begin() + sessionIndexToDelete);
 
@@ -2087,10 +2435,13 @@ void MainFrame::RefreshEventStreamIndicators() {
 void MainFrame::ApplyEngineDegradedControls(const Thoth::EventStreamSnapshot& snap) {
     const bool engine_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
     if (m_sendButton) {
-        m_sendButton->Enable(engine_usable);
         m_sendButton->SetToolTip(engine_usable
             ? wxString()
             : wxString::FromUTF8("Engine is not ready — try again when Engine: Ready"));
+    }
+    UpdateChatSendChrome();
+    if (m_runGoalBtn) {
+        m_runGoalBtn->Enable(engine_usable);
     }
     if (m_reviseGoalBtn) {
         m_reviseGoalBtn->Enable(engine_usable);
@@ -2100,6 +2451,7 @@ void MainFrame::ApplyEngineDegradedControls(const Thoth::EventStreamSnapshot& sn
         bar->Enable(ID_MENU_AGENT_PAUSE, engine_usable);
         bar->Enable(ID_MENU_AGENT_RESUME, engine_usable);
         bar->Enable(ID_MENU_AGENT_ABORT, engine_usable);
+        bar->Enable(ID_MENU_AGENT_UNLOCK_SEND, true);
     }
     ApplyIngestControls(snap);
 }
@@ -2192,6 +2544,7 @@ void MainFrame::OnMenuAgentRunGoal(wxCommandEvent& WXUNUSED(evt)) {
     SetSessionGoal(m_sessionId, goalStd);
     SyncBackendSessionIdentity();
     if (agent) {
+        BeginCognitiveGoalPlanningOptimistic();
         agent->executeGoal(goalStd);
     }
 }
@@ -2235,6 +2588,7 @@ void MainFrame::SetupMenuBar() {
     agentMenu->Append(ID_MENU_AGENT_PAUSE, "&Pause Execution");
     agentMenu->Append(ID_MENU_AGENT_RESUME, "&Resume Execution");
     agentMenu->Append(ID_MENU_AGENT_ABORT, "&Abort Execution\tCtrl+Shift+A");
+    agentMenu->Append(ID_MENU_AGENT_UNLOCK_SEND, "&Unlock Send\tCtrl+Shift+U");
     agentMenu->AppendSeparator();
     agentMenu->Append(ID_MENU_AGENT_SHOW_PLAN, "Show Current &Plan");
     agentMenu->Append(ID_MENU_AGENT_SHOW_TRAJECTORY, "Show &Trajectory");
@@ -2298,6 +2652,7 @@ void MainFrame::SetupMenuBar() {
     Bind(wxEVT_MENU, &MainFrame::OnMenuAgentPause, this, ID_MENU_AGENT_PAUSE);
     Bind(wxEVT_MENU, &MainFrame::OnMenuAgentResume, this, ID_MENU_AGENT_RESUME);
     Bind(wxEVT_MENU, &MainFrame::OnMenuAgentAbort, this, ID_MENU_AGENT_ABORT);
+    Bind(wxEVT_MENU, &MainFrame::OnUnlockChatSend, this, ID_MENU_AGENT_UNLOCK_SEND);
     Bind(wxEVT_MENU, &MainFrame::OnMenuAgentShowPlan, this, ID_MENU_AGENT_SHOW_PLAN);
     Bind(wxEVT_MENU, &MainFrame::OnMenuAgentShowTrajectory, this, ID_MENU_AGENT_SHOW_TRAJECTORY);
 
@@ -2571,20 +2926,39 @@ void MainFrame::OnMenuBenchFullSystem(wxCommandEvent& WXUNUSED(evt)) {
 }
 
 void MainFrame::OnMenuViewShowGrag(wxCommandEvent& evt) {
-    wxWindow* sidebar = m_rightSidebar;
-    int id = evt.GetId();
-    if (id == ID_MENU_VIEW_SHOW_SESSIONS) sidebar = m_leftSidebar;
-    
-    if (!sidebar) return;
+    const int id = evt.GetId();
+    if (id == ID_MENU_VIEW_SHOW_SESSIONS) {
+        if (!m_leftSidebar) {
+            return;
+        }
+        auto& pane = m_auiManager.GetPane(m_leftSidebar);
+        if (pane.IsOk()) {
+            pane.Show();
+            m_auiManager.Update();
+        }
+        return;
+    }
 
-    auto& pane = m_auiManager.GetPane(sidebar);
+    if (!m_observabilityNotebook) {
+        return;
+    }
+    auto& pane = m_auiManager.GetPane(m_observabilityNotebook);
     if (pane.IsOk()) {
         pane.Show();
-        m_auiManager.Update();
     }
+    // Tab order: Cognitive(0), Plan(1), GRAG(2), Strategy(3)
+    int tab = 2;
+    if (id == ID_MENU_VIEW_SHOW_STRATEGY) {
+        tab = 3;
+    }
+    if (tab < static_cast<int>(m_observabilityNotebook->GetPageCount())) {
+        m_observabilityNotebook->SetSelection(tab);
+    }
+    m_auiManager.Update();
 }
 
 void MainFrame::OnMenuViewShowStrategy(wxCommandEvent& evt) {
+    evt.SetId(ID_MENU_VIEW_SHOW_STRATEGY);
     OnMenuViewShowGrag(evt);
 }
 
@@ -2698,45 +3072,458 @@ std::string MainFrame::ResolveGoalEventSessionId(const std::string& eventSession
     return m_sessionId;
 }
 
-void MainFrame::RegisterPendingChatRequest(const std::string& requestId,
-                                           const std::string& sessionId) {
-    if (requestId.empty() || sessionId.empty()) {
+void MainFrame::BeginChatTurnUi(const std::string& requestId,
+                                const std::string& sessionId,
+                                const std::string& userContent) {
+    Thoth::ChatTurnUi::ChatTurnUiState turn;
+    turn.phase = Thoth::ChatTurnUi::Phase::Accepted;
+    turn.request_id = requestId;
+    turn.session_id = sessionId;
+    turn.user_content = userContent;
+    turn.started_at_ms = NowMs();
+    turn.terminal = false;
+    turn.refresh_attempt = 0;
+    turn.send_unlocked_early = false;
+    m_activeChatTurn = std::move(turn);
+    SetChatTurnPhase(Thoth::ChatTurnUi::Phase::WaitingEngine);
+    Thoth::ChatSendTrace::log(
+        10, "chat_turn_begin",
+        "request=" + requestId + " session=" + sessionId
+            + " user_len=" + std::to_string(userContent.size()));
+}
+
+void MainFrame::SetChatTurnPhase(Thoth::ChatTurnUi::Phase phase) {
+    if (!m_activeChatTurn.has_value() || m_activeChatTurn->terminal) {
         return;
     }
-    ++m_inFlightChatBySession[sessionId];
+    m_activeChatTurn->phase = phase;
+    if (Thoth::ChatTurnUi::isTerminal(phase)) {
+        m_activeChatTurn->terminal = true;
+        m_chatTurnElapsedTimer.Stop();
+        m_chatTurnRefreshRetryTimer.Stop();
+    } else if (phase == Thoth::ChatTurnUi::Phase::WaitingEngine) {
+        if (!m_chatTurnElapsedTimer.IsRunning()) {
+            m_chatTurnElapsedTimer.Start(1000);
+        }
+    } else {
+        m_chatTurnElapsedTimer.Stop();
+    }
+    RefreshChatTurnChromeText();
+    Thoth::ChatSendTrace::log(
+        10, "chat_turn_phase",
+        "phase=" + std::to_string(static_cast<int>(phase))
+            + " request=" + m_activeChatTurn->request_id);
+}
+
+void MainFrame::RefreshChatTurnChromeText() {
+    if (!m_typingIndicator || !m_activeChatTurn.has_value()) {
+        return;
+    }
+    if (m_inChatTurnChromeRefresh) {
+        return;
+    }
+
+    const bool wantVisible =
+        m_sessionId == m_activeChatTurn->session_id
+        && Thoth::ChatTurnUi::isActivePhase(m_activeChatTurn->phase)
+        && !m_activeChatTurn->terminal;
+
+    if (wantVisible) {
+        const std::string text =
+            Thoth::ChatTurnUi::statusTextForTurn(*m_activeChatTurn, NowMs());
+        m_typingIndicator->SetLabel(wxString::FromUTF8(text));
+    }
+
+    wxSizer* sizer = m_typingIndicator->GetContainingSizer();
+    const bool shown = m_typingIndicator->IsShown();
+    if (wantVisible == shown) {
+        // Label-only update (e.g. elapsed seconds) — avoid Layout (size recursion).
+        return;
+    }
+
+    m_inChatTurnChromeRefresh = true;
+    if (sizer) {
+        sizer->Show(m_typingIndicator, wantVisible);
+    }
+    m_typingIndicator->Show(wantVisible);
+    if (wxWindow* parent = m_typingIndicator->GetParent()) {
+        parent->Layout();
+    }
+    m_inChatTurnChromeRefresh = false;
+}
+
+void MainFrame::ClearChatTurnChromeIfOwner(const std::string& requestId) {
+    if (!m_activeChatTurn.has_value() || m_activeChatTurn->request_id != requestId) {
+        return;
+    }
+    m_chatTurnElapsedTimer.Stop();
+    m_chatTurnRefreshRetryTimer.Stop();
+    if (m_typingIndicator) {
+        m_inChatTurnChromeRefresh = true;
+        if (wxSizer* sizer = m_typingIndicator->GetContainingSizer()) {
+            sizer->Show(m_typingIndicator, false);
+        }
+        m_typingIndicator->Hide();
+        if (wxWindow* parent = m_typingIndicator->GetParent()) {
+            parent->Layout();
+        }
+        m_inChatTurnChromeRefresh = false;
+    }
+    Thoth::ChatSendTrace::log(
+        15, "thinking_indicator_hidden",
+        "ok owner_request=" + requestId + " visible_after="
+            + std::string(m_typingIndicator && m_typingIndicator->IsShown() ? "yes" : "no"));
+}
+
+void MainFrame::ClearChatTurnChromeForSession(const std::string& sessionId,
+                                             Thoth::ChatTurnUi::Phase terminalPhase) {
+    if (!m_activeChatTurn.has_value() || m_activeChatTurn->session_id != sessionId) {
+        HideTypingIndicatorIfChatTurnIdle();
+        return;
+    }
+    if (!m_activeChatTurn->terminal) {
+        m_activeChatTurn->phase = terminalPhase;
+        m_activeChatTurn->terminal = true;
+    }
+    ClearChatTurnChromeIfOwner(m_activeChatTurn->request_id);
+}
+
+bool MainFrame::ChatTurnOwnsTypingIndicator() const {
+    return m_activeChatTurn.has_value() && !m_activeChatTurn->terminal
+        && Thoth::ChatTurnUi::isActivePhase(m_activeChatTurn->phase);
+}
+
+void MainFrame::HideTypingIndicatorIfChatTurnIdle() {
+    if (ChatTurnOwnsTypingIndicator()) {
+        Thoth::ChatSendTrace::log(
+            15, "thinking_indicator_hidden",
+            "skipped reason=chat_turn_owns_indicator request="
+                + m_activeChatTurn->request_id);
+        return;
+    }
+    if (m_typingIndicator) {
+        m_inChatTurnChromeRefresh = true;
+        if (wxSizer* sizer = m_typingIndicator->GetContainingSizer()) {
+            sizer->Show(m_typingIndicator, false);
+        }
+        m_typingIndicator->Hide();
+        if (wxWindow* parent = m_typingIndicator->GetParent()) {
+            parent->Layout();
+        }
+        m_inChatTurnChromeRefresh = false;
+    }
+}
+
+bool MainFrame::RefreshAndVerifyChatTurnAssistant(const std::string& sessionId,
+                                                  const std::string& userContent,
+                                                  const std::string& expectedAssistant) {
+    // Always refresh the originating session store — never another session.
+    RefreshSessionConversationFromEngine(sessionId);
+    auto sessionIt = std::find_if(m_sessions.begin(), m_sessions.end(),
+                                  [&sessionId](const Thoth::ChatSession& session) {
+                                      return session.id == sessionId;
+                                  });
+    if (sessionIt == m_sessions.end()) {
+        return false;
+    }
+    sessionIt->updatedAtMs = NowMs();
+    SaveChatSessions();
+    const bool ok = Thoth::ChatTurnUi::transcriptContainsCurrentTurnAssistant(
+        sessionIt->messages, userContent, expectedAssistant);
+    Thoth::ChatSendTrace::log(
+        16, "chat_turn_verify",
+        "session=" + sessionId + " ok=" + std::string(ok ? "yes" : "no")
+            + " messages=" + std::to_string(sessionIt->messages.size()));
+    return ok;
+}
+
+bool MainFrame::ApplyEngineChatSuccessTranscript(const std::string& requestId,
+                                                 const std::string& sessionId,
+                                                 const std::string& userContent,
+                                                 const std::string& expectedAssistant) {
+    if (sessionId.empty()) {
+        return false;
+    }
+    const bool ok =
+        RefreshAndVerifyChatTurnAssistant(sessionId, userContent, expectedAssistant);
+    Thoth::ChatSendTrace::log(
+        16, "apply_engine_success_transcript",
+        "request=" + requestId + " session=" + sessionId
+            + " verified=" + std::string(ok ? "yes" : "no"));
+    if (m_sessionId == sessionId && m_activeSessionIndex >= 0) {
+        RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
+    }
+    return ok;
+}
+
+void MainFrame::FinishChatTurnSuccess(const std::string& requestId,
+                                      const std::string& sessionId,
+                                      const std::string& /*expectedAssistant*/) {
+    if (!m_activeChatTurn.has_value() || m_activeChatTurn->request_id != requestId
+        || m_activeChatTurn->session_id != sessionId) {
+        Thoth::ChatSendTrace::log(
+            16, "chat_turn_complete",
+            "ignored stale request=" + requestId);
+        return;
+    }
+    if (m_activeChatTurn->terminal) {
+        Thoth::ChatSendTrace::log(
+            16, "chat_turn_complete",
+            "ignored already_terminal request=" + requestId);
+        return;
+    }
+    // Terminal precedence: completed cannot later become failed.
+    SetChatTurnPhase(Thoth::ChatTurnUi::Phase::Completed);
+    ClearChatTurnChromeIfOwner(requestId);
+    UpdateChatSendChrome();
+    Thoth::ChatSendTrace::log(16, "chat_turn_complete", "completed request=" + requestId);
+}
+
+void MainFrame::FinishChatTurnFailure(const std::string& requestId,
+                                      const std::string& sessionId) {
+    if (!m_activeChatTurn.has_value() || m_activeChatTurn->request_id != requestId
+        || m_activeChatTurn->session_id != sessionId) {
+        Thoth::ChatSendTrace::log(
+            16, "chat_turn_complete",
+            "failure_ignored stale request=" + requestId);
+        return;
+    }
+    if (m_activeChatTurn->terminal
+        && m_activeChatTurn->phase == Thoth::ChatTurnUi::Phase::Completed) {
+        Thoth::ChatSendTrace::log(
+            16, "chat_turn_complete",
+            "failure_ignored already_completed request=" + requestId);
+        return;
+    }
+    SetChatTurnPhase(Thoth::ChatTurnUi::Phase::Failed);
+    ClearChatTurnChromeIfOwner(requestId);
+    UpdateChatSendChrome();
+    Thoth::ChatSendTrace::log(16, "chat_turn_complete", "failed request=" + requestId);
+}
+
+void MainFrame::RegisterPendingChatRequest(const std::string& requestId,
+                                            const std::string& sessionId) {
+    if (requestId.empty() || sessionId.empty()) {
+        Thoth::ChatSendTrace::log(
+            9, "RegisterPending",
+            "early_return reason=empty_id requestId_empty="
+                + std::string(requestId.empty() ? "yes" : "no") + " sessionId_empty="
+                + std::string(sessionId.empty() ? "yes" : "no"));
+        return;
+    }
+    Thoth::ChatSendChrome::registerPending(m_inFlightChatBySession, sessionId);
+    if (m_chatPendingStartedAtMsBySession[sessionId] <= 0) {
+        m_chatPendingStartedAtMsBySession[sessionId] = NowMs();
+    }
+    const int pending = Thoth::ChatSendChrome::pendingCountForSession(
+        m_inFlightChatBySession, sessionId);
+    Thoth::ChatSendTrace::log(
+        9, "RegisterPending",
+        "ok request=" + requestId + " session=" + sessionId
+            + " pending_count_after=" + std::to_string(pending));
     UpdateChatSendChrome();
 }
 
 void MainFrame::ClearPendingChatRequest(const std::string& /*requestId*/,
                                           const std::string& sessionId) {
-    if (sessionId.empty()) {
-        return;
+    Thoth::ChatSendChrome::clearOnePending(m_inFlightChatBySession, sessionId);
+    if (Thoth::ChatSendChrome::pendingCountForSession(m_inFlightChatBySession, sessionId)
+        == 0) {
+        m_chatPendingStartedAtMsBySession.erase(sessionId);
     }
-    auto it = m_inFlightChatBySession.find(sessionId);
-    if (it == m_inFlightChatBySession.end()) {
-        UpdateChatSendChrome();
-        return;
-    }
-    it->second = std::max(0, it->second - 1);
-    if (it->second == 0) {
-        m_inFlightChatBySession.erase(it);
-    }
+    const int pending = Thoth::ChatSendChrome::pendingCountForSession(
+        m_inFlightChatBySession, sessionId);
+    Thoth::ChatSendTrace::log(
+        14, "ClearPendingChatRequest",
+        "ok session=" + sessionId + " pending_count_after=" + std::to_string(pending));
     UpdateChatSendChrome();
+}
+
+void MainFrame::ForceClearSessionChatPending(const std::string& sessionId) {
+    Thoth::ChatSendChrome::forceClearSessionPending(m_inFlightChatBySession, sessionId);
+    m_chatPendingStartedAtMsBySession.erase(sessionId);
+    for (auto it = m_requestToSession.begin(); it != m_requestToSession.end();) {
+        if (it->second == sessionId) {
+            it = m_requestToSession.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    Thoth::ChatSendTrace::log(
+        14, "ClearPendingChatRequest",
+        "force_clear session=" + sessionId);
+    UpdateChatSendChrome();
+}
+
+void MainFrame::UnlockSendKeepInFlightTurn(const std::string& sessionId) {
+    // Unlock Send only — keep request_id map + active turn so late Engine success
+    // can still refresh the transcript.
+    Thoth::ChatSendChrome::forceClearSessionPending(m_inFlightChatBySession, sessionId);
+    m_chatPendingStartedAtMsBySession.erase(sessionId);
+    if (m_activeChatTurn.has_value() && m_activeChatTurn->session_id == sessionId
+        && !m_activeChatTurn->terminal) {
+        m_activeChatTurn->send_unlocked_early = true;
+        RefreshChatTurnChromeText();
+    }
+    Thoth::ChatSendTrace::log(
+        14, "UnlockSendKeepInFlightTurn",
+        "session=" + sessionId + " request_map_preserved=yes");
+    UpdateChatSendChrome();
+}
+
+void MainFrame::UnlockActiveSessionChatSend() {
+    if (m_sessionId.empty()) {
+        return;
+    }
+    // Explicit Esc unlock abandons UI ownership; late HTTP may still refresh via
+    // ApplyEngineChatSuccessTranscript when request_id still matches active turn.
+    UnlockSendKeepInFlightTurn(m_sessionId);
+    m_auiManager.Update();
+    SetTransientStatus(wxString::FromUTF8(Thoth::ChatSendChrome::kUnlockedSendStatus));
+}
+
+void MainFrame::OnUnlockChatSend(wxCommandEvent& WXUNUSED(evt)) {
+    UnlockActiveSessionChatSend();
+}
+
+void MainFrame::OnChatPendingWatchdogTimer(wxTimerEvent& WXUNUSED(evt)) {
+    if (m_sessionId.empty()) {
+        return;
+    }
+    const auto startedIt = m_chatPendingStartedAtMsBySession.find(m_sessionId);
+    if (startedIt == m_chatPendingStartedAtMsBySession.end()) {
+        return;
+    }
+    if (!Thoth::ChatSendChrome::watchdogShouldFire(startedIt->second, NowMs())) {
+        return;
+    }
+    UnlockSendKeepInFlightTurn(m_sessionId);
+    m_auiManager.Update();
+    SetTransientStatus(wxString::FromUTF8(Thoth::ChatSendChrome::kWatchdogStatus));
+}
+
+void MainFrame::OnChatTurnElapsedTimer(wxTimerEvent& WXUNUSED(evt)) {
+    if (!m_activeChatTurn.has_value() || m_activeChatTurn->terminal) {
+        m_chatTurnElapsedTimer.Stop();
+        return;
+    }
+    if (m_activeChatTurn->phase != Thoth::ChatTurnUi::Phase::WaitingEngine) {
+        return;
+    }
+    RefreshChatTurnChromeText();
+}
+
+void MainFrame::OnChatTurnRefreshRetryTimer(wxTimerEvent& WXUNUSED(evt)) {
+    if (!m_activeChatTurn.has_value() || m_activeChatTurn->terminal) {
+        return;
+    }
+    if (m_activeChatTurn->phase != Thoth::ChatTurnUi::Phase::Refreshing) {
+        return;
+    }
+    const std::string requestId = m_activeChatTurn->request_id;
+    const std::string sessionId = m_activeChatTurn->session_id;
+    const std::string userContent = m_activeChatTurn->user_content;
+    const std::string expected = m_activeChatTurn->expected_assistant_content;
+    if (!Thoth::ChatTurnUi::mayMutateTurn(m_activeChatTurn, requestId, sessionId)) {
+        return;
+    }
+    m_activeChatTurn->refresh_attempt =
+        std::max(m_activeChatTurn->refresh_attempt + 1, 2);
+    Thoth::ChatSendTrace::log(
+        16, "chat_turn_refresh_retry",
+        "request=" + requestId + " session=" + sessionId
+            + " attempt=" + std::to_string(m_activeChatTurn->refresh_attempt));
+    if (RefreshAndVerifyChatTurnAssistant(sessionId, userContent, expected)) {
+        FinishChatTurnSuccess(requestId, sessionId, expected);
+        return;
+    }
+    if (m_activeChatTurn->refresh_attempt < Thoth::ChatTurnUi::kMaxRefreshAttempts) {
+        Thoth::ChatSendTrace::log(
+            16, "chat_turn_verify_miss",
+            "scheduling_another_retry request=" + requestId
+                + " attempt=" + std::to_string(m_activeChatTurn->refresh_attempt));
+        m_chatTurnRefreshRetryTimer.Start(Thoth::ChatTurnUi::kRefreshRetryDelayMs, true);
+        return;
+    }
+    Thoth::ChatSendTrace::log(16, "chat_turn_verify_failed",
+                              "request=" + requestId + " after_retries=yes");
+    FinishChatTurnFailure(requestId, sessionId);
+    SetTransientStatus(wxString::FromUTF8(Thoth::ChatTurnUi::kReplyNotInTranscriptStatus));
+}
+
+void MainFrame::OnChatInputKeyDown(wxKeyEvent& event) {
+    if (event.GetKeyCode() == WXK_ESCAPE) {
+        if (!Thoth::ChatSendChrome::sendEnabledForSession(m_inFlightChatBySession, m_sessionId)) {
+            UnlockActiveSessionChatSend();
+            return;
+        }
+        event.Skip();
+        return;
+    }
+
+    const bool enter = event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER;
+    if (enter) {
+        // Shift+Enter → newline. Enter / Ctrl+Enter → send.
+        if (event.ShiftDown()) {
+            Thoth::ChatSendTrace::log(
+                1, "enter_or_send_event",
+                "received=Shift+Enter action=newline_skip");
+            event.Skip();
+            return;
+        }
+        Thoth::ChatSendTrace::log(
+            1, "enter_or_send_event",
+            "received=Enter ctrl=" + std::string(event.ControlDown() ? "yes" : "no")
+                + " session=" + m_sessionId);
+        if (agent && agent->capabilities().supportsConversation
+            && !Thoth::ChatSendChrome::sendEnabledForSession(m_inFlightChatBySession,
+                                                            m_sessionId)) {
+            Thoth::ChatSendTrace::log(
+                1, "enter_or_send_event",
+                "early_return reason=send_locked_before_OnSend");
+            SetTransientStatus(wxString::FromUTF8(Thoth::ChatTurnUi::kAnotherReplyInProgressStatus));
+            return;
+        }
+        wxCommandEvent evt(wxEVT_BUTTON, m_sendButton ? m_sendButton->GetId() : wxID_ANY);
+        OnSend(evt);
+        return;
+    }
+    event.Skip();
 }
 
 void MainFrame::UpdateChatSendChrome() {
     if (!m_sendButton) {
+        Thoth::ChatSendTrace::log(
+            17, "send_reenabled",
+            "skipped reason=send_button_null");
         return;
     }
     const bool engineConversation =
         agent && agent->capabilities().supportsConversation;
     if (!engineConversation || m_sessionId.empty()) {
-        m_sendButton->Enable(true);
+        // Non-conversation / no session: leave enablement to degraded controls path.
+        const Thoth::EventStreamSnapshot snap =
+            agent ? agent->eventStreamSnapshot() : Thoth::localEventStreamSnapshot(NowMs());
+        const bool engine_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
+        m_sendButton->Enable(engine_usable);
+        Thoth::ChatSendTrace::log(
+            17, "send_reenabled",
+            "path=non_engine_conversation enabled="
+                + std::string(engine_usable ? "yes" : "no"));
         return;
     }
-    const auto it = m_inFlightChatBySession.find(m_sessionId);
-    const int inFlight = (it != m_inFlightChatBySession.end()) ? it->second : 0;
-    m_sendButton->Enable(inFlight == 0);
+    const Thoth::EventStreamSnapshot snap = agent->eventStreamSnapshot();
+    const bool engine_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
+    const bool pending_clear =
+        Thoth::ChatSendChrome::sendEnabledForSession(m_inFlightChatBySession, m_sessionId);
+    const bool enabled = engine_usable && pending_clear;
+    m_sendButton->Enable(enabled);
+    Thoth::ChatSendTrace::log(
+        17, "send_reenabled",
+        "path=engine_conversation enabled=" + std::string(enabled ? "yes" : "no")
+            + " engine_usable=" + std::string(engine_usable ? "yes" : "no")
+            + " pending_clear=" + std::string(pending_clear ? "yes" : "no")
+            + " session=" + m_sessionId);
 }
 
 void MainFrame::SetSessionGoal(const std::string& sessionId, const std::string& goal) {
@@ -2754,6 +3541,34 @@ void MainFrame::SetSessionGoal(const std::string& sessionId, const std::string& 
     if (m_sessionId == sessionId) {
         RefreshGoalBanner();
     }
+}
+
+void MainFrame::RunActiveBannerGoal() {
+    if (!agent || m_activeSessionIndex < 0
+        || static_cast<std::size_t>(m_activeSessionIndex) >= m_sessions.size()) {
+        return;
+    }
+
+    const auto& session = m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+    const std::string goal = TrimGoalForDisplay(session.activeGoal);
+    if (goal.empty()) {
+        return;
+    }
+
+    SetTransientStatus(wxString::FromUTF8(Thoth::kGoalSubmittedChrome));
+    SyncBackendSessionIdentity();
+    BeginCognitiveGoalPlanningOptimistic();
+    agent->executeGoal(goal);
+}
+
+void MainFrame::BeginCognitiveGoalPlanningOptimistic() {
+    if (!m_cognitivePanel) {
+        return;
+    }
+    m_cognitivePanel->BeginGoalPlanningOptimistic();
+    m_goalPlanningPending = true;
+    ApplyWorkActivity("Planning…", ActiveBackendProgressSource());
+    std::cerr << "[MainFrame] Cognitive State: Planning started (optimistic)\n";
 }
 
 bool MainFrame::InputStartsGoal(const wxString& input) {
@@ -2817,6 +3632,9 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
                                         const std::string& requestId) {
     wxTheApp->CallAfter([this, result, requestId]() {
         if (wxPendingDelete.Member(this) || !wxWindow::FindWindowById(GetId())) {
+            Thoth::ChatSendTrace::log(
+                13, "completion_path",
+                "early_return reason=frame_destroyed request=" + requestId);
             return;
         }
 
@@ -2831,56 +3649,176 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
         const bool isChat = result.operation == Thoth::kOpChat && !requestId.empty();
         std::string targetSessionId;
         if (isChat) {
-            const auto requestIt = m_requestToSession.find(requestId);
-            if (requestIt == m_requestToSession.end()) {
-                return;
+            {
+                std::string path = result.success ? "success" : "error";
+                if (!result.success && result.retryable) {
+                    path = "error_retryable";
+                }
+                Thoth::ChatSendTrace::log(
+                    12, "engine_response_received",
+                    "request=" + requestId + " success="
+                        + std::string(result.success ? "yes" : "no")
+                        + " http_status="
+                        + (result.http_status
+                               ? std::to_string(*result.http_status)
+                               : std::string("none"))
+                        + " detail=" + result.technical_details);
+                Thoth::ChatSendTrace::log(
+                    13, "completion_path",
+                    "selected=" + path + " severity="
+                        + std::to_string(static_cast<int>(severity)));
             }
-            targetSessionId = requestIt->second;
-            m_requestToSession.erase(requestIt);
-            ClearPendingChatRequest(requestId, targetSessionId);
 
+            const auto requestIt = m_requestToSession.find(requestId);
+            if (requestIt != m_requestToSession.end()) {
+                targetSessionId = requestIt->second;
+                m_requestToSession.erase(requestIt);
+                ClearPendingChatRequest(requestId, targetSessionId);
+            } else if (m_activeChatTurn.has_value()
+                       && m_activeChatTurn->request_id == requestId) {
+                targetSessionId = m_activeChatTurn->session_id;
+                ClearPendingChatRequest(requestId, targetSessionId);
+                Thoth::ChatSendTrace::log(
+                    14, "ClearPendingChatRequest",
+                    "resolved_session_from_active_turn request=" + requestId
+                        + " session=" + targetSessionId);
+            } else if (!m_sessionId.empty()) {
+                Thoth::ChatSendTrace::log(
+                    14, "ClearPendingChatRequest",
+                    "fallback_active_session reason=request_not_in_map request="
+                        + requestId);
+                targetSessionId = m_sessionId;
+                ClearPendingChatRequest(requestId, targetSessionId);
+            } else {
+                Thoth::ChatSendTrace::log(
+                    14, "ClearPendingChatRequest",
+                    "skipped reason=no_request_map_and_no_session");
+            }
+
+            const bool engineConversation =
+                agent && agent->capabilities().supportsConversation;
+            const bool turnMutable =
+                Thoth::ChatTurnUi::mayMutateTurn(m_activeChatTurn, requestId, targetSessionId);
+
+            // Late success after watchdog unlock: always paint originating session.
+            if (!turnMutable && result.success && engineConversation
+                && !targetSessionId.empty()) {
+                std::string userContent;
+                if (m_activeChatTurn.has_value()
+                    && m_activeChatTurn->request_id == requestId) {
+                    userContent = m_activeChatTurn->user_content;
+                }
+                Thoth::ChatSendTrace::log(
+                    13, "completion_path",
+                    "late_success_transcript_apply request=" + requestId
+                        + " session=" + targetSessionId);
+                const bool verified = ApplyEngineChatSuccessTranscript(
+                    requestId, targetSessionId, userContent, result.response_text);
+                if (m_activeChatTurn.has_value()
+                    && m_activeChatTurn->request_id == requestId
+                    && m_activeChatTurn->session_id == targetSessionId
+                    && !m_activeChatTurn->terminal) {
+                    if (verified) {
+                        FinishChatTurnSuccess(requestId, targetSessionId, result.response_text);
+                    } else {
+                        FinishChatTurnFailure(requestId, targetSessionId);
+                    }
+                } else {
+                    ClearChatTurnChromeIfOwner(requestId);
+                }
+                UpdateChatSendChrome();
+                if (m_graphPanel) {
+                    m_graphPanel->UpdateControllerState("IDLE");
+                }
+                m_auiManager.Update();
+                RefreshChatList();
+                RefreshAllPanels();
+            } else if (!turnMutable) {
+                Thoth::ChatSendTrace::log(
+                    13, "completion_path",
+                    "stale_or_terminal_ignored request=" + requestId
+                        + " session=" + targetSessionId);
+                UpdateChatSendChrome();
+            } else {
             auto sessionIt = std::find_if(m_sessions.begin(), m_sessions.end(),
                 [&targetSessionId](const Thoth::ChatSession& session) {
                     return session.id == targetSessionId;
                 });
             if (sessionIt == m_sessions.end()) {
-                return;
-            }
-
-            const bool engineConversation =
-                agent && agent->capabilities().supportsConversation;
+                Thoth::ChatSendTrace::log(
+                    16, "transcript_refresh",
+                    "early_return reason=target_session_missing session="
+                        + targetSessionId);
+                FinishChatTurnFailure(requestId, targetSessionId);
+                UpdateChatSendChrome();
+            } else {
 
             if (result.success) {
                 if (engineConversation) {
-                    RefreshSessionConversationFromEngine(targetSessionId);
+                    // Engine success ≠ transcript visibility — refresh + verify (2 attempts).
+                    m_activeChatTurn->expected_assistant_content = result.response_text;
+                    SetChatTurnPhase(Thoth::ChatTurnUi::Phase::Refreshing);
+                    m_activeChatTurn->refresh_attempt = 1;
+                    Thoth::ChatSendTrace::log(
+                        16, "chat_turn_refreshing",
+                        "request=" + requestId + " session=" + targetSessionId
+                            + " expected_assistant_len="
+                            + std::to_string(result.response_text.size()));
+                    if (ApplyEngineChatSuccessTranscript(
+                            requestId,
+                            targetSessionId,
+                            m_activeChatTurn->user_content,
+                            result.response_text)) {
+                        FinishChatTurnSuccess(requestId, targetSessionId, result.response_text);
+                    } else {
+                        Thoth::ChatSendTrace::log(
+                            16, "chat_turn_verify_miss",
+                            "scheduling_second_check request=" + requestId);
+                        m_chatTurnRefreshRetryTimer.Start(
+                            Thoth::ChatTurnUi::kRefreshRetryDelayMs, true);
+                    }
                 } else {
                     sessionIt->messages.push_back({"assistant", result.response_text, NowMs()});
+                    Thoth::ChatSendTrace::log(
+                        16, "transcript_refresh",
+                        "local_append assistant_len="
+                            + std::to_string(result.response_text.size()));
+                    sessionIt->updatedAtMs = NowMs();
+                    SaveChatSessions();
+                    FinishChatTurnSuccess(requestId, targetSessionId, result.response_text);
                 }
             } else if (severity == Thoth::OperationUiSeverity::Panel && !engineConversation) {
                 sessionIt->messages.push_back({"assistant", correlated, NowMs()});
-            }
-
-            if (result.success || (severity == Thoth::OperationUiSeverity::Panel && !engineConversation)) {
                 sessionIt->updatedAtMs = NowMs();
                 SaveChatSessions();
+                FinishChatTurnFailure(requestId, targetSessionId);
+            } else if (!result.success) {
+                Thoth::ChatSendTrace::log(
+                    16, "transcript_refresh",
+                    "skipped reason=engine_chat_failure_no_local_append");
+                FinishChatTurnFailure(requestId, targetSessionId);
             }
 
-            if (m_typingIndicator) {
-                m_typingIndicator->Hide();
-            }
             if (m_graphPanel) {
                 m_graphPanel->UpdateControllerState("IDLE");
             }
             m_auiManager.Update();
             RefreshChatList();
 
-            if (m_sessionId == targetSessionId) {
+            if (m_sessionId == targetSessionId && m_activeSessionIndex >= 0) {
                 RenderSession(static_cast<std::size_t>(m_activeSessionIndex));
                 if (m_inputCtrl) {
                     m_inputCtrl->SetFocus();
                 }
             }
             RefreshAllPanels();
+            }
+            }
+        } else {
+            Thoth::ChatSendTrace::log(
+                13, "completion_path",
+                "non_chat_or_empty_request op=" + result.operation
+                    + " request_empty=" + std::string(requestId.empty() ? "yes" : "no"));
         }
 
         if (!result.success && isChat && agent && agent->capabilities().supportsConversation
@@ -2894,7 +3832,8 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
             if (!result.success && result.operation == Thoth::kOpGoal) {
                 m_goalPlanningPending = false;
                 RefreshExecutiveStripActivity();
-                ClearSessionGoal(m_sessionId);
+                // CSG-A Phase 1: keep banner goal for chat GRAG even if executeGoal failed.
+                this->RefreshGoalBanner();
             }
             return;
         }
@@ -2902,7 +3841,8 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
         if (!result.success && result.operation == Thoth::kOpGoal) {
             m_goalPlanningPending = false;
             RefreshExecutiveStripActivity();
-            ClearSessionGoal(m_sessionId);
+            // CSG-A Phase 1: keep banner goal for chat GRAG even if executeGoal failed.
+            this->RefreshGoalBanner();
         }
 
         if (result.success) {
@@ -3255,7 +4195,8 @@ wxCollapsiblePane* MainFrame::AddCollapsiblePane(wxScrolledWindow* parent, const
     coll->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED, [this, parent, coll](wxCollapsiblePaneEvent& evt) {
         parent->Layout();
         parent->FitInside();
-        
+        m_auiManager.Update(); // architectural_facts.md §8
+
         if (!evt.GetCollapsed()) {
             wxTheApp->CallAfter([parent, coll]() {
                 // Ensure the newly expanded pane is visible
@@ -3266,8 +4207,6 @@ wxCollapsiblePane* MainFrame::AddCollapsiblePane(wxScrolledWindow* parent, const
                 
                 if (ppuY > 0) {
                     int scrollY = y / ppuY;
-                    int maxScrollX, maxScrollY;
-                    parent->GetVirtualSize(&maxScrollX, &maxScrollY);
                     
                     // Safety: clamp to valid range
                     if (scrollY >= 0) {

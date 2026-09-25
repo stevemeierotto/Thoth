@@ -543,6 +543,10 @@ Engine-mode chat **reliability and GUI honesty**: send → Engine-owned turn →
 | **R4-V7** | Transport / timeout / HTTP failure classes → G1 messaging each |
 | **R4-V8** | Local smoke (`THOTH_ENGINE_URL` unset) — no regression |
 
+**Chat-turn waiting chrome (2026-09-11):** Engine chat no longer uses a bare “Agent thinking…” hide-on-HTTP-success path. While a turn is in flight the center chrome shows **Waiting for Engine…** with elapsed time; after Engine success it shows **Loading reply…** until that turn’s assistant text is present in the originating session (exact user/assistant content pair), with one bounded refresh retry. Chrome clears only on verified transcript visibility or an explicit failure. Goal/executive events must not clear an owned chat turn. See `completed_improvements_log.md` (2026-09-11).
+
+**Cognitive State panel (2026-09-12):** Goal / executive decision points surface in Observability tab **Cognitive State** (decision tape) — separate from chat-turn waiting. Do not drive typing-indicator ownership from cognition events. Right column is a tabbed notebook (like System State); see `architectural_facts.md` §8 and `completed_improvements_log.md` (2026-09-12).
+
 Record results in **Phase R4 Verify Record** (append after manual pass).
 
 ### Current observed symptoms (reported)

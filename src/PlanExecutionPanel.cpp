@@ -1,4 +1,5 @@
 #include "PlanExecutionPanel.h"
+#include "plan_execution_display.h"
 #include <wx/sizer.h>
 #include <wx/statline.h>
 
@@ -66,20 +67,39 @@ void PlanExecutionPanel::SetExecutionState(const std::string& state) {
     m_stateLabel->SetLabel("State: " + state);
 }
 
+void PlanExecutionPanel::ClearForSessionSwitch() {
+    if (m_stepList) {
+        m_stepList->DeleteAllItems();
+    }
+    if (m_goalLabel) {
+        m_goalLabel->SetLabel(
+            wxString::FromUTF8(Thoth::PlanExecutionDisplay::formatActiveGoalLabel("")));
+    }
+    if (m_stateLabel) {
+        m_stateLabel->SetLabel(wxString::FromUTF8(Thoth::PlanExecutionDisplay::kIdleState));
+    }
+    Layout();
+}
+
 void PlanExecutionPanel::SetSessionGoalDisplay(const std::string& goal) {
     if (!m_goalLabel || !m_stateLabel) {
         return;
     }
-    // Do not clobber an in-flight executive plan view (steps listed).
-    if (m_stepList && m_stepList->GetItemCount() > 0) {
+    // Do not clobber an in-flight executive plan view on the *current* session.
+    // ActivateSession must ClearForSessionSwitch() first so prior-chat steps
+    // cannot pin a stale Observability goal.
+    const std::size_t stepCount =
+        m_stepList ? static_cast<std::size_t>(m_stepList->GetItemCount()) : 0;
+    if (!Thoth::PlanExecutionDisplay::canApplySessionGoalDisplay(stepCount)) {
         return;
     }
+    m_goalLabel->SetLabel(
+        wxString::FromUTF8(Thoth::PlanExecutionDisplay::formatActiveGoalLabel(goal)));
     if (goal.empty()) {
-        m_goalLabel->SetLabel("Active Goal: None");
-        m_stateLabel->SetLabel("State: Idle");
+        m_stateLabel->SetLabel(wxString::FromUTF8(Thoth::PlanExecutionDisplay::kIdleState));
     } else {
-        m_goalLabel->SetLabel("Active Goal: " + wxString::FromUTF8(goal));
-        m_stateLabel->SetLabel("State: Session (chat retrieval)");
+        m_stateLabel->SetLabel(
+            wxString::FromUTF8(Thoth::PlanExecutionDisplay::kSessionChatRetrievalState));
     }
     Layout();
 }

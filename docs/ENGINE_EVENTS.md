@@ -73,11 +73,25 @@ data: {"event_id":42,"sequence":42,"timestamp":"2026-07-13T20:15:31Z",...}
 | `RETRIEVAL_DIAGNOSTICS` | GRAG retrieval diagnostics |
 | `INDEXING_STARTED` | RAG indexing started |
 | `INDEXING_COMPLETED` | RAG indexing worker finished (see metadata below) |
-| `PLAN_REUSE_INJECTION` | Plan history hint injected |
+| `PLAN_REUSE_INJECTION` | Plan history hint injected (also emitted when `plan_count` is 0 — miss) |
 | `REFLECTION_REPLAN` | Reflection loop replan |
 | `PLAN_HISTORY_STORED` | Successful plan stored for reuse |
+| `STRATEGY_INJECTION` | Planner strategy lookup outcome (`injected` true/false; similarity vs floor) |
+| `TRAJECTORY_INJECTION` | Planner trajectory lookup outcome (`injected` true/false; count) |
+| `COGNITION_STAGE` | Mid-planning tape (`stage` + `phase` started/finished; live during plan create / reflection) |
 
 Events are **observational only** — clients must not infer permission to mutate controller state from the stream.
+
+### Cognition metadata notes
+
+| Type | Useful metadata |
+|------|-----------------|
+| `COGNITION_STAGE` | `stage` ∈ {`planning`,`plan_reuse`,`trajectory`,`strategy`,`llm_plan`}; `phase` ∈ {`started`,`finished`}; on finished: `injected` / `plan_count` / `similarity` / `min_similarity` as applicable |
+| `STRATEGY_INJECTION` | `injected`, `similarity`, `min_similarity`, optional `strategy_id` |
+| `TRAJECTORY_INJECTION` | `injected`, `trajectory_count`, `min_similarity` |
+| `STEP_FAILED` | `error`, `next_action` ∈ {`revise`,`abort`,`continue`} |
+| `PLAN_COMPLETED` / `PLAN_FAILED` | `trajectory_score`, `reflection_threshold`, optional `reflection_skip_reason` |
+| `REFLECTION_REPLAN` | `trajectory_score`, `reflection_threshold`, `reflection_cycle`, `max_reflections` |
 
 ### `INDEXING_COMPLETED` metadata (R2)
 

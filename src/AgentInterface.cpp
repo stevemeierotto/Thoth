@@ -15,6 +15,7 @@
 #include "logger.h"
 #include "cognitive_diagnostics_authority.h"
 #include "decision_summary.h"
+#include "chat_send_trace.h"
 #include <json.hpp>
 
 using json = nlohmann::json;
@@ -197,6 +198,17 @@ Thoth::OperationResult AgentInterface::queryCorpusDocumentIntent(
     return backend->queryCorpusDocumentIntent(sourceFilePath);
 }
 
+Thoth::OperationResult AgentInterface::unlinkSessionDocument(
+    const std::string& document_id,
+    const std::string& session_id) {
+    if (!backend) {
+        return Thoth::makeFailure(Thoth::kOpUnlinkSessionDocument,
+                                  "Could not unlink document from chat",
+                                  "backend unavailable");
+    }
+    return backend->unlinkSessionDocument(document_id, session_id);
+}
+
 nlohmann::json AgentInterface::createConversationSession() const {
     if (!backend) {
         return Thoth::ConversationAuthority::makeCreateSessionResponse("default");
@@ -211,7 +223,16 @@ void AgentInterface::appendConversationTurn(const std::string& sessionId,
                                             const std::string& content,
                                             const std::string& requestId,
                                             const std::optional<std::string>& active_goal) {
+    Thoth::ChatSendTrace::logPayload("payload_b9_AgentInterface_entry_content", content);
+    Thoth::ChatSendTrace::log(
+        11, "appendConversationTurn_entry",
+        "request=" + requestId + " session=" + sessionId
+            + " content_len=" + std::to_string(content.size()));
     if (!backend) {
+        Thoth::ChatSendTrace::log(
+            11, "http_dispatch",
+            "NOT_DISPATCHED reason=backend_null request=" + requestId
+                + " session=" + sessionId);
         return;
     }
     std::string resolvedRequestId = requestId;
@@ -221,13 +242,48 @@ void AgentInterface::appendConversationTurn(const std::string& sessionId,
     }
     {
         std::lock_guard<std::mutex> lock(workersMutex);
+        const size_t qsize = taskQueue.size();
+        // Lambda captures `content` by value (copy of the by-ref parameter at enqueue time).
+        Thoth::ChatSendTrace::log(
+            11, "http_dispatch_enqueued",
+            "request=" + resolvedRequestId + " session=" + sessionId
+                + " queue_size_before_push=" + std::to_string(qsize)
+                + " worker_busy=" + std::string(workerBusy.load() ? "yes" : "no")
+                + " captured_content_len=" + std::to_string(content.size()));
         taskQueue.push([this, sessionId, content, active_goal, resolvedRequestId]() {
+            Thoth::ChatSendTrace::logPayload(
+                "payload_b10_worker_captured_content", content);
+            Thoth::ChatSendTrace::log(
+                11, "http_dispatch_worker_start",
+                "request=" + resolvedRequestId + " session=" + sessionId
+                    + " content_len=" + std::to_string(content.size()));
             if (!backend) {
+                Thoth::ChatSendTrace::log(
+                    11, "http_dispatch",
+                    "NOT_DISPATCHED reason=backend_null_in_worker request="
+                        + resolvedRequestId);
+                if (onOperationComplete) {
+                    onOperationComplete(
+                        Thoth::makeFailure(Thoth::kOpChat,
+                                           "Failed to send",
+                                           "backend unavailable"),
+                        resolvedRequestId);
+                }
                 return;
             }
             const auto result = backend->appendConversationTurn(sessionId, content, active_goal);
+            Thoth::ChatSendTrace::log(
+                12, "engine_response_at_worker",
+                "request=" + resolvedRequestId + " success="
+                    + std::string(result.success ? "yes" : "no")
+                    + " detail=" + result.technical_details);
             if (onOperationComplete) {
                 onOperationComplete(result, resolvedRequestId);
+            } else {
+                Thoth::ChatSendTrace::log(
+                    13, "completion_path",
+                    "GUI_CLEANUP_MISSING reason=onOperationComplete_null request="
+                        + resolvedRequestId);
             }
         });
     }

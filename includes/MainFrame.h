@@ -14,6 +14,7 @@
 #include <wx/wx.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -21,6 +22,7 @@
 #include "FileDropTarget.h"
 #include "ChatSessionDataViewModel.h"
 #include "ChatSessionTypes.h" // Contains ChatMessage and ChatSession structs
+#include "chat_turn_ui_status.h"
 #include "local_note_engine_sync.h"
 #include "json.hpp"
 #include "progress_source.h"
@@ -28,6 +30,7 @@
 class GragDiagnosticsPanel;
 class StrategyPanel;
 class PlanExecutionPanel;
+class CognitiveStatusPanel;
 class TrajectoryViewer;
 class ExperimentLabPanel;
 class GraphPanel;
@@ -61,6 +64,7 @@ private:
         ID_MENU_AGENT_PAUSE,
         ID_MENU_AGENT_RESUME,
         ID_MENU_AGENT_ABORT,
+        ID_MENU_AGENT_UNLOCK_SEND,
         ID_MENU_AGENT_SHOW_PLAN,
         ID_MENU_AGENT_SHOW_TRAJECTORY,
         ID_MENU_TOOLS_STRATEGY_VIEWER,
@@ -96,8 +100,10 @@ private:
     GragDiagnosticsPanel* m_gragPanel = nullptr;
     StrategyPanel* m_strategyPanel = nullptr;
     PlanExecutionPanel* m_planPanel = nullptr;
+    CognitiveStatusPanel* m_cognitivePanel = nullptr;
 
     wxNotebook* m_bottomNotebook = nullptr;
+    wxNotebook* m_observabilityNotebook = nullptr;
     TrajectoryViewer* m_trajectoryViewer = nullptr;
     ExperimentLabPanel* m_experimentLab = nullptr;
     GraphPanel* m_graphPanel = nullptr;
@@ -108,6 +114,7 @@ private:
     
     wxPanel*      m_goalBanner = nullptr;
     wxStaticText* m_goalText = nullptr;
+    wxButton*     m_runGoalBtn = nullptr;
     wxButton*     m_clearGoalBtn = nullptr;
     wxButton*     m_reviseGoalBtn = nullptr;
 
@@ -117,12 +124,15 @@ private:
     wxButton* m_planExplainBtn = nullptr;
 
     wxStaticText* m_typingIndicator = nullptr;
+    /** Active Engine chat turn chrome owner (narrow; not ExecutiveStateStrip). */
+    std::optional<Thoth::ChatTurnUi::ChatTurnUiState> m_activeChatTurn;
+    /** Guards RefreshChatTurnChromeText Layout against wxSizeEvent re-entrancy. */
+    bool m_inChatTurnChromeRefresh = false;
 
     // Sidebar Containers
     wxScrolledWindow* m_leftSidebar = nullptr;
-    wxScrolledWindow* m_rightSidebar = nullptr;
 
-    // Helper for collapsible sections
+    // Helper for collapsible sections (left Knowledge Base only)
     wxCollapsiblePane* AddCollapsiblePane(wxScrolledWindow* parent, const wxString& label, wxWindow* content, bool expanded = true);
 
     wxStaticText* m_ragFileSlot1 = nullptr;
@@ -151,6 +161,8 @@ private:
     int m_activeSessionIndex = -1;
     std::unordered_map<std::string, std::string> m_requestToSession;
     std::unordered_map<std::string, int> m_inFlightChatBySession;
+    /** Wall-clock start of current pending streak per session (for watchdog). */
+    std::unordered_map<std::string, std::int64_t> m_chatPendingStartedAtMsBySession;
 
     std::unique_ptr<AgentInterface> agent;
 
@@ -249,15 +261,63 @@ private:
     void ClearActiveGoal();
     void ClearSessionGoal(const std::string& sessionId);
     void SetSessionGoal(const std::string& sessionId, const std::string& goal);
+    /** Start or restart the active banner goal without opening the Revise dialog. */
+    void RunActiveBannerGoal();
+    /** Phase 1 — Cognitive State tape: Planning started (before Engine events). */
+    void BeginCognitiveGoalPlanningOptimistic();
     /** R3 — align backend session identity with active tab before goal POST. */
     void SyncBackendSessionIdentity();
     /** R3-G6 — resolve session for goal lifecycle events (never broadcast on empty id). */
     std::string ResolveGoalEventSessionId(const std::string& eventSessionId) const;
     void RegisterPendingChatRequest(const std::string& requestId, const std::string& sessionId);
     void ClearPendingChatRequest(const std::string& requestId, const std::string& sessionId);
+    /** Unlock Send for a session without waiting for Engine (S2 cancel / S1 orphan). */
+    void ForceClearSessionChatPending(const std::string& sessionId);
+    /** Unlock Send without abandoning in-flight request_id / turn (watchdog). */
+    void UnlockSendKeepInFlightTurn(const std::string& sessionId);
+    void UnlockActiveSessionChatSend();
+    /**
+     * Apply Engine chat success to the originating session transcript even if the
+     * turn UI was unlocked early. Returns true when verify succeeded.
+     */
+    bool ApplyEngineChatSuccessTranscript(const std::string& requestId,
+                                          const std::string& sessionId,
+                                          const std::string& userContent,
+                                          const std::string& expectedAssistant);
     void UpdateChatSendChrome();
+    void OnChatPendingWatchdogTimer(wxTimerEvent& evt);
+    void OnChatTurnElapsedTimer(wxTimerEvent& evt);
+    void OnChatTurnRefreshRetryTimer(wxTimerEvent& evt);
+    void OnUnlockChatSend(wxCommandEvent& evt);
+    void OnChatInputKeyDown(wxKeyEvent& evt);
     void RefreshExecutiveStripActivity();
     static bool InputStartsGoal(const wxString& input);
+
+    /** Begin owned chat-turn chrome (Engine conversation path). */
+    void BeginChatTurnUi(const std::string& requestId,
+                         const std::string& sessionId,
+                         const std::string& userContent);
+    void SetChatTurnPhase(Thoth::ChatTurnUi::Phase phase);
+    void RefreshChatTurnChromeText();
+    /** Hide typing chrome only if this request still owns it (or force clear owner). */
+    void ClearChatTurnChromeIfOwner(const std::string& requestId);
+    void ClearChatTurnChromeForSession(const std::string& sessionId,
+                                       Thoth::ChatTurnUi::Phase terminalPhase);
+    bool ChatTurnOwnsTypingIndicator() const;
+    /** Goal/executive events must not hide typing while a chat turn owns it. */
+    void HideTypingIndicatorIfChatTurnIdle();
+    /**
+     * Refresh originating session and prove assistant for this turn.
+     * Returns true when transcriptContainsCurrentTurnAssistant succeeds.
+     */
+    bool RefreshAndVerifyChatTurnAssistant(const std::string& sessionId,
+                                           const std::string& userContent,
+                                           const std::string& expectedAssistant);
+    void FinishChatTurnSuccess(const std::string& requestId,
+                               const std::string& sessionId,
+                               const std::string& expectedAssistant);
+    void FinishChatTurnFailure(const std::string& requestId,
+                               const std::string& sessionId);
 
     /** Phase 5 — work-implying strip text; no-op if source is UserAction/Unknown. */
     void ApplyWorkActivity(const wxString& message, Thoth::ProgressSource source);
@@ -272,6 +332,9 @@ private:
     bool m_goalPlanningPending = false;
 
     wxTimer m_connectionPollTimer;
+    wxTimer m_chatPendingWatchdogTimer;
+    wxTimer m_chatTurnElapsedTimer;
+    wxTimer m_chatTurnRefreshRetryTimer;
     std::int64_t m_lastCorpusPollForIndexingMs = 0;
 
     void SetupMenuBar();
