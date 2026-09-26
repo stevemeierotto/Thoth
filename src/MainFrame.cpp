@@ -8,6 +8,7 @@
 #include "StrategyPanel.h"
 #include "PlanExecutionPanel.h"
 #include "CognitiveStatusPanel.h"
+#include "cognitive_status_display.h"
 #include "TrajectoryViewer.h"
 #include "ExperimentLabPanel.h"
 #include "GraphPanel.h"
@@ -979,6 +980,7 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
     }
     if (m_cognitivePanel) {
         m_cognitivePanel->ClearForSessionSwitch();
+        NoteDecisionTapeIdleIfQuiescent();
     }
     if (m_stateStrip) {
         m_stateStrip->ClearPlan();
@@ -1046,7 +1048,8 @@ MainFrame::MainFrame()
                     cognitiveEv.controller_state_name = controllerState;
                     cognitiveEv.metadata = metadata;
                     cognitiveEv.timestamp_ms = 0;
-                    this->m_cognitivePanel->ApplyEvent(cognitiveEv, this->m_sessionId);
+                    this->m_cognitivePanel->ApplyEvent(
+                        cognitiveEv, this->m_sessionId, this->m_decisionTapeChatActive);
                 }
                 
                 std::cerr << "[MainFrame] onEvent: type=" << (int)type 
@@ -1279,33 +1282,6 @@ MainFrame::MainFrame()
                                 this->ActiveBackendProgressSource());
                         }
                     }
-                } else if (type == EventType::STRATEGY_INJECTION) {
-                    if (isActiveSession) {
-                        if (metadata.value("injected", false)) {
-                            this->ApplyWorkStatus(wxString::Format(
-                                "Strategy inject (sim %.2f)",
-                                metadata.value("similarity", 0.0f)),
-                                this->ActiveBackendProgressSource());
-                        } else {
-                            this->ApplyWorkStatus(
-                                "Strategy lookup: no match",
-                                this->ActiveBackendProgressSource());
-                        }
-                    }
-                } else if (type == EventType::TRAJECTORY_INJECTION) {
-                    if (isActiveSession) {
-                        if (metadata.value("injected", false)
-                            || metadata.value("trajectory_count", 0) > 0) {
-                            this->ApplyWorkStatus(wxString::Format(
-                                "Trajectory found (%d)",
-                                metadata.value("trajectory_count", 0)),
-                                this->ActiveBackendProgressSource());
-                        } else {
-                            this->ApplyWorkStatus(
-                                "Trajectory search: not found",
-                                this->ActiveBackendProgressSource());
-                        }
-                    }
                 } else if (type == EventType::REFLECTION_REPLAN) {
                     std::cerr << "[MainFrame] REFLECTION_REPLAN score="
                               << metadata.value("trajectory_score", 0.0f)
@@ -1328,8 +1304,19 @@ MainFrame::MainFrame()
                     }
                 }
                 
+                if (type == EventType::PLAN_COMPLETED || type == EventType::PLAN_FAILED
+                    || type == EventType::PLAN_ABORTED) {
+                    const bool goalEventForOwner =
+                        eventSessionId.empty()
+                        || eventSessionId == this->m_decisionTapeGoalSessionId
+                        || eventSessionId == this->m_sessionId;
+                    if (goalEventForOwner) {
+                        this->ReleaseDecisionTapeGoal();
+                    }
+                }
+
                 // Periodically refresh panels during execution for live updates
-                if (type == EventType::STEP_COMPLETED) {
+                if (type == EventType::STEP_COMPLETED && !this->m_decisionTapeChatActive) {
                     this->RefreshAllPanels();
                 }
             }
@@ -1952,6 +1939,7 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
         SetTransientStatus(wxString::FromUTF8(Thoth::kMessageSubmittedChrome));
     }
 
+    bool chatSubmitted = false;
     if (agent) {
         if (isGoal) {
             HideTypingIndicatorIfChatTurnIdle();
@@ -1978,9 +1966,8 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
             TraceWxStringBoundary("payload_b7b_after_SyncBackendSessionIdentity", input);
             SetTransientStatus(
                 wxString::FromUTF8(Thoth::ChatSendChrome::kWaitingForEngineStatus));
-            if (m_cognitivePanel) {
-                m_cognitivePanel->NoteChatTurnWaiting();
-            }
+            BeginDecisionTapeChat();
+            chatSubmitted = true;
             ++m_requestCounter;
             const std::string requestId = activeId + "-" + std::to_string(m_requestCounter);
             m_requestToSession[requestId] = activeId;
@@ -2011,6 +1998,8 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
             RegisterPendingChatRequest(requestId, activeId);
             const std::string contentForAgent = input.ToStdString();
             BeginChatTurnUi(requestId, activeId, contentForAgent);
+            BeginDecisionTapeChat();
+            chatSubmitted = true;
             std::cerr << "[MainFrame] Sending request " << requestId << " for session "
                       << activeId << "\n";
             agent->processUserInput(contentForAgent, requestId);
@@ -2025,8 +2014,11 @@ void MainFrame::OnSend(wxCommandEvent& WXUNUSED(evt)) {
         m_inputCtrl->SetFocus();
     }
     // Defer panel refresh so Cognitive State / chat chrome can paint first.
-    // Sync RefreshAllPanels on the GUI thread can block for a long time (Engine HTTP).
-    wxTheApp->CallAfter([this]() {
+    // Skip it during a chat submit: RefreshAllPanels blocks the GUI thread on Engine HTTP.
+    wxTheApp->CallAfter([this, chatSubmitted]() {
+        if (chatSubmitted) {
+            return;
+        }
         if (!wxPendingDelete.Member(this) && wxWindow::FindWindowById(GetId())) {
             RefreshAllPanels();
         }
@@ -3276,6 +3268,7 @@ void MainFrame::FinishChatTurnSuccess(const std::string& requestId,
     SetChatTurnPhase(Thoth::ChatTurnUi::Phase::Completed);
     ClearChatTurnChromeIfOwner(requestId);
     UpdateChatSendChrome();
+    ReleaseDecisionTapeChat();
     Thoth::ChatSendTrace::log(16, "chat_turn_complete", "completed request=" + requestId);
 }
 
@@ -3298,6 +3291,7 @@ void MainFrame::FinishChatTurnFailure(const std::string& requestId,
     SetChatTurnPhase(Thoth::ChatTurnUi::Phase::Failed);
     ClearChatTurnChromeIfOwner(requestId);
     UpdateChatSendChrome();
+    ReleaseDecisionTapeChat();
     Thoth::ChatSendTrace::log(16, "chat_turn_complete", "failed request=" + requestId);
 }
 
@@ -3562,6 +3556,8 @@ void MainFrame::RunActiveBannerGoal() {
 }
 
 void MainFrame::BeginCognitiveGoalPlanningOptimistic() {
+    m_decisionTapeGoalActive = true;
+    m_decisionTapeGoalSessionId = m_sessionId;
     if (!m_cognitivePanel) {
         return;
     }
@@ -3569,6 +3565,42 @@ void MainFrame::BeginCognitiveGoalPlanningOptimistic() {
     m_goalPlanningPending = true;
     ApplyWorkActivity("Planning…", ActiveBackendProgressSource());
     std::cerr << "[MainFrame] Cognitive State: Planning started (optimistic)\n";
+}
+
+void MainFrame::BeginDecisionTapeChat() {
+    m_decisionTapeChatActive = true;
+    if (m_cognitivePanel) {
+        m_cognitivePanel->NoteChatTurnWaiting();
+    }
+}
+
+void MainFrame::ReleaseDecisionTapeChat() {
+    if (!m_decisionTapeChatActive) {
+        return;
+    }
+    m_decisionTapeChatActive = false;
+    NoteDecisionTapeIdleIfQuiescent();
+}
+
+void MainFrame::ReleaseDecisionTapeGoal() {
+    if (!m_decisionTapeGoalActive) {
+        return;
+    }
+    m_decisionTapeGoalActive = false;
+    m_decisionTapeGoalSessionId.clear();
+    NoteDecisionTapeIdleIfQuiescent();
+}
+
+void MainFrame::NoteDecisionTapeIdleIfQuiescent() {
+    Thoth::CognitiveStatusDisplay::DecisionTapeOwnership ownership;
+    ownership.chat_active = m_decisionTapeChatActive;
+    ownership.goal_active = m_decisionTapeGoalActive;
+    if (!Thoth::CognitiveStatusDisplay::shouldShowSystemWaiting(ownership)) {
+        return;
+    }
+    if (m_cognitivePanel) {
+        m_cognitivePanel->NoteSystemWaiting();
+    }
 }
 
 bool MainFrame::InputStartsGoal(const wxString& input) {
@@ -3831,6 +3863,7 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
                          this);
             if (!result.success && result.operation == Thoth::kOpGoal) {
                 m_goalPlanningPending = false;
+                ReleaseDecisionTapeGoal();
                 RefreshExecutiveStripActivity();
                 // CSG-A Phase 1: keep banner goal for chat GRAG even if executeGoal failed.
                 this->RefreshGoalBanner();
@@ -3840,6 +3873,7 @@ void MainFrame::HandleOperationComplete(const Thoth::OperationResult& result,
 
         if (!result.success && result.operation == Thoth::kOpGoal) {
             m_goalPlanningPending = false;
+            ReleaseDecisionTapeGoal();
             RefreshExecutiveStripActivity();
             // CSG-A Phase 1: keep banner goal for chat GRAG even if executeGoal failed.
             this->RefreshGoalBanner();

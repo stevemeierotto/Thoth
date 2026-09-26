@@ -25,8 +25,14 @@ class CognitiveStatusPanel : public wxPanel {
 public:
     explicit CognitiveStatusPanel(wxWindow* parent);
 
-    /** Apply a ControllerEvent if it belongs to the active session. */
-    void ApplyEvent(const ControllerEvent& event, const std::string& active_session_id);
+    /**
+     * Apply a ControllerEvent if it belongs to the active session.
+     * chat_turn_active allows the existing retrieval-diagnostics event onto the tape.
+     * Events that do not produce a tape line do not change the phase.
+     */
+    void ApplyEvent(const ControllerEvent& event,
+                    const std::string& active_session_id,
+                    bool chat_turn_active);
 
     /**
      * Phase 1 — paint immediately on goal submit (before Engine events).
@@ -34,8 +40,11 @@ public:
      */
     void BeginGoalPlanningOptimistic();
 
-    /** Clarify that a normal chat send is not the executive /goal spine. */
+    /** Chat submit line. Preserves earlier tape history. */
     void NoteChatTurnWaiting();
+
+    /** Idle line. Consecutive duplicates are suppressed. */
+    void NoteSystemWaiting();
 
     void ClearForSessionSwitch();
     void SetPhase(const std::string& phase_label);

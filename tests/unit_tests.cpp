@@ -1057,6 +1057,47 @@ static bool testDecisionTapeTimeoutDisplay() {
         && step_fail->find("timed out after 900000ms") != std::string::npos;
 }
 
+static bool testDecisionTapeLifecycle() {
+    using namespace Thoth::CognitiveStatusDisplay;
+    if (std::string(kSystemWaitingLine) != "System waiting") {
+        return false;
+    }
+    if (std::string(kChatTurnInProgressLine) != "Chat turn in progress") {
+        return false;
+    }
+    if (std::string(kChatTurnInProgressLine).find("/goal") != std::string::npos) {
+        return false;
+    }
+    DecisionTapeOwnership ownership;
+    ownership.chat_active = true;
+    ownership.goal_active = true;
+    if (shouldShowSystemWaiting(ownership)) {
+        return false;
+    }
+    ownership.chat_active = false;
+    if (shouldShowSystemWaiting(ownership)) {
+        return false;
+    }
+    ownership.goal_active = false;
+    if (!shouldShowSystemWaiting(ownership)) {
+        return false;
+    }
+    const auto retrieval = formatChatRetrievalLine(EventType::RETRIEVAL_DIAGNOSTICS, true);
+    if (!retrieval || *retrieval != kRetrievalFinishedLine) {
+        return false;
+    }
+    if (formatChatRetrievalLine(EventType::RETRIEVAL_DIAGNOSTICS, false).has_value()) {
+        return false;
+    }
+    if (formatChatRetrievalLine(EventType::STEP_STARTED, true).has_value()) {
+        return false;
+    }
+    if (formatDecisionLine(EventType::RETRIEVAL_DIAGNOSTICS, nlohmann::json::object(), "", "")) {
+        return false;
+    }
+    return true;
+}
+
 static bool testRemoteHttpUtilsOffline() {
     using namespace ThothRemoteHttp;
 
@@ -19443,6 +19484,7 @@ int main() {
         if (std::string(focused) == "1") {
             const bool ok = testLlmTimeoutPolicy() && testLlmSynthesisRetriesDisabled()
                             && testDecisionTapeTimeoutDisplay()
+                            && testDecisionTapeLifecycle()
                             && testRemoteHttpUtilsOffline();
             std::cout << (ok ? "LLM timeout tests passed.\n" : "LLM timeout tests failed.\n");
             return ok ? 0 : 1;
@@ -19483,6 +19525,7 @@ int main() {
             if (!testLlmTimeoutPolicy()) failures++;
             if (!testLlmSynthesisRetriesDisabled()) failures++;
             if (!testDecisionTapeTimeoutDisplay()) failures++;
+            if (!testDecisionTapeLifecycle()) failures++;
             if (!testRemoteHttpUtilsOffline()) failures++;
             if (!testRemoteChatGoalMappingOffline()) failures++;
             if (!testGuiR3GoalSessionWire()) failures++;
@@ -19799,6 +19842,7 @@ int main() {
     if (!testLlmTimeoutPolicy()) failures++;
     if (!testLlmSynthesisRetriesDisabled()) failures++;
     if (!testDecisionTapeTimeoutDisplay()) failures++;
+    if (!testDecisionTapeLifecycle()) failures++;
     if (!testRemoteHttpUtilsOffline()) failures++;
     if (!testRemoteChatGoalMappingOffline()) failures++;
     if (!testGuiR3GoalSessionWire()) failures++;

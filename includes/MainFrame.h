@@ -265,6 +265,12 @@ private:
     void RunActiveBannerGoal();
     /** Phase 1 — Cognitive State tape: Planning started (before Engine events). */
     void BeginCognitiveGoalPlanningOptimistic();
+    /** Chat tape ownership. Appends "Chat turn in progress" before HTTP. */
+    void BeginDecisionTapeChat();
+    void ReleaseDecisionTapeChat();
+    void ReleaseDecisionTapeGoal();
+    /** Append "System waiting" only when chat and goal are both inactive. */
+    void NoteDecisionTapeIdleIfQuiescent();
     /** R3 — align backend session identity with active tab before goal POST. */
     void SyncBackendSessionIdentity();
     /** R3-G6 — resolve session for goal lifecycle events (never broadcast on empty id). */
@@ -330,6 +336,11 @@ private:
 
     int m_ragIndexingCount = 0;
     bool m_goalPlanningPending = false;
+    /** Decision tape: chat and goal are independent; idle only when both are false. */
+    bool m_decisionTapeChatActive = false;
+    bool m_decisionTapeGoalActive = false;
+    /** Session that owns the in-flight goal, so a later tab switch still sees its terminal. */
+    std::string m_decisionTapeGoalSessionId;
 
     wxTimer m_connectionPollTimer;
     wxTimer m_chatPendingWatchdogTimer;

@@ -25,6 +25,38 @@ inline constexpr std::size_t kMaxTimelineLines = 24;
 /** Phase 1 optimistic line (GUI, before Engine events). */
 inline constexpr const char* kOptimisticPlanningStartedLine = "Planning started";
 
+/** Idle tape line when no chat and no goal is active. */
+inline constexpr const char* kSystemWaitingLine = "System waiting";
+
+/** Immediate chat-submit line (GUI, before the HTTP response). */
+inline constexpr const char* kChatTurnInProgressLine = "Chat turn in progress";
+
+/** Existing chat retrieval diagnostics event, shown only while a chat turn is active. */
+inline constexpr const char* kRetrievalFinishedLine = "Retrieval finished";
+
+/**
+ * Chat and goal can overlap. Idle is the absence of both.
+ * Terminal transitions append System waiting only when both are inactive.
+ */
+struct DecisionTapeOwnership {
+    bool chat_active = false;
+    bool goal_active = false;
+
+    bool idle() const { return !chat_active && !goal_active; }
+};
+
+inline bool shouldShowSystemWaiting(const DecisionTapeOwnership& ownership) {
+    return ownership.idle();
+}
+
+/** Retrieval line only while a chat turn owns the tape. Goals keep their own step lines. */
+inline std::optional<std::string> formatChatRetrievalLine(EventType type, bool chat_turn_active) {
+    if (chat_turn_active && type == EventType::RETRIEVAL_DIAGNOSTICS) {
+        return std::string(kRetrievalFinishedLine);
+    }
+    return std::nullopt;
+}
+
 /** COGNITION_STAGE metadata.stage values (Phase 2a contract). */
 inline constexpr const char* kStagePlanning = "planning";
 inline constexpr const char* kStagePlanReuse = "plan_reuse";

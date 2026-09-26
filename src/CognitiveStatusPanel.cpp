@@ -38,6 +38,7 @@ void CognitiveStatusPanel::InitializeUI() {
     mainSizer->Add(m_timeline, 1, wxEXPAND | wxALL, 5);
 
     SetSizer(mainSizer);
+    NoteSystemWaiting();
 }
 
 void CognitiveStatusPanel::SetPhase(const std::string& phase_label) {
@@ -80,9 +81,28 @@ void CognitiveStatusPanel::BeginGoalPlanningOptimistic() {
 }
 
 void CognitiveStatusPanel::NoteChatTurnWaiting() {
-    SetPhase("Chat (not /goal)");
-    AppendLine("Chat turn in progress — use /goal … for executive decision tape");
+    SetPhase("Chat");
+    AppendLine(Thoth::CognitiveStatusDisplay::kChatTurnInProgressLine);
     Layout();
+    if (m_timeline) {
+        m_timeline->Refresh();
+        m_timeline->Update();
+    }
+    Refresh();
+    Update();
+}
+
+void CognitiveStatusPanel::NoteSystemWaiting() {
+    SetPhase("Idle");
+    AppendLine(Thoth::CognitiveStatusDisplay::kSystemWaitingLine);
+    if (!IsShownOnScreen()) {
+        return;
+    }
+    Layout();
+    if (m_timeline) {
+        m_timeline->Refresh();
+        m_timeline->Update();
+    }
     Refresh();
     Update();
 }
@@ -113,17 +133,24 @@ void CognitiveStatusPanel::ClearForSessionSwitch() {
 }
 
 void CognitiveStatusPanel::ApplyEvent(const ControllerEvent& event,
-                                      const std::string& active_session_id) {
+                                      const std::string& active_session_id,
+                                      bool chat_turn_active) {
     if (!Thoth::CognitiveStatusDisplay::mayApplyEvent(event.session_id, active_session_id)) {
+        return;
+    }
+
+    if (const auto retrieval = Thoth::CognitiveStatusDisplay::formatChatRetrievalLine(
+            event.type, chat_turn_active)) {
+        AppendLine(*retrieval);
         return;
     }
 
     const auto line = Thoth::CognitiveStatusDisplay::formatDecisionLine(
         event.type, event.metadata, event.controller_state_name, event.step_id);
-    if (line.has_value()) {
-        AppendLine(*line);
+    if (!line.has_value()) {
+        return;
     }
-
+    AppendLine(*line);
     SetPhase(Thoth::CognitiveStatusDisplay::formatPhaseForEvent(
         event.type, event.controller_state_name, event.metadata));
 }
