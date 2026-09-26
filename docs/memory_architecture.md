@@ -1,6 +1,6 @@
 # Thoth Memory Architecture
 
-**Status:** Active — M1 (memory consolidation) in progress  
+**Status:** Active architecture reference. **M1–M4 are implemented** (warm tier, age policy, `/prune`, range restore) — [`M4_PROTOCOL.md`](M4_PROTOCOL.md), [`completed_improvements_log.md`](completed_improvements_log.md). “M1 in progress” was the status when this note was first written and is superseded.  
 **See also:** `improvements.md` Step 3.2, `memory_summary.md` (thesis synthesis)
 
 ---

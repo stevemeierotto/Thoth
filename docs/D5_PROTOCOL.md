@@ -1,7 +1,7 @@
 # D5 — Evolution Trust Proof Protocol
 
 **Protocol version:** D5 v0.1  
-**Status:** 🔒 **LOCKED** (2026-07-08) — implementation plan § D.5.0 may proceed; await explicit implementation approval  
+**Status:** 🔒 **LOCKED** (2026-07-08). Lock-time next step was explicit implementation approval for § D.5.0. **Later outcome:** D5 was implemented and Phase D sealed (`e0a9ba5`, 2026-07-08). This header is not an open implementation gate.  
 **Supersedes:** None (first D5 protocol)  
 **Depends on:** [`D_PHASE_PROTOCOL.md`](D_PHASE_PROTOCOL.md) D0–D4 (D4 complete 2026-07-08), [`C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) v1.1, [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2, Phase B v1 baseline ([`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md))  
 **Checkpoint tracking:** `cursor_list.md` § **D.5.0** (implementation plan — locked only after this protocol locks)

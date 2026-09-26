@@ -1,10 +1,10 @@
 # Thoth Attachment Lifecycle Protocol
 
 **Document type:** Architecture protocol (GUI ↔ Engine attachment lifecycle)  
-**Status:** **ALP1** 🔒 **LOCKED** **2026-07-26** — normative lifecycle + P0 decisions; **no implementation** until plan approval  
+**Status:** **ALP1** 🔒 **LOCKED** **2026-07-26** — normative lifecycle + P0 decisions. Lock-time text required plan approval before code. **Later outcome:** ALP-A–F implemented 2026-07-26. **ALP-G** full certification remains deferred operator verification (G2b/G3; owner deferral 2026-09-13).  
 **Created:** 2026-07-26  
 **Prerequisite:** [`attachment_state_analysis.md`](attachment_state_analysis.md) ✅  
-**Implementation plan:** [`ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md`](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) 📋  
+**Implementation plan:** [`ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md`](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) 🔒 implemented A–F; G harness only  
 **Related:** [`THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md`](THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md) (TCB2–TCB4 · **TCB-ALP amendment** §1.5) · [`GUI_integration.md`](GUI_integration.md) (Phases 8–10) · [`GUI_RESTORATION_PROTOCOL.md`](GUI_RESTORATION_PROTOCOL.md) · [`AGENTS.md`](../AGENTS.md)
 
 ---

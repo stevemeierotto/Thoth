@@ -1,7 +1,7 @@
 # Phase D — Evolution Tier Protocol
 
 **Protocol version:** D v1.0  
-**Status:** 🔒 **D0 locked** — design complete; paused before D1  
+**Status:** 🔒 **D0 locked** (lock-time note: design complete; paused before D1). **Later outcome:** Phase D is sealed and Phase E v0.1 is certified — [`phases/PHASE_D_COMPLETE.md`](phases/PHASE_D_COMPLETE.md), [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md). The “paused before D1” clause is historical.  
 **Supersedes:** None (first Phase D protocol)  
 **Depends on:** [`C_PHASE_PROTOCOL.md`](C_PHASE_PROTOCOL.md) v1.1 (Phase C locked 2026-07-05), [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2, Phase B v1 baseline ([`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md))  
 **Checkpoint tracking:** `cursor_list.md` § **D.0.0**

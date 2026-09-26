@@ -3,7 +3,7 @@
 **Protocol version:** 1.0  
 **Locked:** 2026-07-01  
 **Applies to:** Thoth `8960c27`, basic_agent `4c45aca`  
-**Status:** ✅ Closed **DROP** 2026-07-18 — methodology v1.0 immutable; close-out [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) **G1d-CO v1.2**; production `w_t=0.0`  
+**Status:** ✅ Closed **DROP** 2026-07-18 — methodology v1.0 immutable; close-out [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) **G1d-CO v1.2**. G1d close-out production weight was `w_t=0.0`. **Current production weight is G1e `w_t=-0.05`** (2026-07-19) — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md).  
 **Prerequisite:** E1 ✅ (`docs/benchmark_environment.md`)  
 **Blocks:** F5 (semantic trajectory embeddings) — **no F5 work until G1d reaches a documented decision**  
 **Related:** `plan_reuse_tuning.md`, `benchmark_case_registry.cpp`, `run_grag_benchmark`, **`G1D_CLOSEOUT_PROTOCOL.md`**

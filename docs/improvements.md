@@ -57,7 +57,7 @@ Before making any changes:
 | 11 | Dynamic Plan Revision | High | ✅ Complete (see completed_improvements_log.md) |
 | 12 | Extended Agent & Tool Re-enablement | Medium | ✅ Complete (see completed_improvements_log.md) |
 
-**Active work:** Remaining Phase 3–4 items (G2 subgoals, **G1e** KEEP@−0.05, **B1** Phase 1 Candidate awaiting freeze — [`B1_PROTOCOL.md`](B1_PROTOCOL.md) v1.1, M5). **M4 range restore ✅**. **E1 ✅**; **E2 Phases A–E ✅**. **GUI client/server:** Phase 0–12A 🔒 ([`GUI_integration.md`](GUI_integration.md)); Phase 1–12A ✅; Phase 12B placeholder. **CSG-A ✅ A.1–A.3 2026-07-30** — [`CHAT_SESSION_GOAL_PROTOCOL.md`](CHAT_SESSION_GOAL_PROTOCOL.md) (A.4 manual restart verify pending). **CSG-B ✅ B.1–B.3 2026-07-30** — [`CHAT_RESPONSE_REGURGITATION_PROTOCOL.md`](CHAT_RESPONSE_REGURGITATION_PROTOCOL.md) (B.4 manual verify pending). Next forks: **B1** freeze → Phase 2, **E3**, **G2/M5**. See `cursor_list.md`.
+**Active work:** Research forks that still need an owner decision are **B1** freeze ([`B1_PROTOCOL.md`](B1_PROTOCOL.md) v1.1 candidate), **E3** SCR harness, and **M5** vector benchmarks. **G1e** production weight is KEEP@−0.05; magnitude probes stay paused. **M4 ✅**. **E1 ✅**; **E2 Phases A–E ✅**. **C6 Phase 3 ✅**. **GUI client/server:** Phase 0–12A ✅; Phase 12B+ remains a placeholder, not active work. **CSG-A** A.1–A.3 ✅; automatic cross-restart retrieval **deferred 2026-09-25** (Engine refactor). Supported path is the goal-banner **Run** button — [`CHAT_SESSION_GOAL_PROTOCOL.md`](CHAT_SESSION_GOAL_PROTOCOL.md). **CSG-B ✅ B.1–B.4** including manual acceptance 2026-09-13. Hierarchical subgoals, F-series, `apply_diff`, NODE, F+1, L3, and the DWP editor stay deferred. See `cursor_list.md`.
 
 ---
 
@@ -71,7 +71,7 @@ Before making any changes:
 
 **E1 close-out:** All harnesses (D1–D5) emit `run_id` + `env_hash` + `index_hash`; cognitive metrics attribution on D1–D3; retrieval-only harnesses D4–D5 emit 0 metrics rows. Unblocks **B1** and **V3** under pinned environment.
 
-**E2 close-out:** Kernel + integration + evolution trust + empirical certification complete. Protocol: **`docs/E2_PROTOCOL.md`** v1.2. Checkpoints: **`cursor_list.md` § E2**. Post-E work is product/eval forks (B1, C6.3-05/06, E3, M4, G1d) — not further E2 phase checkpoints unless a new protocol version.
+**E2 close-out:** Kernel + integration + evolution trust + empirical certification complete. Protocol: **`docs/E2_PROTOCOL.md`** v1.2. Checkpoints: **`cursor_list.md` § E2**. Further E2 phase checkpoints require a new protocol version. Post-E items that remain open are **B1** freeze and **E3**. **M4**, **C6 Phase 3**, and **G1d** are done. **G1e** production weight is −0.05; magnitude tuning stays paused.
 
 ---
 

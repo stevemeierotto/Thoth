@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-07-19 (B1 Phase 1 Candidate `b1_v1` ready; awaiting freeze; G1e KEEP@−0.05)  
+**Last updated:** 2026-09-25 (status reconciliation). Historical checkpoint notes below keep their original “paused before” wording. Current open work is the backlog section at the end of this file, aligned with `AGENTS.md`: B1 freeze, E3, M5, paused G1e magnitude, timeout Phase B, and ALP-G verification. M4, G1d, C6 Phase 3, and the shipped Decision Tape are done. CSG-A automatic restart retrieval is deferred.  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
@@ -35,8 +35,10 @@ The gap is not “missing features” — it is **missing eval that connects fea
 ```
 Component harnesses (C3–C5)     →  “Does this mechanism fire correctly?”     ✅
 Per-goal metrics (C6)           →  “How did this run perform?”               ✅
-Longitudinal / learning eval    →  “Is the system improving across runs?”    ❌ (proposed C6 Phase 3)
+Longitudinal / learning eval    →  “Is the system improving across runs?”    ❌ as of this 2026-06-29 snapshot (C6 Phase 3 was still a proposal)
 ```
+
+**Later (2026-07-11):** C6.3-01–06 shipped the longitudinal analyzer, operator guide, and fixtures. The learning claim itself is still unproven until official evaluation windows are run. F-series promotion has no owner record.
 
 M1.5 proved the **consolidation pipe** (Apollo E2E). It did **not** prove that consolidated memory improves **later goal success** — that needs **E2** (repeat-goal harness).
 
@@ -3894,7 +3896,7 @@ STRICT / INTEGRATION share eval types and schema → **behavioral separation**, 
 
 ### 0. Cognitive loop hardening — ✅ complete (C1–C7)
 
-End-to-end goal execution works; C1–C7 quality/speed/evidence hardening is shipped. Remaining focus is **post-E eval forks** (B1, C6 Phase 3, E3, M4, G1d) — not re-wiring the loop.
+End-to-end goal execution works; C1–C7 quality/speed/evidence hardening is shipped. Remaining focus is the unfinished research and verification list in `AGENTS.md` (B1 freeze, E3, M5, G1e magnitude pause, timeout Phase B, ALP-G). M4, G1d, and C6 Phase 3 are already done.
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
@@ -3918,7 +3920,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 |-------|------|--------|
 | **1** | **Append-only per-goal logging** — `GOAL_COGNITIVE_METRICS` → `logs/cognitive_metrics.jsonl` on `PLAN_COMPLETED` / `PLAN_FAILED` / `PLAN_ABORTED`. | ✅ |
 | **2** | **Analysis tooling** — `scripts/summarize_cognitive_metrics.py`; `scripts/plot_cognitive_metrics.py` (matplotlib); token counts from `LLMInterface`; GUI export (Benchmarks → Export Cognitive Metrics, JSONL/CSV). | ✅ |
-| **3** | **Longitudinal analysis** — time-series over many runs: trend success/latency/tokens; segment by `plan_reused`, strategy injection, pre/post consolidation; answer “is the system improving?” | 📋 | See **§ Reflection**; expert + analysis consensus |
+| **3** | **Longitudinal analysis** — time-series over many runs: trend success/latency/tokens; segment by `plan_reused`, strategy injection, pre/post consolidation; answer “is the system improving?” | ✅ | C6.3-01–06 ✅ 2026-07-11. The 📋 mark in older copies of this row is superseded. Official longitudinal windows for an F-series promotion are still unused. |
 
 **Per-goal fields (Phase 1 schema):**
 
@@ -3987,8 +3989,8 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
-| **G1** | Trajectory tuning (Step 4.5) | ✅ | Superseded by **G1d DROP** 2026-07-18 — production `w_t=0.0` |
-| **G2** | Hierarchical subgoal trees (Step 4.4) | 📋 | `GoalNode`, active subgoal embedding in `GragScorer`; single root $G$ today |
+| **G1** | Trajectory tuning (Step 4.5) | ✅ | G1d DROP on 2026-07-18 set a close-out weight of `w_t=0.0`. **Current production is G1e `w_t=-0.05`.** |
+| **G2** | Hierarchical subgoal trees (Step 4.4) | 🔮 deferred | Not started. Single root $G$ today. Not an active workstream. |
 | **G3** | Model upgrade path (Step 4.7) | 📋 | Audit `LLMInterface` for model-specific assumptions; `ModelConfig` + migration playbook |
 | **G4** | Trace replay vs SQLite resume | 🔶 | Document-only acceptable: trace is observability; `resume_from_plan()` is authoritative |
 
@@ -4007,7 +4009,7 @@ Move beyond pass/fail: record **quantitative metrics for every goal execution**,
 | **E1** | Benchmark environment pinning | ✅ | A–E complete 2026-07-01 — **`docs/benchmark_environment.md`** |
 | **E2** | Episodic memory learning eval | ✅ | Phases A–E complete; Phase E v0.1 certified 2026-07-09 — [`phases/PHASE_E_COMPLETE.md`](phases/PHASE_E_COMPLETE.md); paused before Zenodo V3 |
 | **E3** | Strategy impact / SCR harness | 📋 | Automated SCR or plan-structure proxy in nightly/CI; `COGNATE_V2.md` metric → regression JSONL |
-| **G1d** | Trajectory bucket diagnostic | ✅ | Closed **DROP** 2026-07-18 — [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) v1.2; production `w_t=0.0` |
+| **G1d** | Trajectory bucket diagnostic | ✅ | Closed **DROP** 2026-07-18 — [`G1D_CLOSEOUT_PROTOCOL.md`](G1D_CLOSEOUT_PROTOCOL.md) v1.2. Close-out weight `w_t=0.0`. Current production is G1e −0.05. |
 | **G1e** | Trajectory polarity probe (post-G1d) | 🔶 | Phase 4 ✅ production `−0.05`; **tuning paused (not dropped)** — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) v1.2 |
 
 ---
@@ -4101,7 +4103,7 @@ The third tier does not exist yet. It is the missing bridge between "it works" a
 | — | **E1** — Environment pinning | ✅ | `docs/benchmark_environment.md` |
 | — | **E2** — Phases A–E | ✅ | Phase E certified; paused before Zenodo |
 | **1** | **M4** — `MemoryPruner::restore(session_id, range)` | ✅ | Implemented 2026-07-18 — [`M4_PROTOCOL.md`](M4_PROTOCOL.md) v1.0 |
-| **2** | **G1d** — Trajectory scoring ablation | ✅ | Closed **DROP**; `w_t=0.0`; F5 gate cleared |
+| **2** | **G1d** — Trajectory scoring ablation | ✅ | Closed **DROP**; close-out `w_t=0.0`; current production is G1e −0.05 |
 | **2b** | **G1e** — Trajectory polarity | 🔶 | KEEP@−0.05 in production; magnitude lane paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md) |
 | **3** | **E3** — SCR in CI | 📋 | Strategy promotion as regression signal |
 | **4** | **C6 Phase 3** — Accumulated multi-session analysis | ✅ | C6.3-01–06 ✅; operator guide [`cognitive_longitudinal_ops.md`](cognitive_longitudinal_ops.md); fixture catalog [`tests/fixtures/cognitive_longitudinal/README.md`](../tests/fixtures/cognitive_longitudinal/README.md) |
@@ -4168,7 +4170,7 @@ Done    E2 Phase E Step 2 — authoritative STRICT trio sealed ✅ 2026-07-09
 Done    E2 Phase E Step 3 — L4 verification package ✅ 2026-07-09
 Done    E2 Phase E Step 4 — claims audit ✅ 2026-07-09
 Done    E2 Phase E Step 5 — `PHASE_E_COMPLETE.md` certified ✅ 2026-07-09
-Done    **G1d** — close-out A0→D terminal **DROP**; production `w_t=0.0` ✅ 2026-07-18
+Done    **G1d** — close-out A0→D terminal **DROP**; close-out weight `w_t=0.0` ✅ 2026-07-18. Current production weight is G1e −0.05 (2026-07-19).
 Done    **G1e** Phase 0–1 — protocol lock + harness allowlist ✅ 2026-07-18
 Done    **G1e** Phase 2 checklist lock (v1.1) ✅ 2026-07-18
 Done    **G1e** Phase 2 execute preflight (`run-1784407500480`) ✅ 2026-07-18

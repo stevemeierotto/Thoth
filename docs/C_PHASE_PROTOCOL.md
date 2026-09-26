@@ -1,7 +1,7 @@
 # Phase C — Integration Tier Protocol
 
 **Protocol version:** C v1.1  
-**Status:** 🔒 Locked for implementation — design complete; C1 not yet opened  
+**Status:** 🔒 Locked for implementation (lock-time note, 2026-07-05: design complete; C1 not yet opened). **Later outcome:** Phase C is sealed — [`phases/PHASE_C_COMPLETE.md`](phases/PHASE_C_COMPLETE.md). The lock-time sentence is historical and is not an open gate.  
 **Supersedes:** C v1.0  
 **Depends on:** [`E2_PROTOCOL.md`](E2_PROTOCOL.md) v1.2 (locked 2026-07-01), Phase B v1 baseline ([`phases/PHASE_B_COMPLETE.md`](phases/PHASE_B_COMPLETE.md))  
 **Checkpoint tracking:** `cursor_list.md` § **C.0.0**

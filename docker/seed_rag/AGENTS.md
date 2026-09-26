@@ -1,11 +1,15 @@
+<!-- Docker seed corpus copy. Retrieval text. -->
+
+**Corpus copy of the repository agent guide.** This file is seeded into the Engine RAG corpus. It was aligned with repository `AGENTS.md` on 2026-09-25 so older status sentences are not retrieved as current truth. The 2026-07-15 seed snapshot is superseded. Authoritative guide for people editing the repo: repository-root `AGENTS.md`.
+
 # AGENTS.md — AI Coding Agent Guide
 
 **Read this document before making any changes to Thoth.**
 
 This document describes the architecture, conventions, and critical rules for this project. Following these guidelines ensures changes integrate cleanly and preserve the system's design integrity.
 
-**Last Updated**: 2026-07-09  
-**Status**: Current — reflects completed work through P1.6, Cognate V2, and E2 Phases A–E (Phase E v0.1 certified)
+**Last Updated**: 2026-09-25  
+**Status**: Current — reconciled to `main` (`de6811b`). E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3, ALP-A–F, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
 
 ---
 
@@ -187,8 +191,9 @@ always requires explicit authorization.
            │
 ┌──────────▼──────────┐
 │   External Services  │
-│  - Ollama (LLM)     │
-│  - Ollama (Embed)   │
+│  - llama.cpp server │
+│    (chat + embed)   │
+│  - (Optional) Ollama│
 │  - (Optional) OpenAI│
 └─────────────────────┘
 ```
@@ -268,6 +273,8 @@ Thoth/
 
 **⚠️ Do not modify GUI files without understanding the AgentInterface bridge.**
 
+The right Observability notebook includes the Cognitive State **Decision Tape**. The shipped tape shows events the Engine actually emits (`controller_event.h`). It does not use the uncommitted September 12 `COGNITION_STAGE` / `STRATEGY_INJECTION` / `TRAJECTORY_INJECTION` event-type draft.
+
 ---
 
 ## Key Components
@@ -305,7 +312,7 @@ Thoth/
 - `grag_scorer.cpp` — Implements directional scoring (`D = G - C`)
 - `vector_store.cpp` / `i_vector_store.h` — Vector store abstraction (enables future migration to production databases)
 - `index_manager.cpp` — Handles index lifecycle with selective re-indexing
-- `embedding_engine.cpp` — Generates embeddings via Ollama REST API (`nomic-embed-text`)
+- `embedding_engine.cpp` — Generates embeddings via InferenceClient (`llama_cpp` default; Ollama adapter retained)
 
 **Key Features**:
 
@@ -318,13 +325,13 @@ Thoth/
 
 **⚠️ Changes here affect retrieval quality. Tread carefully and verify with tests.**
 
-**Planned Upgrades** (not yet implemented):
+**Deferred upgrades** (not an active workstream):
 
 - Hierarchical Subgoal Trees (active subgoal embedding per subgoal)
 
 **Completed Upgrades**:
 
-- Trajectory-aware retrieval: $w_t = 0.2$ active in local `retrieval_config.json` (gitignored runtime file); executive zeroes weight when trajectory embedding is empty
+- Trajectory-aware retrieval: infrastructure retained; production `w_t = -0.05` after G1e **KEEP** (2026-07-19); executive zeroes weight when trajectory embedding is empty; magnitude tuning paused open
 - Dynamic Graph Edge Learning: Edge weights are now dynamically adjusted via `GraphRefiner` based on execution success/failure. Graph density metrics are logged in retrieval diagnostics.
 
 ### Tool System
@@ -431,10 +438,11 @@ Assembles the final prompt sent to the model, including:
 
 **File**: `llm_interface.cpp`
 
-Abstracts the model backend. Currently supports Ollama local models.
+Abstracts the model backend via Plan H `InferenceClient` (`llama_cpp` default, optional `ollama`).
 
-**Current Model**: Small Qwen model (hardware-constrained)  
-**Embedding Model**: `nomic-embed-text` (768 dimensions) via Ollama REST API  
+**Default backend**: `llama_cpp` (llama-server) when `THOTH_INFERENCE_BACKEND` is unset  
+**Embedding Model**: `nomic-embed-text` (768 dimensions) via embed server / InferenceClient  
+**Ollama**: retained adapter; set `THOTH_INFERENCE_BACKEND=ollama`  
 **Future**: Hardware upgrade and model upgrade planned
 
 **⚠️ Do not hardcode model-specific behavior. The interface is designed to support model upgrades without changing agent logic.**
@@ -548,9 +556,9 @@ These files track project progress. Append to them; do not overwrite.
 
 `src/MainFrame.cpp`, `src/AgentInterface.cpp`, and `src/VisualizationFrame.cpp` interact with the core through `AgentInterface`. Changes require understanding this boundary.
 
-### 🚫 DO NOT bypass the AddCollapsiblePane pattern
+### 🚫 DO NOT bypass the AddCollapsiblePane pattern (left Knowledge Base)
 
-The UI sidebars must remain stable and scrollable. Never add sections to sidebars without using the `AddCollapsiblePane` helper and following the rules in `docs/architectural_facts.md §8`.
+The left Knowledge Base sidebar must remain stable and scrollable. Never add sections there without using the `AddCollapsiblePane` helper. Observability lives in the right **tabbed notebook** (not scrolled collapsible children) — see `docs/architectural_facts.md §8`.
 
 ---
 
@@ -644,28 +652,47 @@ The UI sidebars must remain stable and scrollable. Never add sections to sidebar
 - Strategy Engine and trajectory learning infrastructure
 - Scientific execution mode
 - Memory pruning (hot-tier auto-archive + GUI session trim)
-- Memory consolidation M1–M3 (warm tier, age policy, `/prune` admin API)
+- Memory consolidation M1–M4 (warm tier, age policy, `/prune` admin API, range restore)
 - Security enforcement (ConstraintChecker, sandbox boundaries)
 - E2 evaluation kernel + Phases A–E (Phase E v0.1 certified — see `docs/phases/PHASE_E_COMPLETE.md`)
+- C6 Phase 3 longitudinal analyzer, operator guide, and fixtures (`94012a4`)
+- TCB mandatory sequence through TCB4 (2026-07-23). TCB5/TCB6 remain optional
+- ALP attachment lifecycle A–F (2026-07-26). ALP-G operator certification is deferred verification
+- CSG-B B.1–B.4, including manual acceptance 2026-09-13
+- Container plans A–N as recorded in `docs/docker_roadmap.md` (Plan L3 bind profile stays deferred)
+- Decision Tape on committed engine events, including idle and live chat ownership (`de6811b`, 2026-09-25)
+- Shared text-generation budget of 900 seconds, deployed to the Docker Engine image 2026-09-16 (`THOTH_LLM_TIMEOUT_SECONDS`)
+- Goal banner **Run**: explicit start or restart of an executive plan for the displayed session goal. **Send** stays chat-only
 
 ### 🔬 Prototype / Partial
 
-- Memory pruning: **M4** range restore not yet implemented (M1 consolidate ✅; M2 age policy ✅; M3 `/prune` ✅).
-- Trajectory retrieval: $w_t$ active locally; mixed lift on trajectory-disambiguation benchmark cases (see `plan_reuse_tuning.md`).
-- E2 episodic learning eval: Phase E v0.1 certified for `n=3_strict_trio` with **no measurable lift** (`mean_episodic_lift = 0.0`); generalization and Zenodo V3 deferred (see `docs/phases/PHASE_E_COMPLETE.md`).
+- Trajectory retrieval: G1d DROP for positive weights (close-out production `w_t=0.0` on 2026-07-18) then **G1e KEEP** 2026-07-19 — current production `w_t=-0.05` (see `plan_reuse_tuning.md`, `G1E_POLARITY_PROTOCOL.md`). Magnitude tuning remains paused.
+- E2 episodic learning eval: Phase E v0.1 certified for `n=3_strict_trio` with **no measurable lift** (`mean_episodic_lift = 0.0`); generalization and Zenodo V3 stay paused until B1 (see `docs/phases/PHASE_E_COMPLETE.md`).
 
-### 📋 Planned
+### ⏳ Genuinely unfinished (not the same as deferred)
 
-- Hierarchical Subgoal Trees (active subgoal embedding per subgoal)
-- Post-E forks: B1 hardened corpus, C6 Phase 3 longitudinal metrics, E3 SCR harness, M4 restore, G1d trajectory ablation
+- **Missing implementation:** LLM step cancellation after a soft timeout. The 900-second budget is deployed. `std::async` still joins the timed-out step before `STEP_FAILED` (timeout Phase B, recorded 2026-09-16).
+- **Missing verification:** ALP-G G2b/G3 operator sign-off, owner-deferred 2026-09-13. GUI restoration R5 verify and R6 closeout were not recorded after later GUI work.
+- **Research awaiting an owner decision:** B1 publication suite is a candidate awaiting freeze (`docs/B1_PROTOCOL.md`). E3 SCR harness is specified and not built. M5 vector-store benchmark scaffold is not built. G1e further magnitude probes stay paused.
+- **Small product gap:** File → Export Session shows an unimplemented menu message.
 
-### 🔮 Future expansion (optional — not scheduled)
+### 🔮 Deferred / out of scope (do not treat as active work)
 
-- **Self-building:** `project_analyze`, `run_tests`, and `code_modify` read exist as tools; `**apply_diff` is a stub**. Owner may revisit unified diff / build automation later — not active roadmap work.
+- **CSG-A automatic chat retrieval across restart.** Investigated 2026-09-13. Automatic restoration would require an Engine refactor outside that stage. It is deferred. The supported path is the goal-banner **Run** button (`docs/CHAT_SESSION_GOAL_PROTOCOL.md`).
+- Hierarchical subgoal trees (roadmap Step 4.4). Single root goal embedding remains the scorer input.
+- F1–F8 until an owner promotion record exists (`docs/improvements.md` C6.3-04).
+- `EngineRuntime::submitGoalAsync()` (F+1) and SSE event replay.
+- Plan L3 `compose.dev-rag.yml`.
+- GUI integration Phase 12B and Phase 13+ (draft placeholders).
+- DWP document-revision editor. ALP revisions on ingest exist. The editor workflow was never locked.
+- `code_modify` `apply_diff` and `StepType::NODE` execution. Both are intentional stubs.
+- Self-building Phase 5 (build/revert automation) until the owner schedules it.
+- Zenodo V3 until B1 freeze and pinned publication runs.
 
-### 🚫 Stub / Not Implemented
+### 🚫 Stub / Not Implemented (intentionally unscheduled)
 
-- `code_modify` tool's `apply_diff` operation (prototype error only; see Future expansion above)
+- `code_modify` tool's `apply_diff` operation (prototype error only; see Deferred above)
+- `WorkflowEngine::executeNode` returns "NODE execution not yet implemented" and tests rely on that failure
 
 ---
 

@@ -1,6 +1,6 @@
 # Thoth Documentation Index
 
-**Last Updated:** 2026-07-09  
+**Last Updated:** 2026-09-25  
 **Purpose:** Central navigation for all Thoth documentation
 
 ---
@@ -17,7 +17,7 @@
 4. **[completed_improvements_log.md](completed_improvements_log.md)** — **Authoritative source of truth** for what's actually implemented
 
 ### For Active Development
-- **[cursor_list.md](cursor_list.md)** — **WORKING BACKLOG** — Post-E pause (before Zenodo V3); next forks B1 / M4 / G1d / C6 Phase 3 / E3
+- **[cursor_list.md](cursor_list.md)** — **WORKING BACKLOG** — open items are B1 freeze, E3, M5, paused G1e magnitude, and the unfinished list in `AGENTS.md`. M4, G1d, and C6 Phase 3 are done.
 - **[improvements.md](improvements.md)** — **ACTIVE ROADMAP** — Phases 3–4 🔶 partial; C6.3-04 F-series promotion policy ✅; E2 ✅ certified
 - **[phases/PHASE_E_COMPLETE.md](phases/PHASE_E_COMPLETE.md)** — **Phase E seal** — current empirical certification boundary
 - **[AGENTS.md](../AGENTS.md)** — Architecture reference and coding guidelines
@@ -53,7 +53,7 @@
 | Document | Purpose | Status |
 |----------|---------|--------|
 | **[improvements.md](improvements.md)** | **ACTIVE ROADMAP** — Phases 3–4 partial; Phase 5 future expansion; E2 ✅ | ✅ Active |
-| **[cursor_list.md](cursor_list.md)** | **WORKING BACKLOG** — Post-E forks (B1 / M4 / G1d / C6.3 / E3) | ✅ Active |
+| **[cursor_list.md](cursor_list.md)** | **WORKING BACKLOG** — B1 freeze, E3, M5 still open; M4 / G1d / C6.3 done | ✅ Active |
 | **[completed_improvements_log.md](completed_improvements_log.md)** | **AUTHORITATIVE** — Completed work log | ✅ Authoritative |
 | **[phases/PHASE_E_COMPLETE.md](phases/PHASE_E_COMPLETE.md)** | Phase E v0.1 certification seal | 🔒 Certified |
 | **[phases/PHASE_D_COMPLETE.md](phases/PHASE_D_COMPLETE.md)** | Phase D evolution trust seal | 🔒 Sealed |
@@ -80,9 +80,9 @@
 → **[completed_improvements_log.md](completed_improvements_log.md)** — Authoritative source
 
 ### "What should I work on next?"
-→ **[cursor_list.md](cursor_list.md)** — Working backlog (post-E: B1 / M4 / G1d / C6 Phase 3 / E3)  
-→ **[phases/PHASE_E_COMPLETE.md](phases/PHASE_E_COMPLETE.md)** — Current pause: before Zenodo V3  
-→ **[improvements.md](improvements.md)** — Active roadmap (Phases 3–5; E2 certified)
+→ **[cursor_list.md](cursor_list.md)** — Working backlog (open: B1 freeze, E3, M5; M4 / G1d / C6 Phase 3 are done)  
+→ **[phases/PHASE_E_COMPLETE.md](phases/PHASE_E_COMPLETE.md)** — Phase E pause remains before Zenodo V3  
+→ **[improvements.md](improvements.md)** — Active roadmap (Phases 3–4 still partial; E2 certified; deferred items stay deferred)
 
 ### "How do I run longitudinal analysis?"
 → **[cognitive_longitudinal_ops.md](cognitive_longitudinal_ops.md)** — Operator guide (C6.3-05)  

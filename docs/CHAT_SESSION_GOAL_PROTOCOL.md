@@ -1,7 +1,7 @@
 # Chat Session Goal Retrieval Protocol
 
 **Document type:** Architecture protocol (session goal → Engine chat retrieval)  
-**Status:** **CSG-A** 🔒 **LOCKED** **2026-07-30** · **A.1–A.3 ✅ Implement 2026-07-30** · **A.4 unresolved live-integration verification (2026-09-13)**
+**Status:** **CSG-A** 🔒 **LOCKED** **2026-07-30** · **A.1–A.3 ✅ Implement 2026-07-30** · **A.4 automatic restart retrieval deferred 2026-09-25** (Engine refactor out of scope). Supported path: goal-banner **Run**.
 **Created:** 2026-07-30  
 **Related:** [`GUI_RESTORATION_PROTOCOL.md`](GUI_RESTORATION_PROTOCOL.md) (R3-G1 banner/cache vs Engine) · [`THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md`](THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md) · [`GUI_integration.md`](GUI_integration.md) · [`GRAG.md`](GRAG.md) · [`AGENTS.md`](../AGENTS.md)
 
@@ -30,11 +30,26 @@ Implementation requires explicit human approval per `AGENTS.md`. **No code chang
 | Supersedes | Implicit assumption that banner goal implies Engine directional GRAG after restart |
 | Out of scope (CSG-A) | Response regurgitation (Phase B) · GRAG scoring formula changes · Engine persistence of session goals · `/sessions/{id}/goal` hydrate endpoint |
 | Post-lock rule | Do not revise locked sections without **new CSG lock**; numeric cache thresholds may be tuned in implementation if documented |
-| Next | **Implement A.1** → A.2 → A.3 → A.4 per §6 |
+| Next | **Implement A.1** → A.2 → A.3 → A.4 per §6 *(historical queue at lock)* |
+| Later decision | **2026-09-25** — automatic cross-restart retrieval (A.4 success criteria) deferred. Banner **Run** is the supported behavior. See the section below. |
+
+---
+
+## Later decision — 2026-09-25 (owner)
+
+Automatic restoration and use of the session goal for chat retrieval across restart is **deferred / out of scope**. Investigation of A.4 showed that behavior would require an Engine refactor beyond the CSG-A stage.
+
+**Current supported behavior:** the goal banner **Run** button (`MainFrame`, tooltip “Start or restart an executive plan for this goal. Send remains chat.”) calls `executeGoal` for the displayed session goal. **Send** stays chat-only and does not apply the banner goal by itself after restart.
+
+A.1–A.3 remain implemented (`active_goal` on chat turns, Engine resolver, GUI send of the banner goal when a turn includes it). The 2026-09-13 observation in §A.4 is preserved as history. It is not an open integration task.
+
+The success table in §1 and the A.4 checklist describe the automatic-restart target that this decision defers. They are not the operator contract.
 
 ---
 
 ## §1 — Objective
+
+**Deferred target (2026-09-25).** The paragraph and table below are the historical A.4 automatic-restart target. The supported operator path is the banner **Run** button in the later-decision section above.
 
 When the GUI banner shows `activeGoal`, chat retrieval **must** use directional GRAG after GUI restart **without** re-running `executeGoal`.
 
@@ -209,17 +224,17 @@ Each sub-phase requires `AGENTS.md` gate approval before starting. Do not skip o
 
 ### A.4 — Full restart test (manual)
 
+**Historical target.** The steps below were the automatic-restart check. **2026-09-25:** that check is deferred because it needs an Engine refactor outside CSG-A. Do not reopen it as unfinished integration work. The supported control is the banner **Run** button.
+
 1. Start Engine  
 2. Open GUI → create goal → confirm banner  
 3. **Restart GUI** (Engine may keep running)  
 4. Send question (no re-execute goal)  
 5. Confirm §1 success criteria
 
-**Latest result (2026-09-13):** The GUI restores the banner and its send trace
+**Result recorded 2026-09-13 (historical):** The GUI restores the banner and its send trace
 shows `active_goal` in the outgoing chat JSON, but the observed post-restart
-chat retrieval does not use the goal. A.4 is not complete. Treat this as a
-live Engine deployment/integration issue until diagnostics show
-`goal_source: "session"` with a non-zero directional magnitude.
+chat retrieval does not use the goal. That observation led to the 2026-09-25 decision above.
 
 ---
 
@@ -257,6 +272,6 @@ CSG-A **extends** R3-G1 without changing banner ownership.
 - [ ] A.1 unit tests pass
 - [ ] A.2 curl: `active_goal` → `goal_source=session`
 - [ ] A.3 GUI sends goal on chat
-- [ ] A.4 restart sequence: §1 success criteria
+- [ ] A.4 automatic restart sequence — **deferred 2026-09-25** (Engine refactor out of scope; banner **Run** is the supported path)
 - [ ] `RETRIEVAL_DIAGNOSTICS` events include `goal_source` in `decision_trace.jsonl`
 - [ ] Embed failure path logged (no silent conversational fallback)

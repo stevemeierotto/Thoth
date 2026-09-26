@@ -13,7 +13,7 @@
 - **Codebase Indexing:** Read-only verified. Selective re-indexing active.
 - **Trajectory Awareness:** **[ACTIVE — G1e KEEP]**. Production `retrieval_config.json` `trajectory: -0.05` (2026-07-19). G1d DROP remains the record for positive weights. Magnitude tuning paused open — [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md). Empty-T executive zeroing remains.
   - **G1e:** KEEP@−0.05 in production; further probes (e.g. `−0.40`) deferred, not abandoned.
-- **Subgoal Trees:** **[PLANNED — NOT YET IMPLEMENTED]**. Root goal embedding is used for the entire plan duration.
+- **Subgoal Trees:** **[DEFERRED — NOT AN ACTIVE WORKSTREAM]**. Root goal embedding is used for the entire plan duration. Hierarchical subgoals remain unscheduled.
 - **Self-Modification:** **[STUB — optional future expansion]**. The `code_modify` tool exists but its `apply_diff` operation is a non-functional prototype.
 
 ---
@@ -59,7 +59,7 @@ Optimized during Phase 4 weight sweep:
 ---
 
 ## 4. Embedding Pipeline
-- **Backend:** Ollama REST API (`/api/embed`)
+- **Backend:** `InferenceClient` embed path. Empty `THOTH_INFERENCE_BACKEND` selects `llama_cpp` (embed server). Set `THOTH_INFERENCE_BACKEND=ollama` to use the retained Ollama adapter. An older revision of this section named Ollama REST as the only embed path; that sentence is superseded (2026-09-25).
 - **Model:** `nomic-embed-text`
 - **Dimensions:** 768
 - **Normalization:** Vectors are normalized during retrieval but stored raw. $D$ is a raw difference vector.
@@ -85,7 +85,7 @@ Full run archive: [`benchmark_results.md`](benchmark_results.md). **Always cite 
 
 ### 5.1 Canonical — Hardened 100-case suite (2026-03-14)
 
-*311-chunk research paper corpus; weights $w_q=0.4, w_d=0.4, w_k=0.3, w_t=0.2, w_g=0.3$*
+*311-chunk research paper corpus; weights used in that run were $w_q=0.4, w_d=0.4, w_k=0.3, w_t=0.2, w_g=0.3$. Those run weights are historical. Current production `w_t` is −0.05.*
 
 | Metric | RAG (Baseline) | GRAG (Optimized) | Delta |
 | :--- | :---: | :---: | :---: |
@@ -109,7 +109,7 @@ Full run archive: [`benchmark_results.md`](benchmark_results.md). **Always cite 
 ---
 
 ## 6. Known Gaps & Planned Upgrades
-1.  **[PLANNED] Hierarchical Subgoals (Upgrade 1):** Moving from a single $G$ to an active subgoal embedding $G_{active}$ to reduce direction noise in complex plans.
+1.  **[DEFERRED] Hierarchical Subgoals (Upgrade 1):** Moving from a single $G$ to an active subgoal embedding $G_{active}$ would be a GRAG design change. It is not an active workstream. Root goal embedding remains the scorer input.
 2.  **[ACTIVE — G1e KEEP] Trajectory Awareness (Upgrade 2):** Production `w_t=−0.05` (2026-07-19). G1d DROP remains historical for positive weights. Magnitude tuning paused open — see [`plan_reuse_tuning.md`](plan_reuse_tuning.md), [`G1E_POLARITY_PROTOCOL.md`](G1E_POLARITY_PROTOCOL.md).
 3.  **[COMPLETE] Dynamic Graph Learning:** Graph edges are dynamically updated via `GraphRefiner` based on execution success. Edge weights are adjusted using a logistic learning rule (learning_rate=0.2) that rewards successful trajectories and penalizes failures. Graph density metrics (node count, edge count, avg weight, activations) are logged in `grag_benchmark.jsonl`.
 4.  **[STUB — optional future expansion] Code Modification:** `CodeModifyTool` needs a functional `apply_diff` before self-building claims apply.
@@ -117,6 +117,7 @@ Full run archive: [`benchmark_results.md`](benchmark_results.md). **Always cite 
 ---
 
 ## 7. Changelog
+- **2026-09-25:** Status reconciliation. Embed path is `InferenceClient` (`llama_cpp` when unset). Production `w_t=-0.05` unchanged. Hierarchical subgoals marked deferred.
 - **2026-06-17:** Benchmark §5 split canonical vs. sandbox runs; trajectory audit updated to PARTIAL; corpus-qualified validation status.
 - **2026-03-10:** Integrated `ConstraintChecker` into retrieval pipeline. Added `ScoreBreakdown` for explainable retrieval.
 - **2026-03-09:** Config Locking: weights moved to `retrieval_config.json`.

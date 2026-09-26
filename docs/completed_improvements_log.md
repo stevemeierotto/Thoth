@@ -1,6 +1,19 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-15 (inference default → llama_cpp)
+Last updated: 2026-09-25 (documentation reconciliation — no runtime change)
+
+## 2026-09-25 — Documentation status reconciliation
+
+**Status:** ✅ Docs only. No feature, scoring, retrieval, or test changes.
+
+Reconciled status text with `main` at `de6811b` and engine gitlink `a308ef4`.
+
+- Shipped Decision Tape uses committed `EventType`s only. September 12 `COGNITION_STAGE` / `STRATEGY_INJECTION` / `TRAJECTORY_INJECTION` draft rows below are marked superseded. They were never committed to `controller_event.h`. The Phase 2b test names in that draft (`testPhase2bCognitionStagesBeforePlanCreated`, `testPhase2bAbortDuringPlanningDiscardsCommit`) are not present in `tests/unit_tests.cpp` on this tree. `formatCognitionStageLine` remains in `includes/cognitive_status_display.h` with no callers. It was left in place because this pass does not change code.
+- CSG-A automatic cross-restart chat retrieval is deferred (Engine refactor out of that stage). The goal-banner **Run** button is the supported path. The 2026-09-13 A.4 observation stays in the record as history.
+- Headers that still said Phase C/D/D5, M1, ALP, or B.4 were waiting were updated to point at the later seal or acceptance without deleting the lock-time wording.
+- `docker/seed_rag/AGENTS.md` and `docker/seed_rag/GRAG.md` were aligned so the retrieval corpus does not state the 2026-07-15 snapshot as current truth.
+
+---
 
 Source: previous `docs/improvements.md` and `docs/next_steps.md` plan entries marked completed
 
@@ -36,9 +49,8 @@ scenario: chat responses were coherent, used RAG files, did not expose retrieval
 scaffold, and showed almost no hallucination. The locked CSG-B protocol now
 records B.4 as manually accepted.
 
-**CSG-A A.4:** 🔶 Not closed. The post-restart banner persists and the GUI sends
-`active_goal`, but observed chat retrieval does not use it; live diagnostics must
-show `goal_source: "session"` and non-zero directional magnitude before close-out.
+**CSG-A A.4:** 🔶 Observation on 2026-09-13: the post-restart banner persists and the GUI sends
+`active_goal`, but observed chat retrieval does not use it. **Superseded 2026-09-25:** that automatic path is deferred because it needs an Engine refactor. It is not an open integration task. Supported behavior is the banner **Run** button.
 
 **ALP-G:** ⏸️ Full ALP1 certification is owner-deferred. G2b/G3 manual operator
 sign-off has not been performed; the existing automated harness remains available.
@@ -77,8 +89,8 @@ sign-off has not been performed; the existing automated harness remains availabl
 | Item | Status |
 |------|--------|
 | Cognitive State panel (decision tape) | ✅ |
-| Phase 1 optimistic “Planning started” + Phase 2a `COGNITION_STAGE` schema | ✅ |
-| Phase 2b live mid-plan stages (unlock / epoch / planner progress) | ✅ |
+| Phase 1 optimistic “Planning started” + Phase 2a `COGNITION_STAGE` schema | Recorded 2026-09-12; **superseded 2026-09-25** — those event types are not in the committed engine |
+| Phase 2b live mid-plan stages (unlock / epoch / planner progress) | Recorded 2026-09-12; **superseded 2026-09-25** with the uncommitted event-type draft |
 | Engine image rebuild for remote live stages | ✅ (ops) |
 | GTK-0 Class A–D hardening (buttons, mins, FitInside defer) | ✅ (partial; nested B/C remained until AUI) |
 | Observability → top-level AUI panes; tape → `wxTextCtrl` | ✅ (hosting → notebook) |
@@ -119,9 +131,9 @@ sign-off has not been performed; the existing automated harness remains availabl
 
 ## 2026-09-12 — Cognitive State Phase 2b (live mid-plan COGNITION_STAGE)
 
-**Status:** ✅ Implemented
+**Status:** Recorded 2026-09-12 as implemented. **Superseded 2026-09-25:** `COGNITION_STAGE` is not in committed `controller_event.h`. The shipped Decision Tape is `de6811b`. The behavior paragraph below is the historical draft, not the current contract.
 
-**Behavior:** `ExecutiveController` unlocks around plan-reuse search and `create_plan`; `planning_epoch_` + `planning_in_progress_` commit/discard aborted or superseded plans; progress hook on `IPlanner` → live `COGNITION_STAGE` for strategy / trajectory / llm_plan during planning (and reflection). Planner never takes controller `mutex_`.
+**Behavior (historical draft):** `ExecutiveController` unlocks around plan-reuse search and `create_plan`; `planning_epoch_` + `planning_in_progress_` commit/discard aborted or superseded plans; progress hook on `IPlanner` → live `COGNITION_STAGE` for strategy / trajectory / llm_plan during planning (and reflection). Planner never takes controller `mutex_`.
 
 **Tests:** `testPhase2bCognitionStagesBeforePlanCreated`, `testPhase2bAbortDuringPlanningDiscardsCommit` (`THOTH_PHASE2B_ONLY=1`)
 
@@ -131,7 +143,7 @@ sign-off has not been performed; the existing automated harness remains availabl
 
 ## 2026-09-12 — Cognitive State Phase 1 + 2a (optimistic Planning + COGNITION_STAGE schema)
 
-**Status:** ✅ Implemented (Phase 2b live mid-plan emits — see entry above)
+**Status:** Phase 1 optimistic “Planning started” remains part of the shipped tape. **Phase 2a `COGNITION_STAGE` schema is superseded 2026-09-25** — that event type was not committed. See the reconciliation entry at the top of this log.
 
 **Phase 1:** Goal submit (`/goal`, Run Goal, Revise Goal) immediately paints **Planning started** on the Cognitive State panel (clears prior tape); consecutive duplicate Engine echo is suppressed; paint forced before deferred `RefreshAllPanels`.
 
@@ -141,7 +153,7 @@ sign-off has not been performed; the existing automated harness remains availabl
 
 ## 2026-09-12 — GUI cognitive-state panel (goal / executive decision tape)
 
-**Status:** ✅ Implemented (hosting later moved to top-level AUI — see Observability AUI entry)
+**Status:** ✅ Shipped panel. Hosting later moved to the Observability notebook. **2026-09-25:** the bullet that says the Engine emits `STRATEGY_INJECTION` / `TRAJECTORY_INJECTION` as controller events describes the uncommitted draft. The committed tape uses `PLAN_REUSE_INJECTION`, step events, `REFLECTION_REPLAN`, `STATE_CHANGED`, and related types in `controller_event.h`. `STEP_FAILED` does carry `next_action` and `timeout_ms`.
 
 **Problem:** During `/goal` runs, operators only saw chat “Waiting for Engine…” / thin status lines — not live cognitive decision points (trajectory/strategy inject, plan context, step revise vs fail, reflection score).
 
@@ -231,7 +243,7 @@ sign-off has not been performed; the existing automated harness remains availabl
 
 ## 2026-07-30 — CSG-B chat response regurgitation handling
 
-**Status:** ✅ B.1–B.3 implemented · B.4 manual verify pending
+**Status:** ✅ B.1–B.3 implemented · B.4 manual verify pending at the time of this entry. **Later:** B.4 accepted 2026-09-13 (see the entry above).
 
 **Protocol:** [`CHAT_RESPONSE_REGURGITATION_PROTOCOL.md`](CHAT_RESPONSE_REGURGITATION_PROTOCOL.md)
 
