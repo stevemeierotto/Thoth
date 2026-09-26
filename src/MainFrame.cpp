@@ -1456,7 +1456,11 @@ MainFrame::MainFrame()
     wxSplitterWindow* ragSplit =
         new wxSplitterWindow(m_ragTab, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                              wxSP_LIVE_UPDATE | wxSP_3D);
-    ragSplit->SetMinimumPaneSize(80);
+    // Heading + 2×2 slots + Send to Engine. GTK theme padding can make the
+    // button ~40px; 180 leaves slack. Applied to both panes so inventory
+    // cannot collapse either.
+    constexpr int kNotesPanePx = 180;
+    ragSplit->SetMinimumPaneSize(kNotesPanePx);
 
     wxPanel* corpusPanel = new wxPanel(ragSplit, wxID_ANY);
     wxBoxSizer* corpusSizer = new wxBoxSizer(wxVERTICAL);
@@ -1550,7 +1554,9 @@ MainFrame::MainFrame()
     ragSizer->Add(createSlotSizer(m_ragFileSlot3, m_ragDeleteBtn3, 3), 1, wxEXPAND);
     ragSizer->Add(createSlotSizer(m_ragFileSlot4, m_ragDeleteBtn4, 4), 1, wxEXPAND);
 
-    localNotesOuter->Add(ragSizer, 1, wxEXPAND | wxLEFT | wxRIGHT, 5);
+    // Proportion 0: the slot grid keeps its own height and cannot push
+    // Send to Engine past the bottom of the pane.
+    localNotesOuter->Add(ragSizer, 0, wxEXPAND | wxLEFT | wxRIGHT, 5);
 
     m_sendToEngineBtn = new wxButton(localNotesPanel,
                                       wxID_ANY,
@@ -1559,12 +1565,38 @@ MainFrame::MainFrame()
         wxString::FromUTF8("Create an Engine corpus document from a Local Note"));
     localNotesOuter->Add(m_sendToEngineBtn, 0, wxEXPAND | wxALL, 5);
     m_sendToEngineBtn->Bind(wxEVT_BUTTON, &MainFrame::OnSendToEngine, this);
+    localNotesOuter->AddStretchSpacer(1);
 
     localNotesPanel->SetSizer(localNotesOuter);
-    localNotesPanel->SetMinSize(wxSize(240, 140));
+    localNotesPanel->SetMinSize(wxSize(240, kNotesPanePx));
 
     ragSplit->SplitHorizontally(corpusPanel, localNotesPanel);
-    ragSplit->SetSashPosition(180);
+    // Keep the notes pane at least kNotesPanePx. Extra splitter height stays
+    // with the inventory (gravity 1) so a taller main window does not depend
+    // on the notes pane to reveal the button.
+    ragSplit->SetSashGravity(1.0);
+    auto notesPaneTooShort = [ragSplit](int height) {
+        constexpr int kNotesPanePx = 180;
+        const int sash = ragSplit->GetSashSize();
+        const int bottom = height - sash - ragSplit->GetSashPosition();
+        if (bottom >= kNotesPanePx) {
+            return;
+        }
+        const int pos = height - kNotesPanePx - sash;
+        if (pos >= ragSplit->GetMinimumPaneSize()) {
+            ragSplit->SetSashPosition(pos);
+        }
+    };
+    ragSplit->Bind(wxEVT_SIZE, [ragSplit, notesPaneTooShort](wxSizeEvent& evt) {
+        evt.Skip();
+        static bool adjusting = false;
+        if (adjusting) {
+            return;
+        }
+        adjusting = true;
+        notesPaneTooShort(evt.GetSize().GetHeight());
+        adjusting = false;
+    });
 
     ragTabOuter->Add(ragSplit, 1, wxEXPAND);
     m_ragTab->SetSizer(ragTabOuter);
@@ -1619,8 +1651,8 @@ MainFrame::MainFrame()
         .Bottom()
         .Name("SystemState")
         .Layer(1)
-        .BestSize(-1, 280)
-        .MinSize(-1, 200)
+        .BestSize(-1, 460)
+        .MinSize(-1, 420)
         .Caption("System State")
         .CloseButton(true)
         .Resizable(true)
