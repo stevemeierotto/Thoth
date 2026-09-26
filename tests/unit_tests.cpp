@@ -208,6 +208,29 @@ private:
     bool hadPrevious_ = false;
 };
 
+/** Captures one variable so a test can override it and put the suite isolation back. */
+struct EnvSnapshot {
+    bool had = false;
+    std::string value;
+
+    static EnvSnapshot capture(const char* key) {
+        EnvSnapshot snapshot;
+        if (const char* current = std::getenv(key)) {
+            snapshot.had = true;
+            snapshot.value = current;
+        }
+        return snapshot;
+    }
+
+    void restore(const char* key) const {
+        if (had) {
+            setenv(key, value.c_str(), 1);
+        } else {
+            unsetenv(key);
+        }
+    }
+};
+
 static bool testInferenceEndpointResolution() {
     bool ok = true;
 
@@ -5694,6 +5717,8 @@ static bool waitMsHarnessPlan(std::atomic<bool>& planTerminal, int timeoutMs = 1
 
 /** E1-12: harness helper path — plugin buildTestSuiteBenchmarkInputs → executeGoal → metrics/sidecar. */
 static bool testE1HarnessBenchmarkSmoke() {
+    const EnvSnapshot priorDev = EnvSnapshot::capture("THOTH_TEST_SUITE_DEV");
+    const EnvSnapshot priorMock = EnvSnapshot::capture("THOTH_MOCK_LLM");
     setenv("THOTH_TEST_SUITE_DEV", "1", 1);
     setenv("THOTH_MOCK_LLM", "true", 1);
 
@@ -5739,8 +5764,8 @@ static bool testE1HarnessBenchmarkSmoke() {
         fs::remove_all(logsDir);
         unsetenv("THOTH_COGNITIVE_METRICS_LOG");
         unsetenv("THOTH_TEST_SUITE_INDEX");
-        unsetenv("THOTH_MOCK_LLM");
-        unsetenv("THOTH_TEST_SUITE_DEV");
+        priorMock.restore("THOTH_MOCK_LLM");
+        priorDev.restore("THOTH_TEST_SUITE_DEV");
     };
 
     if (!finished) {
@@ -5914,6 +5939,8 @@ public:
 
 /** E1-14: robustness harness path — probe stack → execute_goal(attribution) → metrics/sidecar. */
 static bool testE1RobustnessBenchmarkSmoke() {
+    const EnvSnapshot priorDev = EnvSnapshot::capture("THOTH_TEST_SUITE_DEV");
+    const EnvSnapshot priorMock = EnvSnapshot::capture("THOTH_MOCK_LLM");
     unsetenv("THOTH_TEST_SUITE_DEV");
     setenv("THOTH_MOCK_LLM", "true", 1);
 
@@ -5953,7 +5980,8 @@ static bool testE1RobustnessBenchmarkSmoke() {
         std::cerr << "testE1RobustnessBenchmarkSmoke: index_hash empty after bind\n";
         fs::remove_all(logsDir);
         unsetenv("THOTH_COGNITIVE_METRICS_LOG");
-        unsetenv("THOTH_MOCK_LLM");
+        priorMock.restore("THOTH_MOCK_LLM");
+        priorDev.restore("THOTH_TEST_SUITE_DEV");
         return false;
     }
 
@@ -5988,7 +6016,8 @@ static bool testE1RobustnessBenchmarkSmoke() {
         fs::remove(cfg.database_path);
         fs::remove_all(logsDir);
         unsetenv("THOTH_COGNITIVE_METRICS_LOG");
-        unsetenv("THOTH_MOCK_LLM");
+        priorMock.restore("THOTH_MOCK_LLM");
+        priorDev.restore("THOTH_TEST_SUITE_DEV");
     };
 
     if (!finished) {
@@ -10087,6 +10116,8 @@ static bool testE1GragBenchmarkSmoke() {
     fs::create_directories(workspaceDir);
     fs::create_directories(logsDir);
 
+    const EnvSnapshot priorWorkspace = EnvSnapshot::capture("THOTH_WORKSPACE_PATH");
+    const EnvSnapshot priorProjectRoot = EnvSnapshot::capture("THOTH_PROJECT_ROOT");
     setenv("THOTH_WORKSPACE_PATH", workspaceDir.string().c_str(), 1);
     setenv("THOTH_PROJECT_ROOT", tempRoot.string().c_str(), 1);
 
@@ -10118,8 +10149,8 @@ static bool testE1GragBenchmarkSmoke() {
     run.bindIndex(index);
 
     auto cleanup = [&]() {
-        unsetenv("THOTH_WORKSPACE_PATH");
-        unsetenv("THOTH_PROJECT_ROOT");
+        priorWorkspace.restore("THOTH_WORKSPACE_PATH");
+        priorProjectRoot.restore("THOTH_PROJECT_ROOT");
         fs::remove_all(tempRoot);
     };
 
@@ -10603,7 +10634,7 @@ static bool testG1dTrajectoryAblationSmoke() {
 
     FileHandler fh;
     const fs::path corpusFile =
-        fs::path(fh.getProjectRoot()) / "agent_workspace" / "rag" / "g1d_unit_test_corpus.txt";
+        fs::path(fh.getRagDirectory()) / "g1d_unit_test_corpus.txt";
     fs::create_directories(corpusFile.parent_path());
     {
         std::ofstream out(corpusFile);
@@ -14460,6 +14491,8 @@ struct E2D3PluginWorkspaceGuard {
     fs::path workspace;
     std::string priorWorkspaceEnv;
     bool hadWorkspaceEnv = false;
+    EnvSnapshot priorDev;
+    EnvSnapshot priorMock;
 
     bool prepare(bool metricsOn, bool traceOn) {
         workspace = makeTempPath("thoth_e2_d3_plugin_workspace");
@@ -14478,6 +14511,8 @@ struct E2D3PluginWorkspaceGuard {
             hadWorkspaceEnv = true;
             priorWorkspaceEnv = prior;
         }
+        priorDev = EnvSnapshot::capture("THOTH_TEST_SUITE_DEV");
+        priorMock = EnvSnapshot::capture("THOTH_MOCK_LLM");
         setenv("THOTH_WORKSPACE_PATH", workspace.string().c_str(), 1);
         setenv("THOTH_TEST_SUITE_DEV", "1", 1);
         setenv("THOTH_MOCK_LLM", "true", 1);
@@ -14490,8 +14525,8 @@ struct E2D3PluginWorkspaceGuard {
         } else {
             unsetenv("THOTH_WORKSPACE_PATH");
         }
-        unsetenv("THOTH_TEST_SUITE_DEV");
-        unsetenv("THOTH_MOCK_LLM");
+        priorDev.restore("THOTH_TEST_SUITE_DEV");
+        priorMock.restore("THOTH_MOCK_LLM");
         fs::remove_all(workspace);
     }
 };
@@ -14851,6 +14886,8 @@ struct E2D4PluginWorkspaceGuard {
     fs::path workspace;
     std::string priorWorkspaceEnv;
     bool hadWorkspaceEnv = false;
+    EnvSnapshot priorDev;
+    EnvSnapshot priorMock;
 
     bool prepare() {
         workspace = makeTempPath("thoth_e2_d4_plugin_workspace");
@@ -14870,6 +14907,8 @@ struct E2D4PluginWorkspaceGuard {
             hadWorkspaceEnv = true;
             priorWorkspaceEnv = prior;
         }
+        priorDev = EnvSnapshot::capture("THOTH_TEST_SUITE_DEV");
+        priorMock = EnvSnapshot::capture("THOTH_MOCK_LLM");
         setenv("THOTH_WORKSPACE_PATH", workspace.string().c_str(), 1);
         setenv("THOTH_TEST_SUITE_DEV", "1", 1);
         setenv("THOTH_MOCK_LLM", "true", 1);
@@ -14884,8 +14923,8 @@ struct E2D4PluginWorkspaceGuard {
         } else {
             unsetenv("THOTH_WORKSPACE_PATH");
         }
-        unsetenv("THOTH_TEST_SUITE_DEV");
-        unsetenv("THOTH_MOCK_LLM");
+        priorDev.restore("THOTH_TEST_SUITE_DEV");
+        priorMock.restore("THOTH_MOCK_LLM");
         fs::remove_all(workspace);
     }
 };
@@ -18817,7 +18856,7 @@ static bool testAlpFOrphanAttachmentExcluded() {
     return true;
 }
 
-static bool testAlpEPickerExcludesNoOpSameHash() {
+static bool testAlpEPickerIncludesNoOpAndCreate() {
     using namespace Thoth;
     using namespace Thoth::LocalNoteEngineSync;
 
@@ -18828,8 +18867,17 @@ static bool testAlpEPickerExcludesNoOpSameHash() {
         "/host/b.md", "b.md", "create", "new_document_slot", "", "b.md", true});
 
     const auto picker = collectPickerCandidates(intents);
-    if (picker.size() != 1 || picker.front().host_path != "/host/b.md") {
-        std::cerr << "testAlpEPickerExcludesNoOpSameHash: expected only create candidate\n";
+    if (picker.size() != 2
+        || picker[0].host_path != "/host/a.md"
+        || picker[0].action != "no_op"
+        || picker[1].host_path != "/host/b.md"
+        || picker[1].action != "create") {
+        std::cerr << "testAlpEPickerIncludesNoOpAndCreate: expected no_op then create\n";
+        return false;
+    }
+    if (actionPickerLabel(picker[0].action) != "Already on Engine — confirm"
+        || actionPickerLabel(picker[1].action) != "Send") {
+        std::cerr << "testAlpEPickerIncludesNoOpAndCreate: labels wrong\n";
         return false;
     }
     return true;
@@ -18869,11 +18917,16 @@ static bool testAlpEPickerIncludesLinkOnly() {
         "/host/b.md", "b.md", "link_only", "hash_matches_committed", "doc-b", "b.md", true});
 
     const auto picker = collectPickerCandidates(intents);
-    if (picker.size() != 1 || picker.front().host_path != "/host/b.md") {
-        std::cerr << "testAlpEPickerIncludesLinkOnly: expected only link_only candidate\n";
+    if (picker.size() != 2
+        || picker[0].host_path != "/host/a.md"
+        || picker[0].action != "no_op"
+        || picker[1].host_path != "/host/b.md"
+        || picker[1].action != "link_only") {
+        std::cerr << "testAlpEPickerIncludesLinkOnly: expected no_op then link_only\n";
         return false;
     }
-    if (actionPickerLabel(picker.front().action) != "Attach to chat") {
+    if (actionPickerLabel(picker[0].action) != "Already on Engine — confirm"
+        || actionPickerLabel(picker[1].action) != "Attach to chat") {
         std::cerr << "testAlpEPickerIncludesLinkOnly: label wrong\n";
         return false;
     }
@@ -19438,10 +19491,15 @@ static bool testAlpEEgarOperatorLifecycle() {
         return fail("post-send dry_run must be no_op");
     }
     LocalNoteIntent noop_row;
+    noop_row.host_path = host_path.string();
     noop_row.action = noop_intent.action;
     noop_row.query_ok = true;
-    if (!collectPickerCandidates({noop_row}).empty()) {
-        return fail("picker must be empty after no_op reconcile");
+    const auto noop_picker = collectPickerCandidates({noop_row});
+    if (noop_picker.size() != 1 || noop_picker.front().action != "no_op") {
+        return fail("picker must offer no_op confirm after same-hash reconcile");
+    }
+    if (actionPickerLabel(noop_picker.front().action) != "Already on Engine — confirm") {
+        return fail("no_op picker label must be Already on Engine — confirm");
     }
 
     std::cout << "[ALP-E EGAR lifecycle] document_id=" << doc_id
@@ -19477,6 +19535,52 @@ static bool testAlpEDryRunIntentIntegration() {
         return false;
     }
     return true;
+}
+
+/**
+ * Isolate the default core suite from the developer machine.
+ *
+ * Workspace, logs, and .env are temporary. THOTH_PROJECT_ROOT stays the
+ * checkout so source-audit tests can still read this tree; the live corpus
+ * is not used because THOTH_WORKSPACE_PATH overrides it.
+ * THOTH_TEST_SUITE_DEV selects TfIdf embeddings and the in-process mock LLM.
+ * Inference backend and endpoint variables are left unset so resolution
+ * tests still observe the compiled Ollama default.
+ */
+static void installCoreTestIsolation() {
+    const FileHandler repoLocator;
+    const fs::path repoRoot = fs::path(repoLocator.getProjectRoot()).lexically_normal();
+
+    const fs::path root = makeTempPath("thoth-core-tests");
+    const fs::path workspace = root / "workspace";
+    const fs::path logs = root / "logs";
+    const fs::path rag = workspace / "rag";
+    const fs::path envFile = root / "empty.env";
+    fs::create_directories(rag);
+    fs::create_directories(logs);
+
+    {
+        std::ofstream fixture(rag / "core_suite_fixture.md");
+        fixture << "Thoth core-suite fixture.\n\n"
+                << "This small note exists only so bootstrap indexing has a "
+                << "deterministic corpus. It is not a live workspace document.\n";
+    }
+    {
+        std::ofstream envOut(envFile);
+        envOut << "# empty isolated env — do not load the repository .env\n";
+    }
+    fs::permissions(envFile, fs::perms::owner_read | fs::perms::owner_write);
+
+    setenv("THOTH_PROJECT_ROOT", repoRoot.string().c_str(), 1);
+    setenv("THOTH_WORKSPACE_PATH", workspace.string().c_str(), 1);
+    setenv("THOTH_LOGS_PATH", logs.string().c_str(), 1);
+    setenv("THOTH_ENV_PATH", envFile.string().c_str(), 1);
+    setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+
+    std::cerr << "[thoth-core-tests] isolated workspace=" << workspace << '\n'
+              << "[thoth-core-tests] isolated logs=" << logs << '\n'
+              << "[thoth-core-tests] isolated env=" << envFile << '\n'
+              << "[thoth-core-tests] project_root=" << repoRoot << '\n';
 }
 
 int main() {
@@ -19831,6 +19935,7 @@ int main() {
     std::cerr << failures << " GUI test(s) failed.\n";
     return 1;
 #else
+    installCoreTestIsolation();
     int failures = 0;
     if (!testRuntimeBootstrapLoadsEnv()) failures++;
     if (!testRuntimeBootstrapRespectsExistingEnv()) failures++;
@@ -20053,7 +20158,7 @@ int main() {
     if (!testAlpFLocalNoteDeleteLinkPersists()) failures++;
     if (!testAlpFMultiSessionSameDocument()) failures++;
     if (!testAlpFOrphanAttachmentExcluded()) failures++;
-    if (!testAlpEPickerExcludesNoOpSameHash()) failures++;
+    if (!testAlpEPickerIncludesNoOpAndCreate()) failures++;
     if (!testAlpEPickerIncludesRetryAndConflict()) failures++;
     if (!testAlpEPickerIncludesLinkOnly()) failures++;
     if (!testAlpEDryRunLinkOnlyForUnlinkedSession()) failures++;
