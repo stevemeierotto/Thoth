@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <deque>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -13,6 +14,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
 
 #if THOTH_HAS_GUI
@@ -18446,6 +18448,127 @@ static bool testAlpCSendPolicyNoOpOnSameHash() {
     return true;
 }
 
+static bool setUnixMtime(const fs::path& path, std::int64_t unix_sec) {
+    struct timespec times[2];
+    times[0].tv_sec = static_cast<time_t>(unix_sec);
+    times[0].tv_nsec = 0;
+    times[1].tv_sec = static_cast<time_t>(unix_sec);
+    times[1].tv_nsec = 0;
+    return utimensat(AT_FDCWD, path.c_str(), times, 0) == 0;
+}
+
+static bool testAlpLocalNoteUnixMtimeRequest() {
+    const fs::path dir = makeTempPath("thoth_alp_mtime");
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) {
+        std::cerr << "testAlpLocalNoteUnixMtimeRequest: mkdir failed\n";
+        return false;
+    }
+
+    const std::string older_bytes = "older local note body\n";
+    const std::string newer_bytes = "newer local note body\n";
+    const fs::path older_path = dir / "older.md";
+    const fs::path newer_path = dir / "newer.md";
+    const fs::path same_older_path = dir / "same-older.md";
+    const fs::path same_newer_path = dir / "same-newer.md";
+    const std::string same_bytes = "same hash local note\n";
+
+    auto write_file = [](const fs::path& path, const std::string& bytes) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << bytes;
+        return static_cast<bool>(out);
+    };
+    if (!write_file(older_path, older_bytes) || !write_file(newer_path, newer_bytes)
+        || !write_file(same_older_path, same_bytes) || !write_file(same_newer_path, same_bytes)) {
+        std::cerr << "testAlpLocalNoteUnixMtimeRequest: write failed\n";
+        fs::remove_all(dir);
+        return false;
+    }
+
+    constexpr std::int64_t kOlderUnix = 1'700'000'000LL;
+    constexpr std::int64_t kNewerUnix = 1'800'000'000LL;
+    constexpr std::int64_t kCommittedUnix = 1'750'000'000LL;
+    if (!setUnixMtime(older_path, kOlderUnix) || !setUnixMtime(newer_path, kNewerUnix)
+        || !setUnixMtime(same_older_path, kOlderUnix) || !setUnixMtime(same_newer_path, kNewerUnix)) {
+        std::cerr << "testAlpLocalNoteUnixMtimeRequest: utimensat failed\n";
+        fs::remove_all(dir);
+        return false;
+    }
+
+    auto expect_request = [&](const fs::path& path,
+                               std::int64_t unix_sec,
+                               const std::string& committed_hash,
+                               Thoth::AttachmentSendPolicy::SendAction expected,
+                               const char* label) -> bool {
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0 || static_cast<std::int64_t>(st.st_mtime) != unix_sec) {
+            std::cerr << "testAlpLocalNoteUnixMtimeRequest: " << label
+                      << " filesystem mtime mismatch\n";
+            return false;
+        }
+        std::string read_err;
+        const auto payload = Thoth::CorpusCreateLocal::readLocalNoteFile(path.string(), read_err);
+        if (!payload) {
+            std::cerr << "testAlpLocalNoteUnixMtimeRequest: " << label
+                      << " read failed: " << read_err << "\n";
+            return false;
+        }
+        if (payload->local_source_mtime_sec != unix_sec || payload->local_source_mtime_sec <= 0) {
+            std::cerr << "testAlpLocalNoteUnixMtimeRequest: " << label
+                      << " mtime " << payload->local_source_mtime_sec
+                      << " expected " << unix_sec << "\n";
+            return false;
+        }
+        Thoth::CorpusCreateGuiOptions options;
+        const auto request = Thoth::CorpusCreateLocal::makeCreateRequest(
+            *payload, "default", path.string(), options, true);
+        const auto body = Thoth::CorpusCreate::makeCreateDocumentRequestBodyAlp(request);
+        if (!body.contains("local_source_mtime")
+            || !body["local_source_mtime"].is_number_integer()
+            || body["local_source_mtime"].get<std::int64_t>() != unix_sec) {
+            std::cerr << "testAlpLocalNoteUnixMtimeRequest: " << label
+                      << " JSON local_source_mtime missing or wrong\n";
+            return false;
+        }
+
+        Thoth::AttachmentSendPolicy::PolicyInput in;
+        in.document_exists = true;
+        in.content_hash = payload->content_hash;
+        in.local_source_mtime_sec = payload->local_source_mtime_sec;
+        Thoth::AttachmentSendPolicy::CommittedRevision committed;
+        committed.content_hash = committed_hash;
+        committed.indexed_at_ms = kCommittedUnix * 1000;
+        in.committed = committed;
+        const auto result = Thoth::AttachmentSendPolicy::evaluate(in);
+        if (result.action != expected) {
+            std::cerr << "testAlpLocalNoteUnixMtimeRequest: " << label
+                      << " action " << Thoth::AttachmentSendPolicy::actionToString(result.action)
+                      << "\n";
+            return false;
+        }
+        return true;
+    };
+
+    const std::string older_hash = Thoth::sha256Hex(older_bytes);
+    const std::string newer_hash = Thoth::sha256Hex(newer_bytes);
+    const std::string same_hash = Thoth::sha256Hex(same_bytes);
+    const bool ok =
+        expect_request(older_path, kOlderUnix, "committed-other-hash",
+                       Thoth::AttachmentSendPolicy::SendAction::Conflict, "older")
+        && expect_request(newer_path, kNewerUnix, "committed-other-hash",
+                          Thoth::AttachmentSendPolicy::SendAction::NewRevision, "newer")
+        && expect_request(same_older_path, kOlderUnix, same_hash,
+                          Thoth::AttachmentSendPolicy::SendAction::NoOp, "same-older")
+        && expect_request(same_newer_path, kNewerUnix, same_hash,
+                          Thoth::AttachmentSendPolicy::SendAction::NoOp, "same-newer")
+        && older_hash != newer_hash
+        && older_hash != same_hash;
+
+    fs::remove_all(dir, ec);
+    return ok;
+}
+
 static bool testAlpCSendPolicyConflictOnOldMtime() {
     Thoth::AttachmentSendPolicy::PolicyInput in;
     in.document_exists = true;
@@ -20274,6 +20397,7 @@ int main() {
     if (!testAlpD1RollbackRestoresM0()) failures++;
     if (!testAlpCSendPolicyNoOpOnSameHash()) failures++;
     if (!testAlpCSendPolicyConflictOnOldMtime()) failures++;
+    if (!testAlpLocalNoteUnixMtimeRequest()) failures++;
     if (!testAlpCCreateAlpPathNoSuffix()) failures++;
     if (!testAlpCMisconfiguredRejectsCreate()) failures++;
     if (!testAlpCRegistryEnsureDocumentUniqueCanonical()) failures++;

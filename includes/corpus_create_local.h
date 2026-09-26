@@ -60,8 +60,12 @@ inline std::optional<LocalNoteFilePayload> readLocalNoteFile(const std::string& 
     std::error_code mtime_ec;
     const auto ftime = std::filesystem::last_write_time(source_path, mtime_ec);
     if (!mtime_ec) {
+        // file_time_type does not use the Unix epoch on every standard library.
+        // clock_cast yields system_clock time without assuming the clocks match.
+        const auto system_time =
+            std::chrono::clock_cast<std::chrono::system_clock>(ftime);
         payload.local_source_mtime_sec = static_cast<std::int64_t>(
-            std::chrono::duration_cast<std::chrono::seconds>(ftime.time_since_epoch())
+            std::chrono::duration_cast<std::chrono::seconds>(system_time.time_since_epoch())
                 .count());
     }
     return payload;
