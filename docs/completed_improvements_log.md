@@ -1,6 +1,18 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-25 (documentation reconciliation — no runtime change)
+Last updated: 2026-09-25 (R5 Verify Record)
+
+## 2026-09-25 — GUI Restoration R5 verified
+
+**Status:** ✅ Verified. Documentation only. No source, test, Docker, volume, or corpus changes.
+
+Live Remote GUI checks on 2026-09-25 against Engine `/version` `{"engine":"0.2","git":"unknown","protocol":"v1"}`, container `thoth-thoth-engine-1` (`4dc93c83cdaa`), image `thoth-engine:local` `sha256:1f625454c661353f4edbdc9356ad1f77453ff37b22e1b651ce28d05f804ab8c1`. Parent `dd4c24f520e1ab253f19e4d4867620f2d6a15e95`. Engine gitlink `a308ef493cb2a1ccdb4c59c898bb068575941803`.
+
+**R5 VERIFIED.** V1–V5 and V8 passed. V6 helpers were present and were not re-executed. V7 was not required. `HOWTO.md` was in the Engine inventory and was absent from the observed scope, candidate set, and grounded set. Session A `session-1789096382966-5978ca5f` / `req-1790391699780-3` cleared when session B `session-1788628805319-1bc0b0a8` was selected. Follow-up `req-1790391883509-4` for A while B was current was logged `active=NO` and was not shown on B’s panel.
+
+Record: [`GUI_RESTORATION_PROTOCOL.md`](GUI_RESTORATION_PROTOCOL.md) § Phase R5 Verify Record. R6 closeout was not part of this seal.
+
+---
 
 ## 2026-09-25 — Documentation status reconciliation
 

@@ -1,7 +1,7 @@
 # GUI Functional Restoration Protocol
 
 **Document type:** Focused restoration protocol (workflows first)  
-**Status:** R1 🔒 · R1.5 🔒 ✅ · **R2 🔒 Verify ✅ 2026-07-22** · **R3 🔒 Implement ✅** (Verify 🔶) · **R4 🔒 Implement ✅** (Verify 🔶 2026-07-24) · **R5 🔒 Implement ✅ 2026-07-23** (Verify pending)  
+**Status:** R1 🔒 · R1.5 🔒 ✅ · **R2 🔒 Verify ✅ 2026-07-22** · **R3 🔒 Implement ✅** (Verify 🔶) · **R4 🔒 Implement ✅** (Verify 🔶 2026-07-24) · **R5 🔒 Implement ✅ 2026-07-23** · **Verify ✅ 2026-09-25**  
 **Created:** 2026-07-21  
 **Refined:** 2026-07-21 (R1.5 complete; **R2 Engine Indexing Honesty** refined — ready for Lock R2)  
 **Phase R1 locked:** 2026-07-21  
@@ -585,7 +585,47 @@ Do not start **R5** until **R4 Verify** is approved.
 
 ## Phase R5 — Retrieval Verification & Honest Diagnostics
 
-**Status:** 🔒 **Locked 2026-07-23** · **Implemented ✅ 2026-07-23** · Verify pending
+**Status:** 🔒 **Locked 2026-07-23** · **Implemented ✅ 2026-07-23** · **Verify ✅ 2026-09-25**
+
+### Phase R5 Verify Record ✅
+
+| Field | Value |
+|-------|-------|
+| Verified | **2026-09-25** |
+| Overall | **R5 VERIFIED** |
+| Parent | `dd4c24f520e1ab253f19e4d4867620f2d6a15e95` |
+| `external/basic_agent` | `a308ef493cb2a1ccdb4c59c898bb068575941803` |
+| Engine `/version` | `{"engine":"0.2","git":"unknown","protocol":"v1"}` |
+| Container | `thoth-thoth-engine-1` (`4dc93c83cdaa`) |
+| Image | `thoth-engine:local` `sha256:1f625454c661353f4edbdc9356ad1f77453ff37b22e1b651ce28d05f804ab8c1` (created 2026-09-16; running during both checks) |
+| GUI | Existing debug `thoth-control-panel` at `THOTH_ENGINE_URL=http://127.0.0.1:8090`. No rebuild, reseed, or attachment edits |
+| R5-V1 | **PASS** — Inventory |
+| R5-V2 | **PASS** — Scope |
+| R5-V3 | **PASS** — Candidate |
+| R5-V4 | **PASS** — Grounded |
+| R5-V5 | **PASS** — Cross-session / tab honesty |
+| R5-V6 | **PASS** — helpers present in `tests/unit_tests.cpp` (`testGuiR5RetrievalSessionGate`, `testGuiR5ScopeGroundingDisplay`, `testGuiR5CorpusInventoryLabel`). **Not re-executed** during this verification |
+| R5-V7 | **NOT REQUIRED** |
+| R5-V8 | **PASS** — Corpus wording |
+
+Live checks used existing indexed documents on the running Engine. Inventory, scope, candidates, and grounded content were different sets.
+
+**Inventory (V1 / V8).** RAG Files tab wording: `Engine inventory (read-only — not session attachments)` and `Engine inventory (unscoped)`. Rows are `NAME · id=<prefix> · indexed · N chunks`. `GET /v1/rag/corpus` returned 10 indexed documents. Photographed counts that matched the API included `COGNATE_V2.md` 41, `EGAR.md` 95, `HOWTO.md` 7, `completed_improvements_log.md` 13, `architectural_facts.md` 32, `improvements.md` 49, `GRAG.md` 17, `README.md` 37. `cognate.md` and `VERIFIED_BASELINE.md` were also in the API list. The list is not worded as the injected set.
+
+**Scope / candidate / grounded (V2–V4), first live pass.** Chat on `session-1789096382966-5978ca5f`. Post-gate `RETRIEVAL_DIAGNOSTICS` `request_id` `req-1790391130511-2`. Envelope `session_id` was that session. Scope `active_context_key` matched it; `allowed_tiers` was `session_attachment`; `selected_documents` were `EGAR.md`, `GRAG.md`, `README.md`, `architectural_facts.md`. Post-gate candidates were five chunks from `EGAR.md`, `README.md`, and `GRAG.md` only. Grounding was `grounded=true`, `grounding_mode=retrieved_context`, `grounding_decision_reason=injected_meaningful_hits`, document names `EGAR.md`, `EGAR.md`, `README.md`, `README.md`, `GRAG.md`. **`HOWTO.md` was in the Engine inventory and was the subject of the question. It was not in the retrieval scope, the candidate set, or the grounded set.** The GUI applied both diagnostics events while that chat was current (`evSid` = `curSid`, `active=YES`).
+
+**Cross-session (V5), second live pass.**
+
+| | Session |
+|--|---------|
+| **A** | `session-1789096382966-5978ca5f` (“In completed_improvements_log.md, what …”) |
+| **B** | `session-1788628805319-1bc0b0a8` (“/goal Summarize how EGAR and GRAG wo…”) |
+
+While A was selected, the GRAG Diagnostics tab showed `request_id: req-1790391699780-3`, `Grounded layer — grounded=true · mode=retrieved_context`, `Alpha: 1.00`, `Magnitude ||G-C||: 0.664`, `Mode: GRAG`, and `Candidate layer (pre-grounding scores — not injected):`.
+
+After switching to B, the banner read `Current Goal: Use the attached files to answer`. The GRAG tab no longer showed A’s request id or `grounded=true`. It showed `N/A (chat)` and `Magnitude ||G-C||: 0.000`.
+
+A later diagnostics event for A arrived while B was current: `req-1790391883509-4`, envelope `session_id` `session-1789096382966-5978ca5f`. The GUI log was `evSid=session-1789096382966-5978ca5f`, `curSid=session-1788628805319-1bc0b0a8`, `active=NO`. B’s panel stayed `N/A (chat)` and magnitude `0.000`. That request id was not displayed.
 
 ### Phase R5 Implement Record
 
@@ -690,7 +730,7 @@ Presentation, labeling, correlation, minimal observability on SSE (`session_id`)
 
 ### STOP gate
 
-Do not start **R6** until **R5 Verify** is approved.
+**R5 Verify ✅ 2026-09-25.** That seal does not close **R6**. R6 closeout remains a separate approval.
 
 ### Human approval requirement
 
@@ -700,7 +740,7 @@ Do not start **R6** until **R5 Verify** is approved.
 
 ## Phase R6 — End-to-End Functional Audit
 
-**Status:** Phase 0 Evidence ✅ 2026-07-24 · Implement pending
+**Status:** Phase 0 Evidence ✅ 2026-07-24 · Implement pending. **R5 prerequisite ✅ 2026-09-25.** This line does not close R6.
 
 ### Phase R6 Phase 0 Evidence Record ✅
 
@@ -769,7 +809,7 @@ Lock R6 → Implement (if any) → closeout approval.
 | Code changes | **Forbidden** until phase locked and `AGENTS.md` implement approval |
 | Normative companion | `GUI_integration.md` (architecture); this doc (function) |
 
-**Next human action:** **R5 Verify** (R5-V1–V8) · optional **R4 Verify ✅** · optional **R3 Verify ✅** sign-off.
+**Next human action:** R6 closeout remains separate (not started by the R5 seal). Optional **R4 Verify ✅** and **R3 Verify ✅** sign-off are still open.
 
 ---
 
