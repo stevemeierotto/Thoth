@@ -101,8 +101,15 @@ private:
     nlohmann::json fetchResearchCollection(const char* path) const;
     nlohmann::json fetchGraphStatisticsResource() const;
 
-    /** First use: /health + /ready; caches result. No retries. */
+    /**
+     * Probe /health + /ready unless a successful result is already cached.
+     * A failed probe is not latched. A later request-path transport failure
+     * clears a cached success so the next operation probes again.
+     */
     bool ensureReady(std::string& error_out);
+
+    /** Drop cached readiness and capability flags. Does not retry the caller. */
+    void invalidateTransientReady();
 
     Thoth::OperationResult controlPost(const char* path_suffix, const char* op_name,
                                        const char* operation);

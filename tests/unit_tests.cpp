@@ -1613,6 +1613,128 @@ static bool testRemoteAgentBackendEmptyUrlOffline() {
     }
 }
 
+static bool corpusListsDoc(const nlohmann::json& body, const char* id) {
+    if (!body.is_object() || !body.contains("documents") || !body["documents"].is_array()) {
+        return false;
+    }
+    for (const auto& doc : body["documents"]) {
+        if (doc.is_object() && doc.value("id", "") == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Same RemoteAgentBackend recovers after a failed startup probe, then again after a later outage. */
+static bool testRemoteAgentBackendReadyRecovery() {
+    httplib::Server server;
+    std::atomic<int> health_probes{0};
+    server.Get("/health", [&](const httplib::Request&, httplib::Response& res) {
+        health_probes.fetch_add(1);
+        res.set_content("ok", "text/plain");
+    });
+    server.Get("/ready", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(
+            R"({"status":"ready","capabilities":["chat","goals","control","ingest"]})",
+            "application/json");
+    });
+    server.Get("/v1/rag/corpus", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(
+            R"({"schema_version":1,"documents":[{"id":"doc-g3","name":"g3-alpha.md","status":"indexed"}]})",
+            "application/json");
+    });
+
+    const int port = server.bind_to_any_port("127.0.0.1");
+    if (port <= 0) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: bind failed\n";
+        return false;
+    }
+
+    auto wait_running = [&]() {
+        for (int i = 0; i < 300 && !server.is_running(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return server.is_running();
+    };
+    std::thread accept_thread;
+    auto listen = [&]() {
+        if (accept_thread.joinable()) {
+            accept_thread.join();
+        }
+        accept_thread = std::thread([&]() { server.listen_after_bind(); });
+        return wait_running();
+    };
+    auto halt = [&]() {
+        if (server.is_running()) {
+            server.stop();
+        }
+        if (accept_thread.joinable()) {
+            accept_thread.join();
+        }
+    };
+
+    RemoteAgentBackend backend("http://127.0.0.1:" + std::to_string(port));
+
+    const auto while_down = backend.listCorpusDocuments();
+    if (corpusListsDoc(while_down, "doc-g3") || health_probes.load() != 0) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: down-start should fail before /health\n";
+        halt();
+        return false;
+    }
+
+    if (!listen()) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: listen failed\n";
+        halt();
+        return false;
+    }
+    const int probes_after_up = health_probes.load();
+    const auto recovered = backend.listCorpusDocuments();
+    if (!corpusListsDoc(recovered, "doc-g3") || health_probes.load() <= probes_after_up) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: same backend did not re-probe and recover\n";
+        halt();
+        return false;
+    }
+    if (!backend.capabilities().supportsIngest) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: ingest capability missing after ready\n";
+        halt();
+        return false;
+    }
+
+    const int probes_while_ready = health_probes.load();
+    halt();
+    const auto during_outage = backend.listCorpusDocuments();
+    if (corpusListsDoc(during_outage, "doc-g3")) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: outage returned cached corpus\n";
+        return false;
+    }
+    if (health_probes.load() != probes_while_ready) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: cached success still probed before the failed GET\n";
+        return false;
+    }
+    if (backend.capabilities().supportsIngest) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: ingest flag survived the outage\n";
+        return false;
+    }
+
+    if (!server.bind_to_port("127.0.0.1", port) || !listen()) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: rebind failed\n";
+        halt();
+        return false;
+    }
+    const int probes_before_return = health_probes.load();
+    const auto after_return = backend.listCorpusDocuments();
+    halt();
+    if (!corpusListsDoc(after_return, "doc-g3") || health_probes.load() <= probes_before_return) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: return trip did not re-probe\n";
+        return false;
+    }
+    if (!backend.capabilities().supportsIngest) {
+        std::cerr << "testRemoteAgentBackendReadyRecovery: ingest not restored after return\n";
+        return false;
+    }
+    return true;
+}
+
 /**
  * Opt-in live check: set THOTH_REMOTE_LIVE_URL=http://127.0.0.1:8090
  * Skips (passes) when unset — not required for default suites / ctest -L pr.
@@ -19927,6 +20049,7 @@ int main() {
     int failures = 0;
     if (!testAgentInterfaceLifecycle()) failures++;
     if (!testRemoteAgentBackendEmptyUrlOffline()) failures++;
+    if (!testRemoteAgentBackendReadyRecovery()) failures++;
     if (!testRemoteAgentBackendLiveOptIn()) failures++;
     if (failures == 0) {
         std::cout << "All GUI tests passed.\n";

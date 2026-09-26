@@ -270,19 +270,30 @@ RemoteAgentBackend::HttpResult RemoteAgentBackend::httpPostJson(const std::strin
     return result;
 }
 
+void RemoteAgentBackend::invalidateTransientReady() {
+    std::lock_guard<std::mutex> lock(ready_mutex_);
+    ready_checked_ = false;
+    ready_ok_ = false;
+    ready_error_.clear();
+    events_sse_allowed_ = false;
+    ingest_allowed_ = false;
+    conversation_allowed_ = false;
+    strategies_allowed_ = false;
+    trajectories_allowed_ = false;
+    episodes_allowed_ = false;
+    graph_stats_allowed_ = false;
+}
+
 bool RemoteAgentBackend::ensureReady(std::string& error_out) {
     bool just_became_ready = false;
     try {
         {
             std::lock_guard<std::mutex> lock(ready_mutex_);
-            if (ready_checked_) {
-                if (!ready_ok_) {
-                    error_out = ready_error_;
-                }
-                return ready_ok_;
+            if (ready_checked_ && ready_ok_) {
+                return true;
             }
 
-            ready_checked_ = true;
+            ready_checked_ = false;
             ready_ok_ = false;
             events_sse_allowed_ = false;
             ingest_allowed_ = false;
@@ -367,6 +378,7 @@ bool RemoteAgentBackend::ensureReady(std::string& error_out) {
             graph_stats_allowed_ = false;
             }
 
+            ready_checked_ = true;
             ready_ok_ = true;
             ready_error_.clear();
             just_became_ready = true;
@@ -583,6 +595,7 @@ Thoth::OperationResult RemoteAgentBackend::processInput(const std::string& input
         const long chat_timeout = resolveRemoteRequestTimeoutSec(kChatTimeoutSec);
         const HttpResult http = httpPostJson("/v1/chat", req.dump(), chat_timeout);
         if (!http.transport_ok) {
+            invalidateTransientReady();
             const std::string msg = "[RemoteEngine] /v1/chat transport: " + http.transport_error;
             logRemoteError("processInput", msg);
             return Thoth::makeFailure(Thoth::kOpChat, "Chat failed", msg, true);
@@ -639,6 +652,7 @@ Thoth::OperationResult RemoteAgentBackend::executeGoal(const std::string& goal) 
         const long goals_timeout = resolveRemoteRequestTimeoutSec(kGoalsTimeoutSec);
         const HttpResult http = httpPostJson("/v1/goals", req.dump(), goals_timeout);
         if (!http.transport_ok) {
+            invalidateTransientReady();
             const std::string msg =
                 "[RemoteEngine] /v1/goals transport: " + http.transport_error;
             logRemoteError("executeGoal", msg);
@@ -701,6 +715,7 @@ Thoth::OperationResult RemoteAgentBackend::controlPost(const char* path_suffix,
         const std::string path = std::string("/v1/control/") + path_suffix;
         const HttpResult http = httpPostJson(path, "{}", kControlTimeoutSec);
         if (!http.transport_ok) {
+            invalidateTransientReady();
             const std::string msg =
                 std::string("[RemoteEngine] ") + path + " transport: " + http.transport_error;
             logRemoteError(op_name, msg);
@@ -772,6 +787,7 @@ nlohmann::json RemoteAgentBackend::fetchResearchCollection(const char* path) con
         }
         const HttpResult http = httpGet(path, ThothRemoteHttp::kHealthReadyTimeoutSec);
         if (!http.transport_ok) {
+            const_cast<RemoteAgentBackend*>(this)->invalidateTransientReady();
             logRemoteError("fetchResearchCollection",
                            std::string("[RemoteEngine] transport: ") + http.transport_error);
             return ResearchResources::unavailableFetchResult();
@@ -813,6 +829,7 @@ nlohmann::json RemoteAgentBackend::fetchGraphStatisticsResource() const {
         const HttpResult http =
             httpGet(GraphStatistics::kHttpPath, ThothRemoteHttp::kHealthReadyTimeoutSec);
         if (!http.transport_ok) {
+            const_cast<RemoteAgentBackend*>(this)->invalidateTransientReady();
             logRemoteError("fetchGraphStatisticsResource",
                            std::string("[RemoteEngine] transport: ") + http.transport_error);
             return GraphStatistics::unavailableFetchResult();
@@ -875,6 +892,7 @@ nlohmann::json RemoteAgentBackend::getLatestDecisionSummary() const {
         const HttpResult http = httpGet(Thoth::DecisionSummary::kHttpPath,
                                         ThothRemoteHttp::kHealthReadyTimeoutSec);
         if (!http.transport_ok) {
+            const_cast<RemoteAgentBackend*>(this)->invalidateTransientReady();
             logRemoteError("getLatestDecisionSummary",
                            "[RemoteEngine] diagnostics transport: " + http.transport_error);
             return Thoth::DecisionSummary::emptyV1Summary();
@@ -916,6 +934,7 @@ nlohmann::json RemoteAgentBackend::listCorpusDocuments() const {
         const HttpResult http = httpGet(Thoth::CorpusDocuments::kHttpPath,
                                         ThothRemoteHttp::kHealthReadyTimeoutSec);
         if (!http.transport_ok) {
+            const_cast<RemoteAgentBackend*>(this)->invalidateTransientReady();
             logRemoteError("listCorpusDocuments",
                            "[RemoteEngine] corpus transport: " + http.transport_error);
             return Thoth::CorpusDocuments::unavailableFetchResult();
@@ -996,6 +1015,7 @@ Thoth::OperationResult RemoteAgentBackend::unlinkSessionDocument(
                                              req.dump(),
                                              ThothRemoteHttp::kControlTimeoutSec);
         if (!http.transport_ok) {
+            invalidateTransientReady();
             return makeFailure(kOpUnlinkSessionDocument,
                                "Could not unlink document from chat",
                                "[RemoteEngine] unlink transport: " + http.transport_error,
@@ -1071,6 +1091,7 @@ Thoth::OperationResult RemoteAgentBackend::postCorpusDocumentRequest(
                                              req.dump(),
                                              ThothRemoteHttp::kControlTimeoutSec);
         if (!http.transport_ok) {
+            invalidateTransientReady();
             return makeFailure(dry_run ? kOpQueryDocumentIntent : CorpusCreate::kOperationName,
                                dry_run ? "Could not query send intent"
                                        : "Document could not be sent to Engine",
@@ -1137,6 +1158,9 @@ nlohmann::json RemoteAgentBackend::createConversationSession() {
         const HttpResult http = httpPostJson(Thoth::ConversationAuthority::kHttpPathSessions,
                                              "{}",
                                              ThothRemoteHttp::kControlTimeoutSec);
+        if (!http.transport_ok) {
+            invalidateTransientReady();
+        }
         if (!http.transport_ok || http.status < 200 || http.status >= 300) {
             logRemoteError("createConversationSession",
                            http.transport_ok ? formatHttpErrorMessage(http.status, http.body)
@@ -1213,6 +1237,7 @@ Thoth::OperationResult RemoteAgentBackend::appendConversationTurn(
                                              request_body,
                                              chat_timeout);
         if (!http.transport_ok) {
+            invalidateTransientReady();
             ChatSendTrace::log(
                 12, "engine_response",
                 "received=transport_error detail=" + http.transport_error);
@@ -1275,6 +1300,9 @@ nlohmann::json RemoteAgentBackend::getConversation(const std::string& session_id
         const std::string path =
             std::string(Thoth::ConversationAuthority::kHttpPathSessions) + "/" + session_id;
         const HttpResult http = httpGet(path, ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok) {
+            const_cast<RemoteAgentBackend*>(this)->invalidateTransientReady();
+        }
         if (!http.transport_ok || http.status < 200 || http.status >= 300) {
             return Thoth::ConversationAuthority::emptyConversation(session_id);
         }
@@ -1299,6 +1327,9 @@ nlohmann::json RemoteAgentBackend::getConversationSummary(const std::string& ses
         const std::string path = std::string(Thoth::ConversationAuthority::kHttpPathSessions) + "/"
                                  + session_id + "/summary";
         const HttpResult http = httpGet(path, ThothRemoteHttp::kHealthReadyTimeoutSec);
+        if (!http.transport_ok) {
+            const_cast<RemoteAgentBackend*>(this)->invalidateTransientReady();
+        }
         if (!http.transport_ok || http.status < 200 || http.status >= 300) {
             return Thoth::ConversationAuthority::makeSummaryResponse(session_id, "");
         }
