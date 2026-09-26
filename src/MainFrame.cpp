@@ -1507,36 +1507,46 @@ MainFrame::MainFrame()
             if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) return;
             auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
             if (static_cast<size_t>(index - 1) < session.ragFilePaths.size()) {
-                const std::string removed = session.ragFilePaths[static_cast<std::size_t>(index - 1)];
+                const std::size_t slot_index = static_cast<std::size_t>(index - 1);
+                const std::string removed = session.ragFilePaths[slot_index];
                 std::string document_id;
                 const auto cacheIt = session.localNoteEngine.find(removed);
                 if (cacheIt != session.localNoteEngine.end()
                     && !cacheIt->second.document_id.empty()) {
                     document_id = cacheIt->second.document_id;
                 }
-                session.ragFilePaths.erase(session.ragFilePaths.begin() + (index - 1));
-                session.localNoteEngine.erase(removed);
+                const bool linked = !document_id.empty();
+                Thoth::LocalNoteEngineSync::LocalNoteXDisposition effect;
+                if (linked) {
+                    // Engine session link is authoritative. Do not drop the slot
+                    // unless unlink succeeds.
+                    if (!agent || !agent->capabilities().supportsIngest || m_sessionId.empty()) {
+                        effect = Thoth::LocalNoteEngineSync::localNoteXAfterUnlinkAttempt(
+                            true, false, "Could not unlink document from chat");
+                    } else {
+                        const auto unlink =
+                            agent->unlinkSessionDocument(document_id, m_sessionId);
+                        effect = Thoth::LocalNoteEngineSync::localNoteXAfterUnlinkAttempt(
+                            true, unlink.success, unlink.user_message);
+                    }
+                } else {
+                    effect = Thoth::LocalNoteEngineSync::localNoteXAfterUnlinkAttempt(
+                        false, false, {});
+                }
+                if (!effect.remove_local_slot) {
+                    SetTransientStatus(wxString::FromUTF8(effect.status_message));
+                    return;
+                }
+                Thoth::LocalNoteEngineSync::eraseLocalNoteSlotIfAuthorized(
+                    session.ragFilePaths, session.localNoteEngine, slot_index, effect);
                 SaveChatSessions();
                 RefreshRagPanel();
                 if (agent
                     && Thoth::RemoteRagHonesty::shouldSyncRagFilesToBackend(agent->isRemote())) {
                     agent->setRagFiles(session.ragFilePaths);
                 }
-                // ALP amend: Local Note X also drops session↔document link so chat
-                // retrieval and Send-to-Engine eligibility reset for this session.
-                if (agent && agent->capabilities().supportsIngest && !document_id.empty()
-                    && !m_sessionId.empty()) {
-                    const auto unlink =
-                        agent->unlinkSessionDocument(document_id, m_sessionId);
-                    if (!unlink.success) {
-                        SetTransientStatus(wxString::FromUTF8(
-                            unlink.user_message.empty()
-                                ? "Local Note removed; Engine unlink failed"
-                                : unlink.user_message));
-                    } else {
-                        SetTransientStatus(wxString::FromUTF8(
-                            "Local Note removed and unlinked from this chat"));
-                    }
+                if (linked) {
+                    SetTransientStatus(wxString::FromUTF8(effect.status_message));
                 }
                 if (agent && agent->capabilities().supportsIngest) {
                     RefreshCorpusPanel();

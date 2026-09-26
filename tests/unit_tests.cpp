@@ -11,6 +11,7 @@
 #include <future>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -18799,6 +18800,190 @@ static bool waitAlpSpecificRevisionCommitted(const std::string& document_id,
     return false;
 }
 
+static bool testAlpFLocalNoteDeleteUnlinksSession() {
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+
+    const fs::path reg_path = Thoth::DocumentRegistry::defaultRegistryPath();
+    const fs::path reg_backup = reg_path.string() + ".bak." + std::to_string(getpid());
+    std::error_code ec;
+    const bool had_registry = fs::exists(reg_path, ec);
+    if (had_registry) {
+        fs::copy(reg_path, reg_backup, fs::copy_options::overwrite_existing, ec);
+    }
+    auto restore_registry = [&]() {
+        if (had_registry) {
+            fs::copy(reg_backup, reg_path, fs::copy_options::overwrite_existing, ec);
+            fs::remove(reg_backup, ec);
+        } else if (fs::exists(reg_path, ec)) {
+            fs::remove(reg_path, ec);
+        }
+    };
+    auto fail = [&](const char* msg) {
+        std::cerr << "testAlpFLocalNoteDeleteUnlinksSession: " << msg << "\n";
+        restore_registry();
+        return false;
+    };
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    FileHandler fh;
+    const std::string slot_name = "alp_f_unlink_" + std::to_string(getpid()) + ".md";
+    const fs::path attachment_path = Thoth::AlpStoragePaths::operatorAttachmentPath(slot_name);
+    if (fs::exists(attachment_path)) {
+        fs::remove(attachment_path);
+    }
+    const std::string body = "ALP-F selective unlink token ALPFUNLINK unique.\n";
+    const auto created = idx.createCorpusDocument(fh.getRagDirectory(),
+                                                slot_name,
+                                                body,
+                                                "session-alp-f-unlink-a");
+    if (!created.ok) {
+        fs::remove(attachment_path);
+        return fail("create failed");
+    }
+    if (!waitAlpCommittedRevision(created.document_id, idx)) {
+        fs::remove(attachment_path);
+        return fail("not committed");
+    }
+    const auto linked_b = idx.createCorpusDocument(fh.getRagDirectory(),
+                                                   slot_name,
+                                                   body,
+                                                   "session-alp-f-unlink-b");
+    if (!linked_b.ok || linked_b.document_id != created.document_id) {
+        fs::remove(attachment_path);
+        return fail("session B link failed");
+    }
+    if (!idx.getDocumentRegistry().hasSessionLink(created.document_id, "session-alp-f-unlink-a")
+        || !idx.getDocumentRegistry().hasSessionLink(created.document_id, "session-alp-f-unlink-b")) {
+        fs::remove(attachment_path);
+        return fail("expected both session links");
+    }
+    if (!fs::exists(attachment_path)) {
+        return fail("storage missing before unlink");
+    }
+    const std::string revision_before = created.revision_id;
+    if (!idx.unlinkSessionDocument(created.document_id, "session-alp-f-unlink-a")) {
+        fs::remove(attachment_path);
+        return fail("unlink returned false");
+    }
+    if (idx.getDocumentRegistry().hasSessionLink(created.document_id, "session-alp-f-unlink-a")) {
+        fs::remove(attachment_path);
+        return fail("session A link must be removed");
+    }
+    if (!idx.getDocumentRegistry().hasSessionLink(created.document_id, "session-alp-f-unlink-b")) {
+        fs::remove(attachment_path);
+        return fail("session B link must remain");
+    }
+    if (!fs::exists(attachment_path)) {
+        return fail("storage must remain");
+    }
+    std::ifstream reg_in(reg_path);
+    nlohmann::json registry;
+    reg_in >> registry;
+    bool document_remains = false;
+    bool revision_remains = false;
+    if (registry.contains("documents")) {
+        for (const auto& row : registry["documents"]) {
+            if (row.value("document_id", "") == created.document_id) {
+                document_remains = true;
+            }
+        }
+    }
+    if (registry.contains("revisions")) {
+        for (const auto& row : registry["revisions"]) {
+            if (row.value("document_id", "") == created.document_id
+                && row.value("revision_id", "") == revision_before
+                && row.value("state", "") == "committed") {
+                revision_remains = true;
+            }
+        }
+    }
+    fs::remove(attachment_path);
+    restore_registry();
+    if (!document_remains || !revision_remains) {
+        std::cerr << "testAlpFLocalNoteDeleteUnlinksSession: document or revision missing\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testLocalNoteXKeepsSlotWhenUnlinkFails() {
+    const std::string path = "/tmp/thoth-local-note-x-keep.md";
+    {
+        std::ofstream out(path);
+        out << "keep me\n";
+    }
+    std::vector<std::string> paths{path, "/tmp/other.md"};
+    std::map<std::string, Thoth::LocalNoteEngineInfo> cache;
+    cache[path].document_id = "doc-linked";
+    cache[path].revision_id = "rev-1";
+    cache[path].content_hash = "abc";
+    const auto paths_before = paths;
+    const auto cache_before = cache;
+
+    const auto failed = Thoth::LocalNoteEngineSync::localNoteXAfterUnlinkAttempt(
+        true, false, "Could not unlink document from chat");
+    if (failed.remove_local_slot) {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: failure must keep the slot\n";
+        fs::remove(path);
+        return false;
+    }
+    if (failed.status_message != "Could not unlink document from chat") {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: failure status missing\n";
+        fs::remove(path);
+        return false;
+    }
+    if (Thoth::LocalNoteEngineSync::eraseLocalNoteSlotIfAuthorized(
+            paths, cache, 0, failed)) {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: erase must not run\n";
+        fs::remove(path);
+        return false;
+    }
+    if (paths != paths_before || cache[path].document_id != cache_before.at(path).document_id
+        || cache[path].revision_id != "rev-1" || cache[path].content_hash != "abc"
+        || !fs::exists(path)) {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: local state changed\n";
+        fs::remove(path);
+        return false;
+    }
+
+    const auto ok = Thoth::LocalNoteEngineSync::localNoteXAfterUnlinkAttempt(true, true, {});
+    if (!ok.remove_local_slot
+        || ok.status_message != "Local Note removed and unlinked from this chat") {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: success disposition wrong\n";
+        fs::remove(path);
+        return false;
+    }
+    if (!Thoth::LocalNoteEngineSync::eraseLocalNoteSlotIfAuthorized(paths, cache, 0, ok)) {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: success must erase slot\n";
+        fs::remove(path);
+        return false;
+    }
+    if (std::find(paths.begin(), paths.end(), path) != paths.end() || cache.count(path) != 0) {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: slot/cache remained after success\n";
+        fs::remove(path);
+        return false;
+    }
+    if (!fs::exists(path)) {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: managed file must remain\n";
+        return false;
+    }
+
+    const auto host_only =
+        Thoth::LocalNoteEngineSync::localNoteXAfterUnlinkAttempt(false, false, "ignored");
+    if (!host_only.remove_local_slot || !host_only.status_message.empty()) {
+        std::cerr << "testLocalNoteXKeepsSlotWhenUnlinkFails: host-only must remove locally\n";
+        fs::remove(path);
+        return false;
+    }
+    fs::remove(path);
+    return true;
+}
+
 static bool testAlpFSessionLinkIsolation() {
     ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
     ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
@@ -20405,6 +20590,8 @@ int main() {
     if (!testAlpFLocalNoteDeleteLinkPersists()) failures++;
     if (!testAlpFMultiSessionSameDocument()) failures++;
     if (!testAlpFOrphanAttachmentExcluded()) failures++;
+    if (!testAlpFLocalNoteDeleteUnlinksSession()) failures++;
+    if (!testLocalNoteXKeepsSlotWhenUnlinkFails()) failures++;
     if (!testAlpEPickerIncludesNoOpAndCreate()) failures++;
     if (!testAlpEPickerIncludesRetryAndConflict()) failures++;
     if (!testAlpEPickerIncludesLinkOnly()) failures++;

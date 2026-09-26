@@ -535,6 +535,48 @@ inline bool syncSessionFromCorpusList(ChatSession& session,
     return changed;
 }
 
+/**
+ * Local Note X against Engine session-link authority.
+ * A linked note is removed from the GUI only after unlink succeeds.
+ * A host-only note (no document id) is removed locally.
+ */
+struct LocalNoteXDisposition {
+    bool remove_local_slot = false;
+    std::string status_message;
+};
+
+inline LocalNoteXDisposition localNoteXAfterUnlinkAttempt(
+    bool has_engine_document,
+    bool unlink_succeeded,
+    const std::string& failure_user_message) {
+    if (!has_engine_document) {
+        return {true, {}};
+    }
+    if (!unlink_succeeded) {
+        std::string message = failure_user_message;
+        if (message.empty()) {
+            message = "Could not unlink document from chat";
+        }
+        return {false, std::move(message)};
+    }
+    return {true, "Local Note removed and unlinked from this chat"};
+}
+
+/** Erase one slot and its cache only when disposition allows it. */
+inline bool eraseLocalNoteSlotIfAuthorized(
+    std::vector<std::string>& paths,
+    std::map<std::string, LocalNoteEngineInfo>& cache,
+    std::size_t index,
+    const LocalNoteXDisposition& disposition) {
+    if (!disposition.remove_local_slot || index >= paths.size()) {
+        return false;
+    }
+    const std::string removed = paths[index];
+    paths.erase(paths.begin() + static_cast<std::ptrdiff_t>(index));
+    cache.erase(removed);
+    return true;
+}
+
 inline std::string formatEngineSlotDocumentId(const std::string& document_id,
                                               bool use_short_uuid) {
     if (document_id.empty()) {
