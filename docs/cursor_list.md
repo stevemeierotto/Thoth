@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-09-27 (ALP1 certified). Historical checkpoint notes below keep their original “paused before” wording. Current open work is the backlog section at the end of this file, aligned with `AGENTS.md`: B1 freeze, E3, M5, paused G1e magnitude, timeout Phase B, and optional R3/R4 GUI sign-off. R6 is **CLOSED**. ALP1 is **CERTIFIED — 2026-09-27**. G3 remains **VERIFIED**. G2b is **SUPERSEDED/CLOSED** and was not passed under the obsolete procedure. M4, G1d, C6 Phase 3, and the shipped Decision Tape are done. CSG-A automatic restart retrieval is deferred.  
+**Last updated:** 2026-09-27 (C6.4 v1.0 locked). Historical checkpoint notes below keep their original “paused before” wording. Current open work is the backlog section at the end of this file, aligned with `AGENTS.md`: B1 freeze, E3, M5, paused G1e magnitude, timeout Phase B, and optional R3/R4 GUI sign-off. R6 is **CLOSED**. ALP1 is **CERTIFIED — 2026-09-27**. G3 remains **VERIFIED**. G2b is **SUPERSEDED/CLOSED** and was not passed under the obsolete procedure. M4, G1d, and C6 Phase 3 machinery are done. **C6.4 v1.0 is locked and not implemented; no official longitudinal window has been opened.** The shipped Decision Tape is done. CSG-A automatic restart retrieval is deferred.  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.
@@ -3896,7 +3896,7 @@ STRICT / INTEGRATION share eval types and schema → **behavioral separation**, 
 
 ### 0. Cognitive loop hardening — ✅ complete (C1–C7)
 
-End-to-end goal execution works; C1–C7 quality/speed/evidence hardening is shipped. Remaining focus is the unfinished research and verification list in `AGENTS.md` (B1 freeze, E3, M5, G1e magnitude pause, timeout Phase B, optional R3/R4 GUI sign-off). GUI restoration R6 is **CLOSED**. ALP1 is **CERTIFIED — 2026-09-27**. ALP-G G3 remains **VERIFIED**. G2b is **SUPERSEDED/CLOSED**. M4, G1d, and C6 Phase 3 are already done.
+End-to-end goal execution works; C1–C7 quality/speed/evidence hardening is shipped. Remaining focus is the unfinished research and verification list in `AGENTS.md` (B1 freeze, E3, M5, G1e magnitude pause, timeout Phase B, optional R3/R4 GUI sign-off). GUI restoration R6 is **CLOSED**. ALP1 is **CERTIFIED — 2026-09-27**. ALP-G G3 remains **VERIFIED**. G2b is **SUPERSEDED/CLOSED**. M4, G1d, and C6 Phase 3 machinery are already done. C6.4 v1.0 is locked and not implemented.
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|

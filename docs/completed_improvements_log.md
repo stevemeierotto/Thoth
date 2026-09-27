@@ -1,6 +1,16 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (ALP1 certified)
+Last updated: 2026-09-27 (C6.4 v1.0 locked)
+
+## 2026-09-27 — C6.4 v1.0 protocol locked
+
+**Status:** 🔒 **C6.4 v1.0 locked.** Documentation only. No production source, tests, harnesses, fixtures, or historical C6.3 artifacts were changed. No official window was opened. Phases 1–8 are not started.
+
+Prospective longitudinal contract: [`C6_phase4_protocol.md`](C6_phase4_protocol.md). `protocol_version` `C6.4 v1.0`. `metric_schema_version` `1.0`. `environment_schema_version` `c64-env-1`. This repository does not assign a separate protocol-file hash.
+
+A first qualifying window with no qualifying prior is `official_baseline`, with `trend=not_evaluable` and `reason=no_prior_window`. Promotion requires two official windows in total: that baseline, then one `official_longitudinal` window that uses it as the prior, plus an owner-signed record. C6.3 v0.2.1 stays sealed. No official C6.3 window was collected.
+
+---
 
 ## 2026-09-27 — ALP1 certified
 
@@ -371,6 +381,7 @@ sign-off has not been performed; the existing automated harness remains availabl
 | **G1d close-out protocol** | A0→D contracts | 🔒 G1d-CO v1.2 |
 | **M4 range restore** | Replay + rehydrate per protocol | ✅ 2026-07-18 |
 | E2 Phase E | Empirical certification v0.1 (`n=3_strict_trio`, lift=0.0) | ✅ 2026-07-09 |
+| C6.4 | Prospective longitudinal protocol | 🔒 C6.4 v1.0 — 2026-09-27. Not implemented. No window opened |
 | C6.3 | Longitudinal track C6.3-01–06 | ✅ 2026-07-11 |
 | Containerization A–E | Portable runtime / inference / consolidation prerequisites | ✅ 2026-07-12 |
 | Plans F–I | Engine HTTP/SSE, Compose packaging, smoke | ✅ 2026-07-13–14 |
