@@ -1727,6 +1727,8 @@ G2b/G3 manual checklist includes the same positive/negative chat retrieval check
 - [ ] G3 — manual ALP-E reconcile checklist (item 19)
 - [ ] Append certification entry to `completed_improvements_log.md` with operator initials
 
+**Later (2026-09-27):** These lock-time checkboxes stay unchecked. G3 was separately **VERIFIED** on 2026-09-27; this note does not reopen it. The G2b checkbox stays unchecked because the obsolete manual scenario was not run and is not a pass. Disposition is **G2b — SUPERSEDED/CLOSED** in `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP-G G2b Superseded Closeout. That closeout does not certify full ALP1.
+
 ### Documentation updates (post-certification)
 
 - Append entry to `docs/completed_improvements_log.md` (after G2b/G3 sign-off)
@@ -1834,9 +1836,12 @@ Per [`AGENTS.md`](../AGENTS.md):
 | **ALP-C** | 2026-07-26 | ✅ Complete | `attachment_send_policy.h`, `alp_uuid.h`; ALP create path (`createCorpusDocumentAlp`); send policy + 409 machine codes; HTTP/backend hash/mtime/force_replace/dry_run; misconfigured gate (`ENABLED` requires `TX_INDEX`); canonical slot (no suffix); 5 unit tests |
 | **ALP-F** | 2026-07-26 | ✅ Complete | Session-link retrieval filter; `CodeChunk.document_id`; `RetrievalScope.linked_document_ids`; fail-closed orphan classify; committed-revision visibility; 4 unit tests |
 | **ALP-E** | 2026-07-26 | ✅ Complete | Engine-driven picker via `dry_run` intent; reconcile on corpus refresh; `force_replace` conflict UX; extended `local_note_engine` cache; sandbox key remap; legacy_id_map upgrade; safety review locks (state machine, match ladders, timeouts); 12 unit tests |
-| **ALP-G** | 2026-07-27 | 🔶 Harness; **G3 sealed 2026-09-27**; G2b unsigned | `alp_g_verify.sh` (preflight/gate/engine); G2a EGAR lifecycle + ALP-F isolation; `alp_g_report.json`; `docker/alp.env.example`; README item 19. **G3 VERIFIED** against `e5d5e24` — see `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP-G G3 Certification Record. **G2b has not been signed off; do not claim full ALP1 certification.** |
+| **ALP-G** | 2026-07-27 | 🔶 Harness; **G3 sealed 2026-09-27**; **G2b SUPERSEDED/CLOSED 2026-09-27**; full ALP1 unsigned | `alp_g_verify.sh` (preflight/gate/engine); G2a EGAR lifecycle + ALP-F isolation; `alp_g_report.json`; `docker/alp.env.example`; README item 19. **G3 VERIFIED** against `e5d5e24` — see `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP-G G3 Certification Record. **G2b — SUPERSEDED/CLOSED** — see § ALP-G G2b Superseded Closeout. The obsolete manual procedure was not executed. **Do not claim full ALP1 certification.** |
 
-**Deferred:** Owner deferred G2b manual sign-off on 2026-09-13. That deferral
-stands. G3 was sealed on 2026-09-27. Full ALP1 certification still requires G2b.
+**G2b:** The owner deferred manual sign-off on 2026-09-13. That procedure was
+not executed and is not a pass. On 2026-09-27 the deferral was closed as
+**SUPERSEDED/CLOSED**: still-valid obligations are covered by the sealed G3
+record and the committed tests named in the protocol closeout. Full ALP1
+certification remains unsigned.
 
 ---

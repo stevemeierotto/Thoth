@@ -45,7 +45,7 @@ Implementation requires explicit human approval per `AGENTS.md`. **No code chang
 | Layer | Document | Role relative to DWP |
 |-------|----------|----------------------|
 | **Identity & lifecycle** | [ALP1 🔒](ATTACHMENT_LIFECYCLE_PROTOCOL.md) | Normative: `document_id`, revisions, session links, transactional indexing |
-| **Implementation detail** | [ALP1 Implementation Plan](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) | Phases A–G; code largely complete; G3 sealed 2026-09-27; G2b and full ALP1 unsigned |
+| **Implementation detail** | [ALP1 Implementation Plan](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) | Phases A–G; code largely complete; G3 sealed 2026-09-27; G2b **SUPERSEDED/CLOSED** 2026-09-27; full ALP1 unsigned |
 | **Retrieval scope** | [TCB 🔒](THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md) | TCB2 scope; **TCB-ALP amendment** — filter by session link + `document_id` |
 | **Operator product model** | **DWP (this document)** | Engine Inventory + chat attachments + dual GUI workflows + migration/rollout |
 
@@ -174,7 +174,7 @@ GRAG scoring unchanged; **scope** bounds the candidate set.
 | **G8** | Revision editing not stubbed for future work | Low (this phase) |
 | **G9** | Failed suffix orphans in inventory (`EGAR_1`, `EGAR_2`) | Medium |
 | **G10** | Synchronous indexing blocks Engine HTTP (SSE / health) | High |
-| **G11** | ALP-G G2b operator certification incomplete. G3 sealed 2026-09-27 | Medium |
+| **G11** | ALP-G G2b manual certification was never signed (owner deferral 2026-09-13). Closed 2026-09-27 as **SUPERSEDED/CLOSED**, not as a pass. G3 sealed 2026-09-27. Full ALP1 remains unsigned. | Closed 2026-09-27 |
 
 ---
 
@@ -568,7 +568,7 @@ Phases are **DWP rollout labels**. Engine/GUI work **reuses ALP-A–G** where no
 | Engine Inventory + **Attach to Chat** | GUI |
 | Chat Attachments panel | GUI |
 | ALP-E reconcile | GUI |
-| ALP-G G2b operator sign-off | Human + QA |
+| ALP-G G2b operator sign-off | **SUPERSEDED/CLOSED** 2026-09-27. Not an open sign-off. See ALP protocol § ALP-G G2b Superseded Closeout. |
 
 **Exit:** Import vs Attach clearly separated in UI.
 
@@ -625,7 +625,7 @@ Phases are **DWP rollout labels**. Engine/GUI work **reuses ALP-A–G** where no
 | Import new doc | New canonical name → one inventory row → link created |
 | Re-import same hash | `no_op`; no `EGAR_1` suffix |
 | Inventory cardinality | `GET /v1/rag/corpus` — no failed suffix rows after migration |
-| ALP-G EGAR lifecycle | `./scripts/alp_g_verify.sh` + operator G2b |
+| ALP-G EGAR lifecycle | `./scripts/alp_g_verify.sh` (G2a) plus sealed G3. The manual G2b script is superseded and must not be executed. |
 | Engine liveness during index | `/ready` + SSE connected during 95-chunk ingest |
 
 ---
@@ -635,6 +635,7 @@ Phases are **DWP rollout labels**. Engine/GUI work **reuses ALP-A–G** where no
 | Version | Date | Change |
 |---------|------|--------|
 | DWP0 draft | 2026-07-30 | Initial protocol from analyze session (EGAR failure, inventory/attachment model) |
+| Status | 2026-09-27 | G11 / P3 / §15: G2b recorded **SUPERSEDED/CLOSED**. Full ALP1 remains unsigned. G3 seal unchanged. |
 
 ---
 

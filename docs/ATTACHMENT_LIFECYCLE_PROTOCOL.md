@@ -1,7 +1,7 @@
 # Thoth Attachment Lifecycle Protocol
 
 **Document type:** Architecture protocol (GUI ↔ Engine attachment lifecycle)  
-**Status:** **ALP1** 🔒 **LOCKED** **2026-07-26** — normative lifecycle + P0 decisions. Lock-time text required plan approval before code. **Later outcome:** ALP-A–F implemented 2026-07-26. **ALP-G G3** sealed **2026-09-27** against `e5d5e24` (see § ALP-G G3 Certification Record). **G2b** and full ALP1 certification remain unsigned (G2b owner deferral 2026-09-13 stands).  
+**Status:** **ALP1** 🔒 **LOCKED** **2026-07-26** — normative lifecycle + P0 decisions. Lock-time text required plan approval before code. **Later outcome:** ALP-A–F implemented 2026-07-26. **ALP-G G3** sealed **2026-09-27** against `e5d5e24` (see § ALP-G G3 Certification Record). **G2b — SUPERSEDED/CLOSED** **2026-09-27** (see § ALP-G G2b Superseded Closeout). The 2026-09-13 owner deferral stands as history: the obsolete manual procedure was not executed and is not a pass. Full ALP1 certification remains unsigned.  
 **Created:** 2026-07-26  
 **Prerequisite:** [`attachment_state_analysis.md`](attachment_state_analysis.md) ✅  
 **Implementation plan:** [`ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md`](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) 🔒 implemented A–F; G harness only  
@@ -924,3 +924,49 @@ The run started from an empty corpus. Source and tests were not edited during ce
 **G3-7 — negative retrieval.** Request `req-1790530728467-1`, query `Where does G3_SIDE_SENTINEL_004 appear?`. Scope selected `g3-cert.md` only. The retrieved chunk was `g3-cert.md`, score `0.194`. Grounded documents were `g3-cert.md`. `g3-side.md` was absent from the record. The side sentinel appeared in the user query inside the assembled prompt, and not in a retrieved chunk. The side document remained in the Engine corpus.
 
 **STATUS: G3 VERIFIED — CERTIFICATION RECORD SEALED**
+
+---
+
+## ALP-G G2b Superseded Closeout
+
+**Closed:** 2026-09-27  
+**Disposition:** **G2b — SUPERSEDED/CLOSED**  
+**Historical status:** Owner-deferred 2026-09-13. The manual EGAR GUI procedure was not executed and did not pass.
+
+This closeout does not change the G3 certification record above. G3 remains **VERIFIED** against product baseline `e5d5e24e877931165593ca67693445d47f824abe`. Full ALP1 certification remains unsigned. Closing G2b does not certify ALP1.
+
+### Why the 2026-07 procedure is obsolete
+
+`docker/README.md` item 19 and `testAlpEEgarOperatorLifecycle` were written for the 2026-07-26 lock: Local Note **X** removed only the GUI slot, and the session link survived. ALP-G safety review §7 then expected session A to still retrieve after that delete. The procedure’s later step imported a newer file and required picker **Update available** / `new_revision`.
+
+The 2026-09-10 ALP amend, landed in parent commit `ba6106985ff91235ec89d9f93a47e5fe563cf449` (2026-09-25) with Engine `e6a7f4f` / `a308ef4`, changed **X**:
+
+| Layer | 2026-07 G2b expectation | Current ALP (amend + G3-7) |
+|-------|-------------------------|----------------------------|
+| GUI slot | Removed | Removed |
+| Active session link | Preserved | Removed (`POST /v1/rag/session-links/remove`) |
+| Other sessions’ links | Untouched | Untouched |
+| Document, committed revision, storage | Preserved | Preserved |
+| Same bytes sent again from that session | Still linked, so `no_op` (the script instead forced a newer file and `new_revision`) | Unlinked, so `link_only` — no new revision |
+| Retrieval in that session after X, before a new send | Retrieve | Do not retrieve |
+
+Running item 19 literally would grade Thoth against that retired contract. A pass on “session A still retrieves after X” or on “the post-X send must be `new_revision`” would contradict current behavior. Lock-time sentences that still say links persist (INV-10, lock-review A7, §8.2, §9.1–§9.2, and the revision summary) stay as 2026-07-26 history. Current **X** behavior is the 2026-09-10 amend in §ALP1 P0, §1.4, and §5.2, the code, and G3-7.
+
+`testAlpFLocalNoteDeleteLinkPersists` and the EGAR lifecycle test still simulate a GUI-only slot clear and do not call unlink. They are not evidence that current **X** keeps the link. This closeout does not change those tests. There is no product defect in the current **X** path.
+
+### Criterion disposition
+
+| Original G2b criterion | Original expected behavior | Current behavior | Evidence | Disposition |
+|------------------------|----------------------------|------------------|----------|-------------|
+| Import a Local Note and Send | One indexed document, UUID, session link | Same | G3-3 create: document `04b86ca3-42cb-49f4-b2ef-9a075af0c617`, committed revision `57bbcbca-ff3a-4f6e-b981-ee9f0aa9cf8c` | STILL VALID — SATISFIED BY LATER EVIDENCE |
+| Close and reopen the GUI | Cache names the same document; no invented document or link | Same | G3-5 | STILL VALID — SATISFIED BY LATER EVIDENCE |
+| **X** clears the slot; Engine row remains | Slot and cache empty; registry row remains; link remains | Slot and cache empty; document, revision, storage, and corpus row remain; **this** session’s link is removed | G3-7 X lifecycle; `testAlpFLocalNoteDeleteUnlinksSession` | Slot and persistence: STILL VALID — SATISFIED BY LATER EVIDENCE. Link preservation: SUPERSEDED BY ALP SEMANTIC CHANGE |
+| Reconcile gates Send | Send disabled until Engine verification; enabled after reconcile | Same | G3-1 Send disabled; G3-2 Send enabled, `reconcile_verified` true | STILL VALID — SATISFIED BY LATER EVIDENCE |
+| Session A retrieves after **X** without a new Send | Link survived, so A still retrieves | A does not retrieve until a later Send restores the link | G3-7 negative retrieval, `req-1790530728467-1` (`g3-side.md` absent). ALP-G §7’s positive-after-delete check is the retired rule | SUPERSEDED BY ALP SEMANTIC CHANGE |
+| Newer bytes → **Update available** / `new_revision`, then a committed rev2 | Required GUI chooser label and a second committed revision after the old **X** | Changed bytes are still `new_revision` on the same UUID. One Local Note does not require the chooser label. Same bytes after **X** are `link_only`, not `new_revision` | G3-3 dry-run `new_revision` and the sealed note that **Update available** is not required. Commit, supersede, one UUID, and no `EGAR_1.md`: `testAlpEEgarOperatorLifecycle` (G2a). Same-bytes unlinked intent: `testAlpEDryRunLinkOnlyForUnlinkedSession` (`link_only`, same `document_id`). Link plus retrieval after that send: `testAlpFMultiSessionSameDocument` | Chooser label and “post-X send must be `new_revision`”: SUPERSEDED BY ALP SEMANTIC CHANGE. Identity, supersede, and no suffix: STILL VALID — SATISFIED BY LATER EVIDENCE (`testAlpEEgarOperatorLifecycle`). Same-bytes `link_only`: current behavior, covered by the two ALP-E/F tests, not by the obsolete script |
+| Session B does not retrieve until B sends or links; a linked session does | Isolation by session link | Same | G3-7 positive retrieval `req-1790530424803-0`; `testAlpFSessionLinkIsolation`; `testAlpFMultiSessionSameDocument` | STILL VALID — SATISFIED BY LATER EVIDENCE |
+| One canonical name, no suffix file | `EGAR_1.md` forbidden | Same | `testAlpEEgarOperatorLifecycle` corpus and storage assertions | STILL VALID — SATISFIED BY LATER EVIDENCE |
+
+No still-valid G2b obligation is left unverified. The obsolete manual script was not run.
+
+**STATUS: G2b SUPERSEDED/CLOSED**

@@ -1,6 +1,6 @@
 <!-- Docker seed corpus copy. Retrieval text. -->
 
-**Corpus copy of the repository agent guide.** This file is seeded into the Engine RAG corpus. It was aligned with repository `AGENTS.md` on 2026-09-25 so older status sentences are not retrieved as current truth. The 2026-07-15 seed snapshot is superseded. Authoritative guide for people editing the repo: repository-root `AGENTS.md`.
+**Corpus copy of the repository agent guide.** This file is seeded into the Engine RAG corpus. It was aligned with repository `AGENTS.md` on 2026-09-25 so older status sentences are not retrieved as current truth. The 2026-07-15 seed snapshot is superseded. G2b status lines below were updated 2026-09-27 to **SUPERSEDED/CLOSED**. Authoritative guide for people editing the repo: repository-root `AGENTS.md`.
 
 # AGENTS.md — AI Coding Agent Guide
 
@@ -657,7 +657,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 - E2 evaluation kernel + Phases A–E (Phase E v0.1 certified — see `docs/phases/PHASE_E_COMPLETE.md`)
 - C6 Phase 3 longitudinal analyzer, operator guide, and fixtures (`94012a4`)
 - TCB mandatory sequence through TCB4 (2026-07-23). TCB5/TCB6 remain optional
-- ALP attachment lifecycle A–F (2026-07-26). ALP-G operator certification is deferred verification
+- ALP attachment lifecycle A–F (2026-07-26). ALP-G **G3** sealed 2026-09-27. **G2b — SUPERSEDED/CLOSED** 2026-09-27. The obsolete manual procedure was not executed. Full ALP1 remains unsigned. Authoritative record: repository `docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md`
 - CSG-B B.1–B.4, including manual acceptance 2026-09-13
 - Container plans A–N as recorded in `docs/docker_roadmap.md` (Plan L3 bind profile stays deferred)
 - Decision Tape on committed engine events, including idle and live chat ownership (`de6811b`, 2026-09-25)
@@ -672,7 +672,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 ### ⏳ Genuinely unfinished (not the same as deferred)
 
 - **Missing implementation:** LLM step cancellation after a soft timeout. The 900-second budget is deployed. `std::async` still joins the timed-out step before `STEP_FAILED` (timeout Phase B, recorded 2026-09-16).
-- **Missing verification:** ALP-G G2b/G3 operator sign-off, owner-deferred 2026-09-13. GUI restoration R5 verify and R6 closeout were not recorded after later GUI work.
+- **Missing verification:** GUI restoration R6 closeout was not recorded after later GUI work. ALP-G G2b is **SUPERSEDED/CLOSED** (2026-09-27), not an open sign-off. G3 is sealed. Full ALP1 remains unsigned.
 - **Research awaiting an owner decision:** B1 publication suite is a candidate awaiting freeze (`docs/B1_PROTOCOL.md`). E3 SCR harness is specified and not built. M5 vector-store benchmark scaffold is not built. G1e further magnitude probes stay paused.
 - **Small product gap:** File → Export Session shows an unimplemented menu message.
 

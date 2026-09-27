@@ -1,6 +1,14 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (ALP-G G3 seal)
+Last updated: 2026-09-27 (ALP-G G2b superseded/closed)
+
+## 2026-09-27 — ALP-G G2b superseded/closed
+
+**Status:** **G2b — SUPERSEDED/CLOSED.** Documentation only. No source or test changes. The obsolete manual EGAR procedure was not executed and did not pass.
+
+The 2026-09-13 owner deferral stands as history. Local Note **X** no longer preserves the session link (ALP amend 2026-09-10, parent `ba61069`). Still-valid G2b obligations are covered by the sealed G3 record (product baseline `e5d5e24`) and the committed tests named in [`ATTACHMENT_LIFECYCLE_PROTOCOL.md`](ATTACHMENT_LIFECYCLE_PROTOCOL.md) § ALP-G G2b Superseded Closeout. G3 remains **VERIFIED**. This entry does not change the G3 certification record and does not certify full ALP1.
+
+---
 
 ## 2026-09-27 — ALP-G G3 certified
 
