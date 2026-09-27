@@ -20,7 +20,12 @@
 
 #if THOTH_HAS_GUI
 #include "AgentInterface.h"
+#include "local_note_slot_layout.h"
 #include "remote_agent_backend.h"
+#include <wx/app.h>
+#include <wx/frame.h>
+#include <wx/panel.h>
+#include <wx/sizer.h>
 #endif
 #include "llm_timeout_policy.h"
 #include "plan_validator.h"
@@ -20070,6 +20075,140 @@ static void installCoreTestIsolation() {
               << "[thoth-core-tests] project_root=" << repoRoot << '\n';
 }
 
+#if THOTH_HAS_GUI
+static bool localNoteDeleteButtonHasPositiveGeometry(const wxButton* button) {
+    if (!button || !button->IsShown()) {
+        return false;
+    }
+    const wxSize size = button->GetSize();
+    return size.GetWidth() > 0 && size.GetHeight() > 0;
+}
+
+/**
+ * Occupied slots are shown one at a time, the same hidden → shown transition
+ * that left later X controls with no geometry. The pane is held at the
+ * computed minimum so Send to Engine must still fit.
+ */
+static bool testLocalNoteSlotDeleteButtonGeometry() {
+    // A console wx app never opens a display, and the next widget then aborts GTK.
+    if (!wxApp::GetInstance()) {
+        wxApp::SetInstance(new wxApp());
+    }
+    wxInitializer init;
+    if (!init.IsOk()) {
+        std::cerr << "testLocalNoteSlotDeleteButtonGeometry: wx init failed\n";
+        return false;
+    }
+
+    auto* frame = new wxFrame(nullptr, wxID_ANY, "local-note-slots",
+                              wxPoint(40, 40), wxSize(1100, 700));
+    auto* panel = new wxPanel(frame, wxID_ANY);
+    auto* outer = new wxBoxSizer(wxVERTICAL);
+    auto* heading = new wxStaticText(panel, wxID_ANY,
+        "Local Notes — drop or Import Corpus, then Send to Engine");
+    outer->Add(heading, 0, wxEXPAND | wxALL, 5);
+
+    const auto grid = Thoth::LocalNoteSlotLayout::makeLocalNoteDeleteGrid(panel);
+    outer->Add(grid.grid, 0, wxEXPAND | wxLEFT | wxRIGHT, 5);
+    auto* send = new wxButton(panel, wxID_ANY, "Send to Engine");
+    outer->Add(send, 0, wxEXPAND | wxALL, 5);
+    panel->SetSizer(outer);
+
+    const int paneMin = std::max(
+        180,
+        Thoth::LocalNoteSlotLayout::localNotesPaneMinHeightPx(
+            heading->GetBestSize().GetHeight(),
+            grid.slots[0].remove->GetMinSize().GetHeight(),
+            send->GetBestSize().GetHeight()));
+    panel->SetMinSize(wxSize(900, paneMin));
+    frame->SetClientSize(wxSize(1000, paneMin));
+    frame->Show();
+    panel->Layout();
+    frame->Layout();
+
+    const char* paths[] = {
+        "/host/g3-cert.md",
+        "/host/g3-empty.md",
+        "/host/g3-side.md",
+        "/host/g3-fourth.md"
+    };
+    const char* documents[] = {"doc-cert", "doc-empty", "doc-side", "doc-fourth"};
+
+    for (int occupied = 0; occupied <= 4; ++occupied) {
+        for (int i = 0; i < 4; ++i) {
+            auto* button = grid.slots[static_cast<std::size_t>(i)].remove;
+            auto* label = grid.slots[static_cast<std::size_t>(i)].label;
+            if (i < occupied) {
+                Thoth::LocalNoteSlotLayout::showLocalNoteDeleteButton(button);
+                label->SetLabel(wxString::FromUTF8(paths[i]));
+            } else {
+                Thoth::LocalNoteSlotLayout::hideLocalNoteDeleteButton(button);
+                label->SetLabel(wxString::Format("Empty Slot %d", i + 1));
+            }
+        }
+        panel->Layout();
+        frame->Layout();
+
+        if (occupied == 0) {
+            for (const auto& slot : grid.slots) {
+                if (slot.remove->IsShown()) {
+                    std::cerr << "testLocalNoteSlotDeleteButtonGeometry: empty X shown\n";
+                    frame->Destroy();
+                    return false;
+                }
+            }
+            continue;
+        }
+
+        for (int i = 0; i < occupied; ++i) {
+            const auto& slot = grid.slots[static_cast<std::size_t>(i)];
+            if (!localNoteDeleteButtonHasPositiveGeometry(slot.remove)) {
+                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
+                          << (i + 1) << " of " << occupied << " has no geometry\n";
+                frame->Destroy();
+                return false;
+            }
+            if (slot.slotNumber != i + 1
+                || Thoth::LocalNoteSlotLayout::localNoteSlotPathIndex(slot.slotNumber) != i
+                || slot.label->GetLabel() != wxString::FromUTF8(paths[i])) {
+                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
+                          << (i + 1) << " does not map to its path\n";
+                frame->Destroy();
+                return false;
+            }
+            if (std::string(documents[i]).empty()) {
+                frame->Destroy();
+                return false;
+            }
+        }
+        for (int i = occupied; i < 4; ++i) {
+            if (grid.slots[static_cast<std::size_t>(i)].remove->IsShown()) {
+                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: empty slot "
+                          << (i + 1) << " X is visible\n";
+                frame->Destroy();
+                return false;
+            }
+        }
+    }
+
+    if (!send->IsShown() || send->GetSize().GetHeight() <= 0) {
+        std::cerr << "testLocalNoteSlotDeleteButtonGeometry: Send to Engine missing\n";
+        frame->Destroy();
+        return false;
+    }
+    const int sendBottom = send->GetPosition().y + send->GetSize().GetHeight();
+    if (sendBottom > panel->GetClientSize().GetHeight()) {
+        std::cerr << "testLocalNoteSlotDeleteButtonGeometry: Send clipped at pane min ("
+                  << sendBottom << " > " << panel->GetClientSize().GetHeight() << ")\n";
+        frame->Destroy();
+        return false;
+    }
+
+    frame->Destroy();
+    return true;
+}
+#endif
+
 int main() {
     if (const char* focused = std::getenv("THOTH_LLM_TIMEOUT_TESTS")) {
         if (std::string(focused) == "1") {
@@ -20416,6 +20555,7 @@ int main() {
     if (!testRemoteAgentBackendEmptyUrlOffline()) failures++;
     if (!testRemoteAgentBackendReadyRecovery()) failures++;
     if (!testRemoteAgentBackendLiveOptIn()) failures++;
+    if (!testLocalNoteSlotDeleteButtonGeometry()) failures++;
     if (failures == 0) {
         std::cout << "All GUI tests passed.\n";
         return 0;

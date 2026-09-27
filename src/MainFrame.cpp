@@ -26,6 +26,7 @@
 #include "retrieval_verification_display.h"
 #include "corpus_create.h"
 #include "local_note_engine_sync.h"
+#include "local_note_slot_layout.h"
 #include "alp_feature_flags.h"
 #include "corpus_create_local.h"
 #include "conversation_authority.h"
@@ -495,10 +496,10 @@ void MainFrame::RefreshRagPanel() {
 
     auto setSlot = [this, hostOnlyNotes, alp_gui](wxStaticText* slot, wxButton* btn, const std::string& path, int index) {
         if (!slot || !btn) return;
-        if (path.empty()) {
+            if (path.empty()) {
             slot->SetLabel(wxString::Format("Empty Slot %d", index));
             slot->UnsetToolTip();
-            btn->Hide();
+            Thoth::LocalNoteSlotLayout::hideLocalNoteDeleteButton(btn);
         } else {
             wxFileName fn(wxString::FromUTF8(path));
             const std::string base = fn.GetFullName().ToStdString();
@@ -542,7 +543,7 @@ void MainFrame::RefreshRagPanel() {
                 slot->SetLabel(fn.GetFullName());
                 slot->UnsetToolTip();
             }
-            btn->Show();
+            Thoth::LocalNoteSlotLayout::showLocalNoteDeleteButton(btn);
         }
     };
 
@@ -1494,27 +1495,25 @@ MainFrame::MainFrame()
     localNotesHeader->Wrap(400);
     localNotesOuter->Add(localNotesHeader, 0, wxEXPAND | wxALL, 5);
 
-    wxFlexGridSizer* ragSizer = new wxFlexGridSizer(2, 2, 5, 5);
-    ragSizer->AddGrowableCol(0, 1);
-    ragSizer->AddGrowableCol(1, 1);
+    const Thoth::LocalNoteSlotLayout::LocalNoteDeleteGrid noteSlots =
+        Thoth::LocalNoteSlotLayout::makeLocalNoteDeleteGrid(localNotesPanel);
+    m_ragFileSlot1 = noteSlots.slots[0].label;
+    m_ragFileSlot2 = noteSlots.slots[1].label;
+    m_ragFileSlot3 = noteSlots.slots[2].label;
+    m_ragFileSlot4 = noteSlots.slots[3].label;
+    m_ragDeleteBtn1 = noteSlots.slots[0].remove;
+    m_ragDeleteBtn2 = noteSlots.slots[1].remove;
+    m_ragDeleteBtn3 = noteSlots.slots[2].remove;
+    m_ragDeleteBtn4 = noteSlots.slots[3].remove;
+    wxFlexGridSizer* ragSizer = noteSlots.grid;
 
-    auto createSlotSizer = [this, localNotesPanel](wxStaticText*& slot, wxButton*& btn, int index) {
-        wxBoxSizer* sizer = new wxBoxSizer(wxHORIZONTAL);
-        slot = new wxStaticText(localNotesPanel, wxID_ANY, wxString::Format("Empty Slot %d", index),
-                                wxDefaultPosition, wxDefaultSize,
-                                wxST_ELLIPSIZE_END);
-        btn = new wxButton(localNotesPanel, wxID_ANY, "X", wxDefaultPosition, wxDefaultSize);
-        btn->SetToolTip("Remove file");
-        slot->SetMinSize(wxSize(80, 22));
-
-        sizer->Add(slot, 1, wxALIGN_CENTER_VERTICAL | wxALL, 5);
-        sizer->Add(btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-
-        btn->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) {
+    auto bindSlotRemove = [this](wxButton* button, int slotNumber) {
+        button->Bind(wxEVT_BUTTON, [this, slotNumber](wxCommandEvent&) {
             if (m_activeSessionIndex < 0 || static_cast<size_t>(m_activeSessionIndex) >= m_sessions.size()) return;
             auto& session = m_sessions[static_cast<size_t>(m_activeSessionIndex)];
-            if (static_cast<size_t>(index - 1) < session.ragFilePaths.size()) {
-                const std::size_t slot_index = static_cast<std::size_t>(index - 1);
+            const int pathIndex = Thoth::LocalNoteSlotLayout::localNoteSlotPathIndex(slotNumber);
+            if (pathIndex >= 0 && static_cast<size_t>(pathIndex) < session.ragFilePaths.size()) {
+                const std::size_t slot_index = static_cast<std::size_t>(pathIndex);
                 const std::string removed = session.ragFilePaths[slot_index];
                 std::string document_id;
                 const auto cacheIt = session.localNoteEngine.find(removed);
@@ -1562,14 +1561,11 @@ MainFrame::MainFrame()
                                           : Thoth::localEventStreamSnapshot(NowMs()));
             }
         });
-
-        return sizer;
     };
-
-    ragSizer->Add(createSlotSizer(m_ragFileSlot1, m_ragDeleteBtn1, 1), 1, wxEXPAND);
-    ragSizer->Add(createSlotSizer(m_ragFileSlot2, m_ragDeleteBtn2, 2), 1, wxEXPAND);
-    ragSizer->Add(createSlotSizer(m_ragFileSlot3, m_ragDeleteBtn3, 3), 1, wxEXPAND);
-    ragSizer->Add(createSlotSizer(m_ragFileSlot4, m_ragDeleteBtn4, 4), 1, wxEXPAND);
+    bindSlotRemove(m_ragDeleteBtn1, 1);
+    bindSlotRemove(m_ragDeleteBtn2, 2);
+    bindSlotRemove(m_ragDeleteBtn3, 3);
+    bindSlotRemove(m_ragDeleteBtn4, 4);
 
     // Proportion 0: the slot grid keeps its own height and cannot push
     // Send to Engine past the bottom of the pane.
@@ -1584,22 +1580,27 @@ MainFrame::MainFrame()
     m_sendToEngineBtn->Bind(wxEVT_BUTTON, &MainFrame::OnSendToEngine, this);
     localNotesOuter->AddStretchSpacer(1);
 
+    const int notesPanePx = std::max(
+        kNotesPanePx,
+        Thoth::LocalNoteSlotLayout::localNotesPaneMinHeightPx(
+            localNotesHeader->GetBestSize().GetHeight(),
+            m_ragDeleteBtn1->GetMinSize().GetHeight(),
+            m_sendToEngineBtn->GetBestSize().GetHeight()));
     localNotesPanel->SetSizer(localNotesOuter);
-    localNotesPanel->SetMinSize(wxSize(240, kNotesPanePx));
+    localNotesPanel->SetMinSize(wxSize(240, notesPanePx));
+    ragSplit->SetMinimumPaneSize(notesPanePx);
 
     ragSplit->SplitHorizontally(corpusPanel, localNotesPanel);
-    // Keep the notes pane at least kNotesPanePx. Extra splitter height stays
-    // with the inventory (gravity 1) so a taller main window does not depend
-    // on the notes pane to reveal the button.
+    // Keep the notes pane tall enough for two occupied rows plus Send.
+    // Extra splitter height stays with the inventory (gravity 1).
     ragSplit->SetSashGravity(1.0);
-    auto notesPaneTooShort = [ragSplit](int height) {
-        constexpr int kNotesPanePx = 180;
+    auto notesPaneTooShort = [ragSplit, notesPanePx](int height) {
         const int sash = ragSplit->GetSashSize();
         const int bottom = height - sash - ragSplit->GetSashPosition();
-        if (bottom >= kNotesPanePx) {
+        if (bottom >= notesPanePx) {
             return;
         }
-        const int pos = height - kNotesPanePx - sash;
+        const int pos = height - notesPanePx - sash;
         if (pos >= ragSplit->GetMinimumPaneSize()) {
             ragSplit->SetSashPosition(pos);
         }
@@ -1668,8 +1669,8 @@ MainFrame::MainFrame()
         .Bottom()
         .Name("SystemState")
         .Layer(1)
-        .BestSize(-1, 460)
-        .MinSize(-1, 420)
+        .BestSize(-1, std::max(520, notesPanePx * 2 + 80))
+        .MinSize(-1, std::max(480, notesPanePx * 2 + 40))
         .Caption("System State")
         .CloseButton(true)
         .Resizable(true)
