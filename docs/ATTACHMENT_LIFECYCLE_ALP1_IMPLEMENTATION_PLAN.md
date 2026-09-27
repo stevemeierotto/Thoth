@@ -1727,7 +1727,7 @@ G2b/G3 manual checklist includes the same positive/negative chat retrieval check
 - [ ] G3 — manual ALP-E reconcile checklist (item 19)
 - [ ] Append certification entry to `completed_improvements_log.md` with operator initials
 
-**Later (2026-09-27):** These lock-time checkboxes stay unchecked. G3 was separately **VERIFIED** on 2026-09-27; this note does not reopen it. The G2b checkbox stays unchecked because the obsolete manual scenario was not run and is not a pass. Disposition is **G2b — SUPERSEDED/CLOSED** in `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP-G G2b Superseded Closeout. That closeout does not certify full ALP1.
+**Later (2026-09-27):** These lock-time checkboxes stay unchecked. They are not the current certification authority. G3 was separately **VERIFIED** on 2026-09-27; this note does not reopen it. The G2b checkbox stays unchecked because the obsolete manual scenario was not run and is not a pass. Disposition is **G2b — SUPERSEDED/CLOSED** in `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP-G G2b Superseded Closeout. That closeout did not itself certify ALP1. **ALP1 CERTIFIED — 2026-09-27** is the later seal in § ALP1 Certification Record of that protocol. The G0 + G2a gate passed on parent `ab969f60924c2552d5ab84a20251f17b42fe9a48` at `2026-09-27T19:23:59Z`. G2b was not marked PASS.
 
 ### Documentation updates (post-certification)
 
@@ -1836,12 +1836,14 @@ Per [`AGENTS.md`](../AGENTS.md):
 | **ALP-C** | 2026-07-26 | ✅ Complete | `attachment_send_policy.h`, `alp_uuid.h`; ALP create path (`createCorpusDocumentAlp`); send policy + 409 machine codes; HTTP/backend hash/mtime/force_replace/dry_run; misconfigured gate (`ENABLED` requires `TX_INDEX`); canonical slot (no suffix); 5 unit tests |
 | **ALP-F** | 2026-07-26 | ✅ Complete | Session-link retrieval filter; `CodeChunk.document_id`; `RetrievalScope.linked_document_ids`; fail-closed orphan classify; committed-revision visibility; 4 unit tests |
 | **ALP-E** | 2026-07-26 | ✅ Complete | Engine-driven picker via `dry_run` intent; reconcile on corpus refresh; `force_replace` conflict UX; extended `local_note_engine` cache; sandbox key remap; legacy_id_map upgrade; safety review locks (state machine, match ladders, timeouts); 12 unit tests |
-| **ALP-G** | 2026-07-27 | 🔶 Harness; **G3 sealed 2026-09-27**; **G2b SUPERSEDED/CLOSED 2026-09-27**; full ALP1 unsigned | `alp_g_verify.sh` (preflight/gate/engine); G2a EGAR lifecycle + ALP-F isolation; `alp_g_report.json`; `docker/alp.env.example`; README item 19. **G3 VERIFIED** against `e5d5e24` — see `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP-G G3 Certification Record. **G2b — SUPERSEDED/CLOSED** — see § ALP-G G2b Superseded Closeout. The obsolete manual procedure was not executed. **Do not claim full ALP1 certification.** |
+| **ALP-G** | 2026-07-27 | ✅ **ALP1 CERTIFIED — 2026-09-27** | Harness shipped 2026-07-27. **G3 VERIFIED** against `e5d5e24`. **G2b — SUPERSEDED/CLOSED**, not PASS. Full seal: `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP1 Certification Record. G0 + G2a passed on `ab969f60` at `2026-09-27T19:23:59Z`. Same-session `link_only` after X and accepted force replace passed in that campaign. INV-11 test commit `ad34c3e`. |
 
 **G2b:** The owner deferred manual sign-off on 2026-09-13. That procedure was
 not executed and is not a pass. On 2026-09-27 the deferral was closed as
 **SUPERSEDED/CLOSED**: still-valid obligations are covered by the sealed G3
-record and the committed tests named in the protocol closeout. Full ALP1
-certification remains unsigned.
+record and the committed tests named in the protocol closeout. That closeout
+did not certify ALP1. **ALP1 CERTIFIED — 2026-09-27** is recorded in
+`ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP1 Certification Record. G2b stays
+**SUPERSEDED/CLOSED**.
 
 ---

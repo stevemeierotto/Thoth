@@ -1,6 +1,18 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (GUI restoration R6 closed)
+Last updated: 2026-09-27 (ALP1 certified)
+
+## 2026-09-27 — ALP1 certified
+
+**Status:** **ALP1 CERTIFIED — 2026-09-27.** Documentation seal after the verification campaign. No production source changes in this seal.
+
+Certified product baseline `e5d5e24e877931165593ca67693445d47f824abe`. Engine `a308ef493cb2a1ccdb4c59c898bb068575941803`. G0 and G2a passed on parent `ab969f60924c2552d5ab84a20251f17b42fe9a48` (`alp_g_report.json` timestamp `2026-09-27T19:23:59Z`). G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED** and was not marked PASS. Same-session `link_only` after X passed. Accepted force-replace commit passed. INV-11 HTTP 409 `revision_in_flight` passed in test commit `ad34c3ed2e7f37522ae72edb5f91b538ebe17c93` (`testAlpRevisionInFlightRejectsSecondAccept`). That test commit is not a new product baseline.
+
+This seal does not complete Timeout Phase B, optional R3/R4 GUI sign-off, deferred CSG-A automatic retrieval, or unlocked DWP work.
+
+Record: [`ATTACHMENT_LIFECYCLE_PROTOCOL.md`](ATTACHMENT_LIFECYCLE_PROTOCOL.md) § ALP1 Certification Record.
+
+---
 
 ## 2026-09-27 — GUI restoration R6 closed
 

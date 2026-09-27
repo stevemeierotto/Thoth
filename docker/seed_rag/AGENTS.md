@@ -1,6 +1,6 @@
 <!-- Docker seed corpus copy. Retrieval text. -->
 
-**Corpus copy of the repository agent guide.** This file is seeded into the Engine RAG corpus. It was aligned with repository `AGENTS.md` on 2026-09-25 so older status sentences are not retrieved as current truth. The 2026-07-15 seed snapshot is superseded. G2b status lines below were updated 2026-09-27 to **SUPERSEDED/CLOSED**. R6 status lines were updated 2026-09-27 to **CLOSED**. Authoritative guide for people editing the repo: repository-root `AGENTS.md`.
+**Corpus copy of the repository agent guide.** This file is seeded into the Engine RAG corpus. It was aligned with repository `AGENTS.md` on 2026-09-25 so older status sentences are not retrieved as current truth. The 2026-07-15 seed snapshot is superseded. ALP1 status lines below were updated 2026-09-27 to **ALP1 CERTIFIED**. G2b remains **SUPERSEDED/CLOSED**. R6 remains **CLOSED**. Authoritative guide for people editing the repo: repository-root `AGENTS.md`.
 
 # AGENTS.md — AI Coding Agent Guide
 
@@ -8,8 +8,8 @@
 
 This document describes the architecture, conventions, and critical rules for this project. Following these guidelines ensures changes integrate cleanly and preserve the system's design integrity.
 
-**Last Updated**: 2026-09-25  
-**Status**: Current — reconciled to `main` (`de6811b`). E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3, ALP-A–F, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
+**Last Updated**: 2026-09-27  
+**Status**: Current for ALP1 — **ALP1 CERTIFIED — 2026-09-27**. Product baseline remains `e5d5e24`. G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED**. Lock-time protocol text stays historical. Authoritative seal: repository `docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP1 Certification Record.
 
 ---
 
@@ -657,13 +657,13 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 - E2 evaluation kernel + Phases A–E (Phase E v0.1 certified — see `docs/phases/PHASE_E_COMPLETE.md`)
 - C6 Phase 3 longitudinal analyzer, operator guide, and fixtures (`94012a4`)
 - TCB mandatory sequence through TCB4 (2026-07-23). TCB5/TCB6 remain optional
-- ALP attachment lifecycle A–F (2026-07-26). ALP-G **G3** sealed 2026-09-27. **G2b — SUPERSEDED/CLOSED** 2026-09-27. The obsolete manual procedure was not executed. Full ALP1 remains unsigned. Authoritative record: repository `docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md`
+- ALP attachment lifecycle A–F (2026-07-26). **ALP1 CERTIFIED — 2026-09-27**. ALP-G **G3** remains **VERIFIED**. **G2b — SUPERSEDED/CLOSED** and was not marked PASS. The obsolete manual procedure was not executed. Authoritative record: repository `docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP1 Certification Record
 - CSG-B B.1–B.4, including manual acceptance 2026-09-13
 - Container plans A–N as recorded in `docs/docker_roadmap.md` (Plan L3 bind profile stays deferred)
 - Decision Tape on committed engine events, including idle and live chat ownership (`de6811b`, 2026-09-25)
 - Shared text-generation budget of 900 seconds, deployed to the Docker Engine image 2026-09-16 (`THOTH_LLM_TIMEOUT_SECONDS`)
 - Goal banner **Run**: explicit start or restart of an executive plan for the displayed session goal. **Send** stays chat-only
-- GUI restoration **R6 CLOSED** 2026-09-27. Authoritative record: repository `docs/GUI_RESTORATION_PROTOCOL.md` § Phase R6 Closeout. This closeout does not certify full ALP1
+- GUI restoration **R6 CLOSED** 2026-09-27. Authoritative record: repository `docs/GUI_RESTORATION_PROTOCOL.md` § Phase R6 Closeout. The R6 closeout did not itself certify ALP1. ALP1 was certified later on 2026-09-27.
 
 ### 🔬 Prototype / Partial
 
@@ -673,7 +673,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 ### ⏳ Genuinely unfinished (not the same as deferred)
 
 - **Missing implementation:** LLM step cancellation after a soft timeout. The 900-second budget is deployed. `std::async` still joins the timed-out step before `STEP_FAILED` (timeout Phase B, recorded 2026-09-16).
-- **Missing verification:** Full ALP1 remains unsigned. Optional R3 and R4 GUI sign-off remain open. GUI restoration R6 is **CLOSED** (2026-09-27). G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED**.
+- **Missing verification:** Optional R3 and R4 GUI sign-off remain open. GUI restoration R6 is **CLOSED** (2026-09-27). ALP1 is **CERTIFIED** (2026-09-27). G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED**.
 - **Research awaiting an owner decision:** B1 publication suite is a candidate awaiting freeze (`docs/B1_PROTOCOL.md`). E3 SCR harness is specified and not built. M5 vector-store benchmark scaffold is not built. G1e further magnitude probes stay paused.
 - **Small product gap:** File → Export Session shows an unimplemented menu message.
 

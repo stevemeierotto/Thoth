@@ -833,7 +833,7 @@ R6-04 was the only still-current criterion that lacked direct verification after
 | **R6-07** | **VERIFIED BY STRONGER LATER EVIDENCE.** Chat timing telemetry and `testChatRagPhase0ResponseTelemetryShape` / `testChatPhase0GenerationAttemptCount`. |
 | **R6-08** | **VERIFIED BY ORIGINAL R6 EVIDENCE.** Phase 0 turn table: prompt growth was modest and Turn 3 was the fastest turn. |
 
-This closeout does not certify full ALP1. G3 remains **VERIFIED** against `e5d5e24`. G2b remains **SUPERSEDED/CLOSED**.
+This closeout does not itself certify ALP1. G3 remains **VERIFIED** against `e5d5e24`. G2b remains **SUPERSEDED/CLOSED**. ALP1 was certified later on 2026-09-27 (`docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP1 Certification Record).
 
 **STATUS: R6 CLOSED**
 
@@ -848,7 +848,7 @@ This closeout does not certify full ALP1. G3 remains **VERIFIED** against `e5d5e
 | Code changes | **Forbidden** until phase locked and `AGENTS.md` implement approval |
 | Normative companion | `GUI_integration.md` (architecture); this doc (function) |
 
-**Next human action:** R6 is **CLOSED** (2026-09-27). Optional **R4 Verify ✅** and **R3 Verify ✅** sign-off remain open. Full ALP1 remains unsigned. Timeout Phase B remains separate unfinished implementation.
+**Next human action:** R6 is **CLOSED** (2026-09-27). Optional **R4 Verify ✅** and **R3 Verify ✅** sign-off remain open. ALP1 is **CERTIFIED** (2026-09-27). Timeout Phase B remains separate unfinished implementation.
 
 ---
 

@@ -356,6 +356,8 @@ Use this for manual validation when Compose or a host `thoth-engine` is availabl
 
     **Automated minimum (run first):** `./scripts/alp_g_verify.sh gate` — writes `agent_workspace/alp_certification/alp_g_report.json`.
 
+    **ALP1 CERTIFIED — 2026-09-27.** Product baseline `e5d5e24e877931165593ca67693445d47f824abe`. Engine `a308ef493cb2a1ccdb4c59c898bb068575941803`. G0 + G2a passed on parent `ab969f60924c2552d5ab84a20251f17b42fe9a48` at `2026-09-27T19:23:59Z`. G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED** and was not marked PASS. Record: [`docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md`](../docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md) § ALP1 Certification Record. The obsolete G2b script below was not executed.
+
     **G2b — EGAR operator lifecycle (historical procedure — do not execute):**
 
     **G2b — SUPERSEDED/CLOSED** (2026-09-27). This checklist expected the 2026-07 contract: Local Note **X** kept the session link, and a later send was scored as `new_revision`. Current **X** removes that session’s link and keeps the document, committed revision, and storage. The same bytes sent again from the unlinked session are `link_only`, not a new revision. The steps below are the obsolete script. They were not run for closeout and are not a pass. Record: [`docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md`](../docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md) § ALP-G G2b Superseded Closeout. G3 below was certified separately and stays **VERIFIED**.

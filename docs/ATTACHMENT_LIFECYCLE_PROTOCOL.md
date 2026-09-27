@@ -1,7 +1,7 @@
 # Thoth Attachment Lifecycle Protocol
 
 **Document type:** Architecture protocol (GUI ↔ Engine attachment lifecycle)  
-**Status:** **ALP1** 🔒 **LOCKED** **2026-07-26** — normative lifecycle + P0 decisions. Lock-time text required plan approval before code. **Later outcome:** ALP-A–F implemented 2026-07-26. **ALP-G G3** sealed **2026-09-27** against `e5d5e24` (see § ALP-G G3 Certification Record). **G2b — SUPERSEDED/CLOSED** **2026-09-27** (see § ALP-G G2b Superseded Closeout). The 2026-09-13 owner deferral stands as history: the obsolete manual procedure was not executed and is not a pass. Full ALP1 certification remains unsigned.  
+**Status:** **ALP1 CERTIFIED — 2026-09-27** (see § ALP1 Certification Record). Normative lifecycle 🔒 **LOCKED** **2026-07-26**. **Later outcome:** ALP-A–F implemented 2026-07-26. **ALP-G G3** sealed **2026-09-27** against `e5d5e24` (see § ALP-G G3 Certification Record). **G2b — SUPERSEDED/CLOSED** **2026-09-27** (see § ALP-G G2b Superseded Closeout). The 2026-09-13 owner deferral stands as history: the obsolete manual procedure was not executed and is not a pass. G2b was not marked PASS. The G2b closeout did not itself certify ALP1.  
 **Created:** 2026-07-26  
 **Prerequisite:** [`attachment_state_analysis.md`](attachment_state_analysis.md) ✅  
 **Implementation plan:** [`ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md`](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) 🔒 implemented A–F; G harness only  
@@ -970,3 +970,31 @@ Running item 19 literally would grade Thoth against that retired contract. A pas
 No still-valid G2b obligation is left unverified. The obsolete manual script was not run.
 
 **STATUS: G2b SUPERSEDED/CLOSED**
+
+---
+
+## ALP1 Certification Record ✅
+
+**Sealed:** 2026-09-27  
+**Overall:** **ALP1 CERTIFIED — 2026-09-27**  
+**Scope:** Full ALP1 under the current Attachment Lifecycle Protocol, including the 2026-09-10 Local Note **X** amendment. This seal does not mark G2b PASS. It does not modify the G3 certification record. It does not certify Timeout Phase B, optional R3/R4 GUI sign-off, deferred CSG-A automatic retrieval, or unlocked DWP work.
+
+| Field | Value |
+|-------|-------|
+| Certified product baseline | `e5d5e24e877931165593ca67693445d47f824abe` |
+| Engine / `external/basic_agent` | `a308ef493cb2a1ccdb4c59c898bb068575941803` |
+| G0 + G2a gate parent | `ab969f60924c2552d5ab84a20251f17b42fe9a48` |
+| G0 + G2a report | `agent_workspace/alp_certification/alp_g_report.json` timestamp `2026-09-27T19:23:59Z` — G0 **pass**, G2a **pass**. Report flag fields mirror the parent shell. The G2a process sets ALP flags internally. It recorded document `13e6441d-6513-45dc-afbb-c87ffc660ac3`, revision 1 `7d9b1f23-b890-4997-9063-3e195dab8003`, revision 2 `784700d5-bdc5-4873-8dbf-cc1a8cddce6a`. |
+| INV-11 test commit | `ad34c3ed2e7f37522ae72edb5f91b538ebe17c93` — `testAlpRevisionInFlightRejectsSecondAccept`. Test-only. It does not move the product baseline. |
+| G3 | **VERIFIED**. Historical G3 record unchanged. |
+| G2b | **SUPERSEDED/CLOSED**. Not PASS. |
+
+**Same-session `link_only` after X — PASS.** Isolated workspace. Session `session-gap2-a`. Document `55764d93-279c-4f4b-9944-c98dbc8cdb06`. Committed revision `f43db7f8-d992-476a-aff7-31c9c04791da`. Hash `53d39e2b61e7cce9f6117442ac08c82c97961249f463855f1eb8dc022455135f`. After X, session A’s link was absent, session B’s link remained, the revision stayed `committed`, and storage remained. Same-byte dry-run was `link_only` with the same document id and no new revision. Accept restored session A’s link as `no_op` on that same revision. Revision count stayed 1.
+
+**Accepted force replace — PASS.** Document `bb2d3235-2482-43f3-a23e-6b04bee0652b`. Dry-run was `conflict`. `force_replace=true` accepted `new_revision`. R1 `107b6fbf-4a65-4ae3-92d3-62ce79ae408a` hash `50299714e732a575a9e21436c5b0359c5ab38f958bd381ec9ff4b08c6ecc1f82` became `superseded`. R2 `b89cd0f5-ccc7-4266-9b14-fd0a172be5a9` hash `7bf0a3899ed18dffc334b786ac6ab8a42acab1f5e9cce1590a3612caf2b3e54c` became `committed`. Canonical storage matched R2. `gap3-note_1.md` was absent. The session link remained. The indexed chunk text was the R2 sentinel only.
+
+**INV-11 — PASS.** While the first accept was inside `INDEXING_STARTED`, a second accept of different bytes for the same document returned `revision_in_flight` and allocated no revision. `EngineError::conflict` for that code is what the HTTP error response publishes, and `engineErrorHttpStatus` for it is **409**. After release, the first revision committed and the registry held exactly that one committed revision. Evidence is commit `ad34c3ed2e7f37522ae72edb5f91b538ebe17c93`.
+
+The retired rule that Local Note **X** keeps the same session’s link is not a certification requirement. Optional G1 HTTP smoke, optional R3/R4 GUI sign-off, closed R6, deferred Remove from Engine, Timeout Phase B, deferred CSG-A automatic retrieval, and unlocked DWP text are not ALP1 certification debt.
+
+**STATUS: ALP1 CERTIFIED — 2026-09-27**
