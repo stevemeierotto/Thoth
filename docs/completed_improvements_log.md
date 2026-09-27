@@ -1,6 +1,14 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (C6.4 Phase 5)
+Last updated: 2026-09-27 (C6.4 Phase 6)
+
+## 2026-09-27 — C6.4 Phase 6 longitudinal analysis
+
+**Status:** Implemented on branch `c6/phase-6` only. Not merged. No official window is open. No live inference. Engine sources are unchanged.
+
+`scripts/c64_longitudinal_analyzer.py` reads prospective window assignments and applies the sealed C6.4 v1.0 scope, denominator, Wilson 95% interval, and trend rules. A first qualifying window is `official_baseline` with `trend=not_evaluable` and `reason=no_prior_window`. The report can record the two-window evidence pair. It does not promote Thoth. C6.3 fixtures and the sealed protocol text are unchanged.
+
+---
 
 ## 2026-09-27 — C6.4 Phase 5 prospective window attribution
 
