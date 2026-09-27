@@ -1,6 +1,14 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (C6.4 Phase 3)
+Last updated: 2026-09-27 (C6.4 Phase 4)
+
+## 2026-09-27 — C6.4 Phase 4 successor episodic evaluation
+
+**Status:** Implemented on branch `c6/phase-4` only. Not merged. No live inference. No official window. Historical E2, including `mean_episodic_lift = 0.0` on `n=3_strict_trio`, is unchanged. The old `--full` path still requires Ollama.
+
+`episodic_authoritative_v2` validates a paired E2-01..03 record through `InferenceClient` and accepts a Phase 3 `c64_cohort_fingerprint` without recomputing it. Mock runs cannot be marked authoritative. Provider mismatch and missing identity fail closed. llama.cpp and Ollama stay separate strata.
+
+---
 
 ## 2026-09-27 — C6.4 Phase 3 prospective environment identity
 

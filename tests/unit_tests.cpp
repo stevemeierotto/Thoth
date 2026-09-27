@@ -41,6 +41,7 @@
 #include "inference_endpoint.h"
 #include "inference_client.h"
 #include "mock_inference_client.h"
+#include "episodic_authoritative_v2.h"
 #include "ollama_client.h"
 #include "llama_server_client.h"
 #include "ollama_snapshot.h"
@@ -5354,6 +5355,123 @@ static bool testPlannerEvidenceSessionId() {
                   << "\n";
     }
     return ok;
+}
+
+static Thoth::EpisodicV2Request completeV2Request() {
+    Thoth::EpisodicV2Request request;
+    request.evaluation_tier = "authoritative";
+    request.inference_backend_name = "llama_cpp";
+    request.llm_model = "configured-llm";
+    request.embedding_model = "configured-embed";
+    request.embedding_method = "External";
+    request.embedding_dimension = 768;
+    request.thoth_git_sha = "product-sha";
+    request.basic_agent_git_sha = "engine-sha";
+    request.corpus_fingerprint = "corpus-abc";
+    request.environment_schema_version = "c64-env-1";
+    request.protocol_version = "C6.4 v1.0";
+    request.metric_schema_version = "1.0";
+    request.c64_cohort_fingerprint = std::string(64, 'a');
+    const auto cases = Thoth::getEpisodicLearningCases();
+    for (const auto& item : cases) {
+        Thoth::EpisodicV2Case row;
+        row.case_id = item.id;
+        row.baseline.present = true;
+        row.baseline.response_valid = true;
+        row.episodic.present = true;
+        row.episodic.response_valid = true;
+        request.cases.push_back(row);
+    }
+    return request;
+}
+
+static bool testEpisodicAuthoritativeV2() {
+    const char* prev = std::getenv("THOTH_INFERENCE_BACKEND");
+    setenv("THOTH_INFERENCE_BACKEND", "llama_cpp", 1);
+    auto llama = Thoth::makeEpisodicV2InferenceClient(nullptr);
+    setenv("THOTH_INFERENCE_BACKEND", "ollama", 1);
+    auto ollama = Thoth::makeEpisodicV2InferenceClient(nullptr);
+    if (prev) {
+        setenv("THOTH_INFERENCE_BACKEND", prev, 1);
+    } else {
+        unsetenv("THOTH_INFERENCE_BACKEND");
+    }
+    if (!llama || llama->backendName() != "llama_cpp" || !ollama || ollama->backendName() != "ollama") {
+        std::cerr << "testEpisodicAuthoritativeV2: InferenceClient provider selection drifted\n";
+        return false;
+    }
+
+    Thoth::MockInferenceClient client;
+    client.backend_name = "llama_cpp";
+    const auto okReport = Thoth::buildEpisodicAuthoritativeV2Report(completeV2Request(), &client);
+    if (!okReport.authoritative_valid ||
+        okReport.evidence.value("evaluation_id", "") != Thoth::kEpisodicAuthoritativeV2Id) {
+        std::cerr << "testEpisodicAuthoritativeV2: complete llama stratum was not recorded\n";
+        return false;
+    }
+    if (okReport.evidence["inference"].value("backend_name", "") != "llama_cpp" ||
+        okReport.evidence["model"].value("llm_model", "") != "configured-llm") {
+        std::cerr << "testEpisodicAuthoritativeV2: provider or model was not preserved\n";
+        return false;
+    }
+    if (okReport.evidence.contains("window_id")) {
+        std::cerr << "testEpisodicAuthoritativeV2: window attribution was opened\n";
+        return false;
+    }
+
+    client.backend_name = "ollama";
+    auto request = completeV2Request();
+    request.inference_backend_name = "ollama";
+    request.c64_cohort_fingerprint = std::string(64, 'b');
+    const auto ollamaReport = Thoth::buildEpisodicAuthoritativeV2Report(request, &client);
+    if (!ollamaReport.authoritative_valid ||
+        ollamaReport.evidence["inference"].value("backend_name", "") != "ollama" ||
+        ollamaReport.evidence.value("c64_cohort_fingerprint", "") ==
+            okReport.evidence.value("c64_cohort_fingerprint", "")) {
+        std::cerr << "testEpisodicAuthoritativeV2: provider strata were pooled\n";
+        return false;
+    }
+
+    client.backend_name = "ollama";
+    const auto mismatch = Thoth::buildEpisodicAuthoritativeV2Report(completeV2Request(), &client);
+    if (mismatch.authoritative_valid || mismatch.reason != "provider mismatch") {
+        std::cerr << "testEpisodicAuthoritativeV2: provider mismatch was accepted\n";
+        return false;
+    }
+
+    request = completeV2Request();
+    request.llm_model.clear();
+    client.backend_name = "llama_cpp";
+    const auto missing = Thoth::buildEpisodicAuthoritativeV2Report(request, &client);
+    if (missing.authoritative_valid || missing.reason != "missing required identity") {
+        std::cerr << "testEpisodicAuthoritativeV2: missing model was accepted\n";
+        return false;
+    }
+
+    request = completeV2Request();
+    request.evaluation_tier = "mock";
+    const auto mockReport = Thoth::buildEpisodicAuthoritativeV2Report(request, &client);
+    if (mockReport.authoritative_valid || mockReport.status != "mock") {
+        std::cerr << "testEpisodicAuthoritativeV2: mock run was labeled authoritative\n";
+        return false;
+    }
+
+    request = completeV2Request();
+    request.cases.back().episodic.present = false;
+    const auto incomplete = Thoth::buildEpisodicAuthoritativeV2Report(request, &client);
+    if (incomplete.authoritative_valid || incomplete.reason != "incomplete paired comparison") {
+        std::cerr << "testEpisodicAuthoritativeV2: incomplete pair produced a valid result\n";
+        return false;
+    }
+
+    const auto cases = okReport.evidence["cases"];
+    if (!cases.is_array() || cases.size() != 3 || cases[0].value("case_id", "") != "E2-01" ||
+        cases[0]["baseline"].value("condition", "") != "baseline" ||
+        cases[0]["episodic"].value("condition", "") != "episodic") {
+        std::cerr << "testEpisodicAuthoritativeV2: paired workload was not preserved\n";
+        return false;
+    }
+    return true;
 }
 
 namespace {
@@ -20994,6 +21112,7 @@ int main() {
     if (!testStrategyPromotion()) failures++;
     if (!testStrategyInjection()) failures++;
     if (!testPlannerEvidenceSessionId()) failures++;
+    if (!testEpisodicAuthoritativeV2()) failures++;
     if (!testE1AssembleEnvironmentDeterministic()) failures++;
     if (!testE1InferTierFromEnvFlags()) failures++;
     if (!testE1EnvironmentHashExcludesIndex()) failures++;

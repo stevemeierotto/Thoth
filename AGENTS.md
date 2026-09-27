@@ -5,7 +5,7 @@
 This document describes the architecture, conventions, and critical rules for this project. Following these guidelines ensures changes integrate cleanly and preserve the system's design integrity.
 
 **Last Updated**: 2026-09-27  
-**Status**: Current — product baseline `e5d5e24`. E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3 machinery, **C6.4 v1.0 locked 2026-09-27 (Phase 1 done; Phase 3 identity on `c6/phase-3`, not merged; no official window)**, ALP-A–F, **ALP1 CERTIFIED — 2026-09-27**, G2b superseded/closed, R6 closed, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
+**Status**: Current — product baseline `e5d5e24`. E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3 machinery, **C6.4 v1.0 locked 2026-09-27 (Phase 1 done; Phase 3 identity done; Phase 4 successor episodic on `c6/phase-4`, not merged; no official window)**, ALP-A–F, **ALP1 CERTIFIED — 2026-09-27**, G2b superseded/closed, R6 closed, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
 
 ---
 
@@ -652,7 +652,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 - Security enforcement (ConstraintChecker, sandbox boundaries)
 - E2 evaluation kernel + Phases A–E (Phase E v0.1 certified — see `docs/phases/PHASE_E_COMPLETE.md`)
 - C6 Phase 3 longitudinal analyzer, operator guide, and fixtures (`94012a4`). No official C6.3 window was collected
-- C6.4 v1.0 prospective protocol locked 2026-09-27 (`docs/C6_phase4_protocol.md`). Phase 1 instrumentation is implemented. Phase 3 prospective identity is on branch `c6/phase-3` and is not merged. Later phases and the first window are not started
+- C6.4 v1.0 prospective protocol locked 2026-09-27 (`docs/C6_phase4_protocol.md`). Phases 1 and 3 are implemented. Phase 4 successor episodic evaluation is on branch `c6/phase-4` and is not merged. No authoritative stratum has been run. No official window is open.
 - TCB mandatory sequence through TCB4 (2026-07-23). TCB5/TCB6 remain optional
 - ALP attachment lifecycle A–F (2026-07-26). **ALP1 CERTIFIED — 2026-09-27** against product baseline `e5d5e24` and Engine `a308ef4` (`docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP1 Certification Record). ALP-G **G3** remains **VERIFIED**. **G2b — SUPERSEDED/CLOSED** and was not marked PASS. The obsolete manual procedure was not executed.
 - CSG-B B.1–B.4, including manual acceptance 2026-09-13
