@@ -138,3 +138,18 @@ No deadlock observed; worker accepted sequential turns and returned to idle.
   0c-diagnostics-after-turn{1,2,3}.json
   0c-diagnostics-final.json
 ```
+
+---
+
+## R6 Closeout — 2026-09-27
+
+The sections above are the 2026-07-24 Phase 0 record. They were not re-run for closeout. Phase 0 left the GUI Send path unverified and did not observe Plan Execution.
+
+**R6 CLOSED 2026-09-27.** The sole remaining current gap after the formal audit was R6-04. It was verified by targeted live GUI observation on PID `105077`, workspace `/tmp/thoth-r6-04-gui`:
+
+| Session | Persisted `active_goal` | Plan Execution |
+|---------|-------------------------|----------------|
+| `r6-04-goal-20260927` | `R6-04 persisted goal alpha` | `Active Goal: R6-04 persisted goal alpha` · `State: Session (chat retrieval)` · no step rows |
+| `r6-04-nogoal-20260927` | empty | `Active Goal: None` · `State: Idle` · headers `Step` and `Status` only |
+
+The operator left the goal session and selected it again before the first reading. Restart strengthening was not performed. The center goal banner was not the pass condition. Deferred CSG-A.4 automatic retrieval was not tested. Other finding dispositions are in [`GUI_RESTORATION_PROTOCOL.md`](GUI_RESTORATION_PROTOCOL.md) § Phase R6 Closeout. G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED**. Full ALP1 remains unsigned. Timeout Phase B remains separate debt.

@@ -1,7 +1,7 @@
 # GUI Functional Restoration Protocol
 
 **Document type:** Focused restoration protocol (workflows first)  
-**Status:** R1 🔒 · R1.5 🔒 ✅ · **R2 🔒 Verify ✅ 2026-07-22** · **R3 🔒 Implement ✅** (Verify 🔶) · **R4 🔒 Implement ✅** (Verify 🔶 2026-07-24) · **R5 🔒 Implement ✅ 2026-07-23** · **Verify ✅ 2026-09-25**  
+**Status:** R1 🔒 · R1.5 🔒 ✅ · **R2 🔒 Verify ✅ 2026-07-22** · **R3 🔒 Implement ✅** (Verify 🔶) · **R4 🔒 Implement ✅** (Verify 🔶 2026-07-24) · **R5 🔒 Implement ✅ 2026-07-23** · **Verify ✅ 2026-09-25** · **R6 CLOSED 2026-09-27**  
 **Created:** 2026-07-21  
 **Refined:** 2026-07-21 (R1.5 complete; **R2 Engine Indexing Honesty** refined — ready for Lock R2)  
 **Phase R1 locked:** 2026-07-21  
@@ -740,7 +740,7 @@ Presentation, labeling, correlation, minimal observability on SSE (`session_id`)
 
 ## Phase R6 — End-to-End Functional Audit
 
-**Status:** Phase 0 Evidence ✅ 2026-07-24 · Implement pending. **R5 prerequisite ✅ 2026-09-25.** This line does not close R6.
+**Status:** **R6 CLOSED 2026-09-27.** The Phase 0 record below is the 2026-07-24 historical evidence and did not close R6. **R5 prerequisite ✅ 2026-09-25.** The R5 seal did not close R6.
 
 ### Phase R6 Phase 0 Evidence Record ✅
 
@@ -798,6 +798,45 @@ Restoration protocol complete — return to integration roadmap planning.
 
 Lock R6 → Implement (if any) → closeout approval.
 
+### Phase R6 Closeout ✅ 2026-09-27
+
+**Disposition:** **R6 CLOSED.** Documentation only. No source or test changes. Phase 0 was not re-run. G3 was not re-run. Deferred CSG-A.4 automatic retrieval was not tested.
+
+R6-04 was the only still-current criterion that lacked direct verification after the 2026-09-27 audit. This closeout records that targeted observation. The other findings keep the audit dispositions below. Historical Phase 0 text, including “GUI E1/E8 not yet captured” and the Phase 1 approval prompt, stays as the 2026-07-24 record.
+
+| Field | Value |
+|-------|-------|
+| Observed | **2026-09-27** |
+| Documentation parent | `a07af07abaafc418024185c474ee37b1417e065c` |
+| Product baseline | `e5d5e24e877931165593ca67693445d47f824abe` (unchanged) |
+| GUI | `build/debug/thoth-control-panel` PID `105077` |
+| Workspace | `/tmp/thoth-r6-04-gui` (isolated; development `agent_workspace/` was not edited) |
+| Backend | Remote, `http://127.0.0.1:8090`, from the existing `.env` |
+| Goal session | `r6-04-goal-20260927`, persisted `active_goal` = `R6-04 persisted goal alpha` |
+| No-goal session | `r6-04-nogoal-20260927`, persisted `active_goal` empty |
+| Restart strengthening | **Not performed.** Selecting the persisted session again was the R6-04 contract |
+
+**R6-04 PASS — goal session.** The operator left `r6-04-goal-20260927`, selected it again, and opened Observability → Plan Execution. The visible Plan Execution labels were `Active Goal: R6-04 persisted goal alpha` and `State: Session (chat retrieval)`. The Plan Execution step table showed no step rows. The center banner also showed that goal; it is supplementary and was not the pass condition.
+
+**R6-04 PASS — no-goal session.** The operator then selected `r6-04-nogoal-20260927` on the same Plan Execution tab. The visible labels were `Active Goal: None` and `State: Idle`. The step table showed only the `Step` and `Status` column headers.
+
+### Criterion disposition (audit, then this observation)
+
+| ID | Disposition |
+|----|-------------|
+| **R6-01** | **VERIFIED BY STRONGER LATER EVIDENCE.** R5 live inventory-versus-grounding check (2026-09-25) and G3-7 session-link retrieval. Hiding the global inventory is **SUPERSEDED** by R5-G4 (labeled unscoped inventory plus Local Notes). |
+| **R6-02** | **VERIFIED BY STRONGER LATER EVIDENCE.** Phase 0 verified HTTP ingest only. G3-1, G3-2, and G3-3 verified operator Send. |
+| **R6-03** | **VERIFIED BY ORIGINAL R6 EVIDENCE** as a diagnosis (Phase 0: backlog and generation length; a fresh worker returned HTTP 200 on all three turns). The advice not to raise the timeout is **SUPERSEDED** by the 900-second budget (2026-09-16). Timeout Phase B remains separate unfinished implementation. |
+| **R6-04** | **VERIFIED** 2026-09-27 by the Plan Execution observations above. Before that observation this criterion was implemented and unverified. |
+| **R6-05** | **VERIFIED BY ORIGINAL R6 EVIDENCE** as a diagnosis (the R4 live-turn hang matched worker backlog). Optional R4-V1–V6 and R4-V8 sign-off stays open and is not an R6 item. |
+| **R6-06** | **VERIFIED BY STRONGER LATER EVIDENCE.** R5 **VERIFIED** 2026-09-25. |
+| **R6-07** | **VERIFIED BY STRONGER LATER EVIDENCE.** Chat timing telemetry and `testChatRagPhase0ResponseTelemetryShape` / `testChatPhase0GenerationAttemptCount`. |
+| **R6-08** | **VERIFIED BY ORIGINAL R6 EVIDENCE.** Phase 0 turn table: prompt growth was modest and Turn 3 was the fastest turn. |
+
+This closeout does not certify full ALP1. G3 remains **VERIFIED** against `e5d5e24`. G2b remains **SUPERSEDED/CLOSED**.
+
+**STATUS: R6 CLOSED**
+
 ---
 
 ## Document control
@@ -809,7 +848,7 @@ Lock R6 → Implement (if any) → closeout approval.
 | Code changes | **Forbidden** until phase locked and `AGENTS.md` implement approval |
 | Normative companion | `GUI_integration.md` (architecture); this doc (function) |
 
-**Next human action:** R6 closeout remains separate (not started by the R5 seal). Optional **R4 Verify ✅** and **R3 Verify ✅** sign-off are still open.
+**Next human action:** R6 is **CLOSED** (2026-09-27). Optional **R4 Verify ✅** and **R3 Verify ✅** sign-off remain open. Full ALP1 remains unsigned. Timeout Phase B remains separate unfinished implementation.
 
 ---
 

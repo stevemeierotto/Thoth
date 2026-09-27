@@ -1,6 +1,19 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (ALP-G G2b superseded/closed)
+Last updated: 2026-09-27 (GUI restoration R6 closed)
+
+## 2026-09-27 — GUI restoration R6 closed
+
+**Status:** **R6 CLOSED.** Documentation only. No source or test changes. Phase 0 was not re-run. G3 was not re-run. Deferred CSG-A.4 automatic retrieval was not tested.
+
+R6-04 was the only still-current criterion without direct verification after the 2026-09-27 audit. Targeted Plan Execution observation on isolated workspace `/tmp/thoth-r6-04-gui`, GUI PID `105077`:
+
+- `r6-04-goal-20260927`, persisted `active_goal` `R6-04 persisted goal alpha` → `Active Goal: R6-04 persisted goal alpha`, `State: Session (chat retrieval)`, no step rows
+- `r6-04-nogoal-20260927`, empty `active_goal` → `Active Goal: None`, `State: Idle`, column headers only
+
+The other R6 findings keep the dispositions in [`GUI_RESTORATION_PROTOCOL.md`](GUI_RESTORATION_PROTOCOL.md) § Phase R6 Closeout. The 2026-07-24 Phase 0 record stays historical. G3 remains **VERIFIED** against `e5d5e24`. G2b remains **SUPERSEDED/CLOSED**. Full ALP1 remains unsigned. Timeout Phase B remains separate unfinished implementation. Optional R3 and R4 GUI sign-off remain open.
+
+---
 
 ## 2026-09-27 — ALP-G G2b superseded/closed
 

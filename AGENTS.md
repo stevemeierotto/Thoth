@@ -5,7 +5,7 @@
 This document describes the architecture, conventions, and critical rules for this project. Following these guidelines ensures changes integrate cleanly and preserve the system's design integrity.
 
 **Last Updated**: 2026-09-27  
-**Status**: Current — reconciled to `main` (`e5d5e24`). E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3, ALP-A–F, ALP-G G3, G2b superseded/closed, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
+**Status**: Current — reconciled to `main` (`e5d5e24`). E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3, ALP-A–F, ALP-G G3, G2b superseded/closed, R6 closed, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
 
 ---
 
@@ -659,6 +659,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 - Decision Tape on committed engine events, including idle and live chat ownership (`de6811b`, 2026-09-25)
 - Shared text-generation budget of 900 seconds, deployed to the Docker Engine image 2026-09-16 (`THOTH_LLM_TIMEOUT_SECONDS`)
 - Goal banner **Run**: explicit start or restart of an executive plan for the displayed session goal. **Send** stays chat-only
+- GUI restoration **R6 CLOSED** 2026-09-27. R6-04 Plan Execution goal restore was the remaining live check (`docs/GUI_RESTORATION_PROTOCOL.md` § Phase R6 Closeout). Optional R3 and R4 GUI sign-off remain open. This closeout does not certify full ALP1
 
 ### 🔬 Prototype / Partial
 
@@ -668,7 +669,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 ### ⏳ Genuinely unfinished (not the same as deferred)
 
 - **Missing implementation:** LLM step cancellation after a soft timeout. The 900-second budget is deployed. `std::async` still joins the timed-out step before `STEP_FAILED` (timeout Phase B, recorded 2026-09-16).
-- **Missing verification:** GUI restoration R6 closeout was not recorded after later GUI work. ALP-G G2b is **SUPERSEDED/CLOSED** (2026-09-27), not an open sign-off. G3 is sealed. Full ALP1 remains unsigned.
+- **Missing verification:** Full ALP1 remains unsigned. Optional R3 and R4 GUI sign-off remain open (`docs/GUI_RESTORATION_PROTOCOL.md`). GUI restoration R6 is **CLOSED** (2026-09-27). G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED**.
 - **Research awaiting an owner decision:** B1 publication suite is a candidate awaiting freeze (`docs/B1_PROTOCOL.md`). E3 SCR harness is specified and not built. M5 vector-store benchmark scaffold is not built. G1e further magnitude probes stay paused.
 - **Small product gap:** File → Export Session shows an unimplemented menu message.
 
