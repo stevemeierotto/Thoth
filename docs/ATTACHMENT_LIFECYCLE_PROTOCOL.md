@@ -1,7 +1,7 @@
 # Thoth Attachment Lifecycle Protocol
 
 **Document type:** Architecture protocol (GUI ↔ Engine attachment lifecycle)  
-**Status:** **ALP1** 🔒 **LOCKED** **2026-07-26** — normative lifecycle + P0 decisions. Lock-time text required plan approval before code. **Later outcome:** ALP-A–F implemented 2026-07-26. **ALP-G** full certification remains deferred operator verification (G2b/G3; owner deferral 2026-09-13).  
+**Status:** **ALP1** 🔒 **LOCKED** **2026-07-26** — normative lifecycle + P0 decisions. Lock-time text required plan approval before code. **Later outcome:** ALP-A–F implemented 2026-07-26. **ALP-G G3** sealed **2026-09-27** against `e5d5e24` (see § ALP-G G3 Certification Record). **G2b** and full ALP1 certification remain unsigned (G2b owner deferral 2026-09-13 stands).  
 **Created:** 2026-07-26  
 **Prerequisite:** [`attachment_state_analysis.md`](attachment_state_analysis.md) ✅  
 **Implementation plan:** [`ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md`](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) 🔒 implemented A–F; G harness only  
@@ -865,3 +865,62 @@ All P0 clarifications resolved in **§ALP1 P0 Decisions**. Former ambiguities A1
 **STATUS:** ALP1 🔒 locked. Implementation plan published. **STOP.** No code.
 
 **Next step:** Review implementation plan → `AGENTS.md` approval → implement.
+
+---
+
+## ALP-G G3 Certification Record ✅
+
+**Sealed:** 2026-09-27  
+**Overall:** **G3 VERIFIED**  
+**Scope:** One coherent manual G3 run. This seal does not sign G2b and does not claim full ALP1 certification.
+
+| Field | Value |
+|-------|-------|
+| Parent | `e5d5e24e877931165593ca67693445d47f824abe` |
+| Subject | `fix(gui): place each Local Note X in its own slot` |
+| `external/basic_agent` | `a308ef493cb2a1ccdb4c59c898bb068575941803` |
+| Isolated Engine | `thoth-g3-engine` `692169b9ac18` on `http://127.0.0.1:8091` |
+| Image | `thoth-engine:local` `sha256:98da282ca45485728b55042b3eb1b297da914e9143f8f7c270ee9d08121ad2b4` |
+| Volumes | `thoth-g3-workspace`, `thoth-g3-logs` (created 2026-09-27 09:00, empty corpus before the run) |
+| Live Engine | Untouched. `thoth-thoth-engine-1` `4dc93c83cdaa` on port 8090 |
+| GUI workspace | `/tmp/thoth-g3-gui-e5d5e24-final` |
+| Session | `session-1790528962216-c4f8a4c1` |
+| GUI PIDs | `74422` (G3-1 through G3-4), `80181` (G3-5 through G3-7) |
+| `/ready` before the run | `status=ready`, `llama_cpp`, embedding dimension 768, capabilities included `corpus` and `ingest` |
+| G3-1 | **PASS** |
+| G3-2 | **PASS** |
+| G3-3 | **PASS** |
+| G3-4 | **PASS** |
+| G3-5 | **PASS** |
+| G3-6 | **PASS** |
+| G3-7 | **PASS** — X lifecycle, positive retrieval, and negative retrieval |
+
+`G3-3 criterion corrected before this run: single-candidate no_op uses the documented auto-select path; chooser-only label is not required.`
+
+The run started from an empty corpus. Source and tests were not edited during certification. GUI imports, Send, decline, exit, and chat submission were performed by the operator. Native file choosers were not automated.
+
+**G3-1.** With the isolated Engine stopped and PID `74422` still up, import of `/tmp/thoth-g3-local-notes-e5d5e24/g3-cert.md` produced a host-only slot. The corpus line was **Corpus listing unavailable.** The log recorded `listCorpusDocuments failed: Couldn't connect to server`. The saved session held only the host path. Hash `1e3225a4155b698a90367f871ded0b776f760a8e7c9e35900ff490b9f3b84363`. No document id, revision id, or session link. **Send to Engine** stayed disabled.
+
+**G3-2.** The same container `692169b9ac18` restarted. The GUI was not restarted. The corpus line returned to **Corpus is empty.** The note stayed host-only. **Send to Engine** became enabled. Cache `reconcile_verified` was true with empty `document_id` and `revision_id`. Dry-run was `action: create` and did not create a document. There was no `document_registry.json`.
+
+**G3-3 — create.** Document `04b86ca3-42cb-49f4-b2ef-9a075af0c617`. Committed revision `57bbcbca-ff3a-4f6e-b981-ee9f0aa9cf8c`. Hash `1e3225a4155b698a90367f871ded0b776f760a8e7c9e35900ff490b9f3b84363`. `local_source_mtime` `1790529203`. Indexed `2026-09-27T17:16:22Z` (`indexed_at_ms` `1790529382887`). One session link from `session-1790528962216-c4f8a4c1`.
+
+**G3-3 — no_op.** An unchanged Send kept that revision and that single link. One eligible Local Note auto-selected. No chooser appeared.
+
+**G3-3 — new revision.** Later mtime `1790529622`, hash `3e8f38b001bd106a5418aba4ad19b619e87184c17a20cd1db0528f805587ec6e`. Dry-run `action: new_revision`. No new revision was stored. With one Local Note, the chooser label **Update available** was not required.
+
+**G3-3 — conflict.** Earlier mtime `1790529000`, hash `b6053aaadad8859277cc827fbed033c1eb6dcf990974a925812f7837856559ed`. Dry-run `action: conflict`.
+
+**G3-4.** **No** on **Confirm force replace** left the same document, revision, committed hash, local mtime `1790529000`, and one session link. A later dry-run was still `conflict`.
+
+**G3-5.** PID `74422` was closed. PID `80181` reopened the same workspace against the same Engine. The cache still named the same document and revision. The cache hash was the conflict file. Dry-run stayed `conflict`. No extra revision or session link was invented.
+
+**G3-6.** `g3-empty.md` was a 0-byte host-only slot with no document id and no session link. An empty-content request returned HTTP 400, `content must not be empty`. `g3-cert.md` still dry-ran as `conflict`. The corpus stayed one document.
+
+**G3-7 — X lifecycle.** Side document `6fa741e9-ce41-4caf-be83-cca89d590eff`. Revision `d7db566f-b53a-48a7-bc4c-116966bc9813`. Hash `af856b7ea59411487d7a8fa90f6e0a1445b7f865c44255a92e4023d1191edf5b`. Stored at `/workspace/rag/attachments/g3-side.md`. Before the click, the side **X** at `(1913, 763)` sat on the row of `g3-side.md · id=6fa741e9 · 1 chunk` at `(1378, 770)`. The cert **X** was `(1913, 722)`. The empty-note **X** was `(2549, 722)`. Empty Slot 4’s **X** was hidden. **Send to Engine** stayed visible. After the click, the session file and cache no longer contained `g3-side.md`. The only session link was the cert document. The side document, revision, stored file, and corpus entry remained.
+
+**G3-7 — positive retrieval.** Request `req-1790530424803-0`. Scope tier `session_attachment`, selected document `g3-cert.md`. Candidate `g3-cert.md` score `0.265`. Grounded `true`, mode `retrieved_context`, documents `g3-cert.md`. The context record contains `G3_CERT_SENTINEL_001` and does not contain `g3-side.md`.
+
+**G3-7 — negative retrieval.** Request `req-1790530728467-1`, query `Where does G3_SIDE_SENTINEL_004 appear?`. Scope selected `g3-cert.md` only. The retrieved chunk was `g3-cert.md`, score `0.194`. Grounded documents were `g3-cert.md`. `g3-side.md` was absent from the record. The side sentinel appeared in the user query inside the assembled prompt, and not in a retrieved chunk. The side document remained in the Engine corpus.
+
+**STATUS: G3 VERIFIED — CERTIFICATION RECORD SEALED**

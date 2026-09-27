@@ -1834,10 +1834,9 @@ Per [`AGENTS.md`](../AGENTS.md):
 | **ALP-C** | 2026-07-26 | ✅ Complete | `attachment_send_policy.h`, `alp_uuid.h`; ALP create path (`createCorpusDocumentAlp`); send policy + 409 machine codes; HTTP/backend hash/mtime/force_replace/dry_run; misconfigured gate (`ENABLED` requires `TX_INDEX`); canonical slot (no suffix); 5 unit tests |
 | **ALP-F** | 2026-07-26 | ✅ Complete | Session-link retrieval filter; `CodeChunk.document_id`; `RetrievalScope.linked_document_ids`; fail-closed orphan classify; committed-revision visibility; 4 unit tests |
 | **ALP-E** | 2026-07-26 | ✅ Complete | Engine-driven picker via `dry_run` intent; reconcile on corpus refresh; `force_replace` conflict UX; extended `local_note_engine` cache; sandbox key remap; legacy_id_map upgrade; safety review locks (state machine, match ladders, timeouts); 12 unit tests |
-| **ALP-G** | 2026-07-27 | 🔶 Harness; operator certification deferred 2026-09-13 | `alp_g_verify.sh` (preflight/gate/engine); G2a EGAR lifecycle + ALP-F isolation; `alp_g_report.json`; `docker/alp.env.example`; README item 19. **G2b/G3 have not been run or signed off; do not claim full ALP1 certification.** |
+| **ALP-G** | 2026-07-27 | 🔶 Harness; **G3 sealed 2026-09-27**; G2b unsigned | `alp_g_verify.sh` (preflight/gate/engine); G2a EGAR lifecycle + ALP-F isolation; `alp_g_report.json`; `docker/alp.env.example`; README item 19. **G3 VERIFIED** against `e5d5e24` — see `ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP-G G3 Certification Record. **G2b has not been signed off; do not claim full ALP1 certification.** |
 
-**Deferred:** Owner deferred G2b/G3 manual sign-off on 2026-09-13. ALP-G remains
-an automated-harness close-out only; reopen the documented clean-workspace
-operator procedure when full ALP1 certification is needed.
+**Deferred:** Owner deferred G2b manual sign-off on 2026-09-13. That deferral
+stands. G3 was sealed on 2026-09-27. Full ALP1 certification still requires G2b.
 
 ---

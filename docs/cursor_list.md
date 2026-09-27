@@ -1,6 +1,6 @@
 # Thoth Working Backlog
 
-**Last updated:** 2026-09-25 (status reconciliation). Historical checkpoint notes below keep their original “paused before” wording. Current open work is the backlog section at the end of this file, aligned with `AGENTS.md`: B1 freeze, E3, M5, paused G1e magnitude, timeout Phase B, and ALP-G verification. M4, G1d, C6 Phase 3, and the shipped Decision Tape are done. CSG-A automatic restart retrieval is deferred.  
+**Last updated:** 2026-09-27 (ALP-G G3 seal). Historical checkpoint notes below keep their original “paused before” wording. Current open work is the backlog section at the end of this file, aligned with `AGENTS.md`: B1 freeze, E3, M5, paused G1e magnitude, timeout Phase B, and ALP-G G2b. G3 is sealed. M4, G1d, C6 Phase 3, and the shipped Decision Tape are done. CSG-A automatic restart retrieval is deferred.  
 **Purpose:** Active todo list for the next development sessions. Specs live in `improvements.md`; finished work is logged in `completed_improvements_log.md`.
 
 **Workflow gate:** All checkpoint work in this file follows the Planning/Implementation Gate in AGENTS.md — plan and stop, wait for explicit approval, then implement.

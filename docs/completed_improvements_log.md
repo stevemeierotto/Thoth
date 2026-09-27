@@ -1,6 +1,22 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-25 (R5 Verify Record)
+Last updated: 2026-09-27 (ALP-G G3 seal)
+
+## 2026-09-27 — ALP-G G3 certified
+
+**Status:** ✅ **G3 VERIFIED.** Documentation only. No source, test, Docker, volume, or corpus changes in this seal.
+
+One coherent manual G3 run against parent `e5d5e24e877931165593ca67693445d47f824abe` and Engine gitlink `a308ef493cb2a1ccdb4c59c898bb068575941803`. Isolated Engine `thoth-g3-engine` `692169b9ac18` on `http://127.0.0.1:8091`, image `thoth-engine:local` `sha256:98da282ca45485728b55042b3eb1b297da914e9143f8f7c270ee9d08121ad2b4`. GUI workspace `/tmp/thoth-g3-gui-e5d5e24-final`. Session `session-1790528962216-c4f8a4c1`. PIDs `74422` then `80181`.
+
+G3-1 through G3-7 passed, including the side-note **X** lifecycle and the positive/negative retrieval pair (`req-1790530424803-0`, `req-1790530728467-1`).
+
+`G3-3 criterion corrected before this run: single-candidate no_op uses the documented auto-select path; chooser-only label is not required.`
+
+This seal does not sign G2b and does not claim full ALP1 certification. G2b remains the 2026-09-13 owner deferral.
+
+Record: [`ATTACHMENT_LIFECYCLE_PROTOCOL.md`](ATTACHMENT_LIFECYCLE_PROTOCOL.md) § ALP-G G3 Certification Record.
+
+---
 
 ## 2026-09-25 — GUI Restoration R5 verified
 

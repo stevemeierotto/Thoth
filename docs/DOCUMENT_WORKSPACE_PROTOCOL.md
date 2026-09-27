@@ -45,7 +45,7 @@ Implementation requires explicit human approval per `AGENTS.md`. **No code chang
 | Layer | Document | Role relative to DWP |
 |-------|----------|----------------------|
 | **Identity & lifecycle** | [ALP1 🔒](ATTACHMENT_LIFECYCLE_PROTOCOL.md) | Normative: `document_id`, revisions, session links, transactional indexing |
-| **Implementation detail** | [ALP1 Implementation Plan](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) | Phases A–G; code largely complete; certification pending |
+| **Implementation detail** | [ALP1 Implementation Plan](ATTACHMENT_LIFECYCLE_ALP1_IMPLEMENTATION_PLAN.md) | Phases A–G; code largely complete; G3 sealed 2026-09-27; G2b and full ALP1 unsigned |
 | **Retrieval scope** | [TCB 🔒](THOTH_AGENT_CONTEXT_BOUNDARY_PROTOCOL.md) | TCB2 scope; **TCB-ALP amendment** — filter by session link + `document_id` |
 | **Operator product model** | **DWP (this document)** | Engine Inventory + chat attachments + dual GUI workflows + migration/rollout |
 
@@ -174,7 +174,7 @@ GRAG scoring unchanged; **scope** bounds the candidate set.
 | **G8** | Revision editing not stubbed for future work | Low (this phase) |
 | **G9** | Failed suffix orphans in inventory (`EGAR_1`, `EGAR_2`) | Medium |
 | **G10** | Synchronous indexing blocks Engine HTTP (SSE / health) | High |
-| **G11** | ALP-G operator certification incomplete (G2b/G3) | Medium |
+| **G11** | ALP-G G2b operator certification incomplete. G3 sealed 2026-09-27 | Medium |
 
 ---
 
