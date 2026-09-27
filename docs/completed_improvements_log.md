@@ -1,6 +1,14 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (C6.4 Phase 4)
+Last updated: 2026-09-27 (C6.4 Phase 5)
+
+## 2026-09-27 — C6.4 Phase 5 prospective window attribution
+
+**Status:** Implemented on branch `c6/phase-5` only. Not merged. No official window is open. No live inference. Trend classification is not implemented.
+
+A window record can be written only with a complete authoritative `c64-env-1` pin and passing mock C3/C5 records for the same git SHAs. `ExecutiveController` attributes a goal when `THOTH_C64_WINDOW_FILE` names an open window and `THOTH_C64_CURRENT_FINGERPRINT` matches the frozen fingerprint. Membership uses `goal_started_at_ms` inclusive `[window_start_ms, window_end_ms]`. Production leaves the window file unset, so no real window is open.
+
+---
 
 ## 2026-09-27 — C6.4 Phase 4 successor episodic evaluation
 

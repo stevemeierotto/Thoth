@@ -104,6 +104,13 @@ if(TARGET run_episodic_learning_benchmark)
     )
 endif()
 
+add_test(NAME c64-window-attribution COMMAND python3 scripts/test_c64_window.py)
+set_tests_properties(c64-window-attribution PROPERTIES
+    LABELS "pr;fast"
+    TIMEOUT 60
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 add_test(NAME c64-environment-identity COMMAND python3 scripts/test_c64_environment_identity.py)
 set_tests_properties(c64-environment-identity PROPERTIES
     LABELS "pr;fast"

@@ -42,6 +42,7 @@
 #include "inference_client.h"
 #include "mock_inference_client.h"
 #include "episodic_authoritative_v2.h"
+#include "c64_window_attribution.h"
 #include "ollama_client.h"
 #include "llama_server_client.h"
 #include "ollama_snapshot.h"
@@ -5469,6 +5470,54 @@ static bool testEpisodicAuthoritativeV2() {
         cases[0]["baseline"].value("condition", "") != "baseline" ||
         cases[0]["episodic"].value("condition", "") != "episodic") {
         std::cerr << "testEpisodicAuthoritativeV2: paired workload was not preserved\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testC64WindowAttribution() {
+    const std::int64_t start = 1700000000000LL;
+    const std::int64_t span = Thoth::kC64WindowSpanMs;
+    if (!Thoth::c64GoalStartedInWindow(start, start + span, start) ||
+        !Thoth::c64GoalStartedInWindow(start, start + span, start + span) ||
+        Thoth::c64GoalStartedInWindow(start, start + span, start - 1) ||
+        Thoth::c64GoalStartedInWindow(start, start + span, start + span + 1)) {
+        std::cerr << "testC64WindowAttribution: boundary rule mismatch\n";
+        return false;
+    }
+    if (Thoth::resolveC64WindowAssignment(start).assigned) {
+        std::cerr << "testC64WindowAttribution: attributed without a window file\n";
+        return false;
+    }
+    const char* prevFile = std::getenv("THOTH_C64_WINDOW_FILE");
+    const char* prevFp = std::getenv("THOTH_C64_CURRENT_FINGERPRINT");
+    const fs::path path = fs::temp_directory_path() / "c64-phase5-window.json";
+    {
+        std::ofstream out(path);
+        out << "{\"status\":\"open\",\"window_id\":\"c64w-test\",\"protocol_version\":\"C6.4 v1.0\","
+               "\"metric_schema_version\":\"1.0\",\"environment_schema_version\":\"c64-env-1\","
+               "\"evaluation_tier\":\"authoritative\",\"window_start_ms\":1700000000000,\"window_end_ms\":"
+            << (start + span) << ",\"c64_cohort_fingerprint\":\"" << std::string(64, 'a') << "\"}";
+    }
+    setenv("THOTH_C64_WINDOW_FILE", path.string().c_str(), 1);
+    setenv("THOTH_C64_CURRENT_FINGERPRINT", std::string(64, 'b').c_str(), 1);
+    const auto mismatch = Thoth::resolveC64WindowAssignment(start + 1);
+    setenv("THOTH_C64_CURRENT_FINGERPRINT", std::string(64, 'a').c_str(), 1);
+    const auto match = Thoth::resolveC64WindowAssignment(start + 1);
+    const auto after = Thoth::resolveC64WindowAssignment(start + span + 1);
+    fs::remove(path);
+    if (prevFile) {
+        setenv("THOTH_C64_WINDOW_FILE", prevFile, 1);
+    } else {
+        unsetenv("THOTH_C64_WINDOW_FILE");
+    }
+    if (prevFp) {
+        setenv("THOTH_C64_CURRENT_FINGERPRINT", prevFp, 1);
+    } else {
+        unsetenv("THOTH_C64_CURRENT_FINGERPRINT");
+    }
+    if (mismatch.assigned || !match.assigned || match.window_id != "c64w-test" || after.assigned) {
+        std::cerr << "testC64WindowAttribution: assignment rule failed\n";
         return false;
     }
     return true;
@@ -21113,6 +21162,7 @@ int main() {
     if (!testStrategyInjection()) failures++;
     if (!testPlannerEvidenceSessionId()) failures++;
     if (!testEpisodicAuthoritativeV2()) failures++;
+    if (!testC64WindowAttribution()) failures++;
     if (!testE1AssembleEnvironmentDeterministic()) failures++;
     if (!testE1InferTierFromEnvFlags()) failures++;
     if (!testE1EnvironmentHashExcludesIndex()) failures++;
