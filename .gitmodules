@@ -1,0 +1,3 @@
+[submodule "external/basic_agent"]
+	path = external/basic_agent
+	url = git@github.com:stevemeierotto/Basic_agent.git
