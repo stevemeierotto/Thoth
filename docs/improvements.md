@@ -77,7 +77,7 @@ Before making any changes:
 
 ## C6 Phase 4 — prospective longitudinal protocol (C6.4)
 
-**Status:** 🔒 **Locked** 2026-09-27. Phase 1 instrumentation is implemented. Phases 3–8 are not started. No window opened.  
+**Status:** 🔒 **Locked** 2026-09-27. Phase 1 instrumentation is implemented. Phase 3 prospective identity is implemented on branch `c6/phase-3` and is not merged. Phases 4–8 are not started. No window opened.  
 **Authority:** [`C6_phase4_protocol.md`](C6_phase4_protocol.md) C6.4 v1.0  
 **Relationship to the section below:** C6.3 v0.2.1 and its promotion text stay historical. No official C6.3 window was collected. New prospective evidence and promotion eligibility follow C6.4. An owner-signed promotion record, when one exists, is still written in this file. None exists.
 

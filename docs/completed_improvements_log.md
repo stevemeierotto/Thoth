@@ -1,6 +1,14 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (C6.4 Phase 1)
+Last updated: 2026-09-27 (C6.4 Phase 3)
+
+## 2026-09-27 — C6.4 Phase 3 prospective environment identity
+
+**Status:** Implemented on branch `c6/phase-3` only. Not merged. No official window. C6.4 v1.0 protocol text unchanged. Engine sources unchanged; Product pin records checked-out Engine `5b878ff`.
+
+`scripts/c64_environment_identity.py` builds a `c64-env-1` pin and `c64_cohort_fingerprint` from the sealed input set. `evaluation_tier` is supplied separately from `inference.backend_name`. Historical `BenchmarkTier` values are rejected as tiers. `environment_hash` is stored beside the fingerprint and is not an input to it. Retrieval weights and the runtime memory policy (`max_hot_messages`, `max_hot_age_days`, `prune_batch_size`) are digested. Compile-time strategy and plan-reuse thresholds stay inside `basic_agent_git_sha`.
+
+---
 
 ## 2026-09-27 — C6.4 Phase 1 instrumentation
 
