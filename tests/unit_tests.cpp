@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdlib>
 #include <deque>
 #include <fcntl.h>
@@ -12,6 +13,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -19713,6 +19715,148 @@ static bool testAlpEReconcileStateMachine() {
 }
 
 /**
+ * INV-11 — a second accept while INDEXING_STARTED is in progress is rejected.
+ * The callback is the existing worker barrier; it does not change indexing.
+ */
+static bool testAlpRevisionInFlightRejectsSecondAccept() {
+    using namespace Thoth;
+
+    ScopedEnvVar alp_enabled("THOTH_ALP_ENABLED", "1");
+    ScopedEnvVar tx_index("THOTH_ALP_TX_INDEX", "1");
+    ScopedEnvVar greenfield("THOTH_ALP_GREENFIELD", "1");
+
+    const fs::path workspace = makeTempPath("thoth_alp_inv11");
+    fs::remove_all(workspace);
+    fs::create_directories(workspace / "rag");
+    ScopedEnvVar workspace_env("THOTH_WORKSPACE_PATH", workspace.string().c_str());
+
+    auto fail = [&](const char* msg) {
+        std::cerr << "testAlpRevisionInFlightRejectsSecondAccept: " << msg << "\n";
+        return false;
+    };
+
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+    idx.init("");
+
+    std::mutex mu;
+    std::condition_variable cv;
+    bool indexing_started = false;
+    bool release_indexing = false;
+    struct ReleaseIndexing {
+        std::mutex& mu;
+        std::condition_variable& cv;
+        bool& release;
+        ~ReleaseIndexing() {
+            std::lock_guard<std::mutex> lock(mu);
+            release = true;
+            cv.notify_all();
+        }
+    } release_guard{mu, cv, release_indexing};
+    idx.setEventCallback([&](const ControllerEvent& ev) {
+        if (ev.type != EventType::INDEXING_STARTED) {
+            return;
+        }
+        std::unique_lock<std::mutex> lock(mu);
+        indexing_started = true;
+        cv.notify_all();
+        cv.wait(lock, [&] { return release_indexing; });
+    });
+
+    FileHandler fh;
+    const std::string slot = "alp_inv11.md";
+    const std::string body1 = "INV11 first in flight revision token INV11FIRST.\n";
+    const std::string body2 = "INV11 second accept must be rejected token INV11SECOND.\n";
+
+    IndexManager::CreateCorpusDocumentOptions first_opts;
+    first_opts.content_hash = sha256Hex(body1);
+    first_opts.local_source_mtime_sec = 1'800'000'000LL;
+    const auto first = idx.createCorpusDocument(
+        fh.getRagDirectory(), slot, body1, "session-inv11", first_opts);
+    if (!first.ok || first.action != "create" || first.document_id.empty()
+        || first.revision_id.empty()) {
+        std::cerr << "testAlpRevisionInFlightRejectsSecondAccept: first accept action="
+                  << first.action << " err=" << first.error << "\n";
+        return fail("first accept failed");
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(mu);
+        if (!cv.wait_for(lock, std::chrono::seconds(10), [&] { return indexing_started; })) {
+            return fail("first revision never reached INDEXING_STARTED");
+        }
+    }
+
+    IndexManager::CreateCorpusDocumentOptions second_opts;
+    second_opts.content_hash = sha256Hex(body2);
+    second_opts.local_source_mtime_sec = 1'900'000'000LL;
+    const auto second = idx.createCorpusDocument(
+        fh.getRagDirectory(), slot, body2, "session-inv11", second_opts);
+
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        release_indexing = true;
+    }
+    cv.notify_all();
+
+    if (second.ok || second.machine_code != "revision_in_flight"
+        || second.document_id != first.document_id || !second.revision_id.empty()) {
+        std::cerr << "testAlpRevisionInFlightRejectsSecondAccept: second action="
+                  << second.action << " code=" << second.machine_code
+                  << " revision=" << second.revision_id << " err=" << second.error << "\n";
+        return fail("second accept was not revision_in_flight");
+    }
+
+    const EngineError http = EngineError::conflict(
+        second.machine_code,
+        second.error,
+        nlohmann::json{{"document_id", second.document_id}});
+    if (engineErrorHttpStatus(http.code) != 409) {
+        return fail("revision_in_flight does not map to HTTP 409");
+    }
+    const nlohmann::json http_body = nlohmann::json::parse(http.toJson());
+    if (http_body["error"].value("code", "") != "CONFLICT"
+        || http_body["error"].value("machine_code", "") != "revision_in_flight") {
+        return fail("HTTP error body missing revision_in_flight");
+    }
+
+    bool committed = false;
+    for (int i = 0; i < 400; ++i) {
+        const auto current = idx.getDocumentRegistry().findCommittedRevision(first.document_id);
+        if (current && current->revision_id == first.revision_id && current->chunk_count > 0) {
+            committed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    if (!committed) {
+        return fail("first revision did not commit after the in-flight window");
+    }
+
+    int revisions = 0;
+    const auto& registry = idx.getDocumentRegistry().body();
+    if (registry.contains("revisions") && registry["revisions"].is_array()) {
+        for (const auto& row : registry["revisions"]) {
+            if (row.value("document_id", "") != first.document_id) {
+                continue;
+            }
+            ++revisions;
+            if (row.value("revision_id", "") != first.revision_id
+                || row.value("state", "") != "committed") {
+                return fail("registry has a revision other than the first committed one");
+            }
+        }
+    }
+    if (revisions != 1) {
+        return fail("expected exactly one revision");
+    }
+
+    fs::remove_all(workspace);
+    return true;
+}
+
+/**
  * ALP-G / ALP-E operator scenario — the EGAR.md lifecycle that caused weeks of pain.
  * Simulates GUI + Engine chain in an isolated workspace (not piece tests).
  */
@@ -20852,6 +20996,7 @@ int main() {
     if (!testAlpEIndexingEventNoBasenameOnlyAlpGui()) failures++;
     if (!testAlpECorpusMatchLadderAmbiguousName()) failures++;
     if (!testAlpECorpusMatchLegacyMap()) failures++;
+    if (!testAlpRevisionInFlightRejectsSecondAccept()) failures++;
     if (!testAlpEEgarOperatorLifecycle()) failures++;
     if (!testAlpEDryRunIntentIntegration()) failures++;
     if (!testSessionReclaimDefaultOwnedOnResend()) failures++;
