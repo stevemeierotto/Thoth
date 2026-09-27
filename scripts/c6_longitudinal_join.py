@@ -279,16 +279,16 @@ def validate_metrics_rows(rows: list[dict[str, Any]], summary: ValidationSummary
 
 
 def validate_app_log_rows(rows: list[dict[str, Any]], summary: ValidationSummary, verbose_issues: bool) -> list[dict[str, Any]]:
+    """Shared app log. Only strategy candidates are C6 evidence; other events are ignored."""
     valid: list[dict[str, Any]] = []
     for row in rows:
         line = int(row.get("_source_line", 0))
+        event_name = row.get("event_name")
+        if event_name not in STRATEGY_EVENT_NAMES:
+            continue
         session_id = row.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             _record_invalid(summary, "app_log", line, "missing session_id", verbose_issues)
-            continue
-        event_name = row.get("event_name")
-        if event_name not in STRATEGY_EVENT_NAMES:
-            _record_invalid(summary, "app_log", line, "unsupported event_name", verbose_issues)
             continue
         if normalize_timestamp_ms(row.get("timestamp_ms")) is None:
             _record_invalid(summary, "app_log", line, "invalid timestamp_ms", verbose_issues)
@@ -298,11 +298,11 @@ def validate_app_log_rows(rows: list[dict[str, Any]], summary: ValidationSummary
 
 
 def validate_trace_rows(rows: list[dict[str, Any]], summary: ValidationSummary, verbose_issues: bool) -> list[dict[str, Any]]:
+    """Shared decision trace. Only memory_consolidation rows are C6 evidence."""
     valid: list[dict[str, Any]] = []
     for row in rows:
         line = int(row.get("_source_line", 0))
-        if not row.get("trace_type"):
-            _record_invalid(summary, "trace", line, "missing trace_type", verbose_issues)
+        if row.get("trace_type") != "memory_consolidation":
             continue
         if normalize_timestamp_ms(row.get("finished_at_ms")) is None:
             _record_invalid(summary, "trace", line, "invalid finished_at_ms", verbose_issues)

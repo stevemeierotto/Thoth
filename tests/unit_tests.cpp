@@ -5243,6 +5243,119 @@ static bool testStrategyInjection() {
     return true; 
 }
 
+static bool testPlannerEvidenceSessionId() {
+    const char* prevDev = std::getenv("THOTH_TEST_SUITE_DEV");
+    setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+
+    FileHandler fh;
+    const std::string appLog = fh.getAgentWorkspacePath("app_log.jsonl");
+    const std::string traceLog = fh.getAgentWorkspacePath("decision_trace.jsonl");
+    const std::string metricsLog = fh.getLogsPath("cognitive_metrics.jsonl");
+    auto sizeOf = [](const std::string& path) -> std::uintmax_t {
+        std::error_code ec;
+        const auto size = fs::file_size(path, ec);
+        return ec ? 0 : size;
+    };
+    const auto appBefore = sizeOf(appLog);
+    const auto traceBefore = sizeOf(traceLog);
+    const auto metricsBefore = sizeOf(metricsLog);
+    auto restoreLogs = [&]() {
+        auto trim = [](const std::string& path, std::uintmax_t keep) {
+            std::error_code ec;
+            if (!fs::exists(path, ec)) {
+                return;
+            }
+            fs::resize_file(path, keep, ec);
+        };
+        trim(appLog, appBefore);
+        trim(traceLog, traceBefore);
+        trim(metricsLog, metricsBefore);
+    };
+
+    const std::string sessionId = "session-c64-phase1";
+    const std::string goal = "Test Strategy [\"RETRIEVAL\", \"LLM\"]";
+    bool sawAssembly = false;
+    bool sawStrategy = false;
+    std::string detail;
+
+    {
+        Config cfg;
+        cfg.database_path = makeTempPath("thoth_planner_session_test.db").string();
+        auto memory = std::make_shared<Memory>(cfg);
+        auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+        auto idx = new IndexManager(engine.get());
+        auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx);
+        auto promptFactory = std::make_shared<PromptFactory>(*memory, *rag);
+        LLMInterface llm(LLMBackend::Ollama, &cfg);
+
+        Memory::CognateStrategyRecord strat;
+        strat.strategy_id = "strat-session";
+        strat.description = "Test Strategy";
+        strat.step_pattern_json = "[\"RETRIEVAL\", \"LLM\"]";
+        strat.success_rate = 0.95f;
+        strat.created_at = 1000;
+        memory->saveStrategy(strat);
+
+        const std::string strategyText = strat.description + " " + strat.step_pattern_json;
+        rag->engine->updateVocabulary(strategyText);
+
+        auto planner = std::make_shared<LLMPlanner>(memory, rag, promptFactory, &llm);
+        auto registry = std::make_shared<ToolRegistry>();
+        Thoth::ExecutiveController controller(planner, registry, rag, memory);
+        controller.set_session_id(sessionId);
+        controller.set_max_reflections(0);
+        controller.execute_goal(goal);
+        controller.abort();
+        fs::remove(cfg.database_path);
+    }
+
+    std::ifstream in(appLog);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.find(sessionId) == std::string::npos) {
+            continue;
+        }
+        try {
+            const auto entry = nlohmann::json::parse(line);
+            if (entry.value("session_id", "") != sessionId) {
+                continue;
+            }
+            const std::string eventName = entry.value("event_name", "");
+            if (eventName == "PLANNER_CONTEXT_ASSEMBLY") {
+                sawAssembly = true;
+                if (!entry.contains("metadata") ||
+                    entry["metadata"].value("strategy_injection", false) != true) {
+                    detail = "assembly log did not keep the selected strategy";
+                }
+            }
+            if (eventName == "STRATEGY_INJECTION") {
+                sawStrategy = true;
+                if (!entry.contains("metadata") ||
+                    entry["metadata"].value("strategy_id", "") != "strat-session") {
+                    detail = "strategy injection id changed";
+                }
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+    in.close();
+    restoreLogs();
+    if (prevDev) {
+        setenv("THOTH_TEST_SUITE_DEV", prevDev, 1);
+    } else {
+        unsetenv("THOTH_TEST_SUITE_DEV");
+    }
+
+    const bool ok = sawAssembly && sawStrategy && detail.empty();
+    if (!ok) {
+        std::cerr << "testPlannerEvidenceSessionId: "
+                  << (detail.empty() ? "planner evidence missing session_id" : detail)
+                  << "\n";
+    }
+    return ok;
+}
+
 namespace {
 
 Thoth::BenchmarkEnvironmentInputs makeE1SampleInputs() {
@@ -20880,6 +20993,7 @@ int main() {
     if (!testScientificConvergence()) failures++;
     if (!testStrategyPromotion()) failures++;
     if (!testStrategyInjection()) failures++;
+    if (!testPlannerEvidenceSessionId()) failures++;
     if (!testE1AssembleEnvironmentDeterministic()) failures++;
     if (!testE1InferTierFromEnvFlags()) failures++;
     if (!testE1EnvironmentHashExcludesIndex()) failures++;

@@ -1,6 +1,14 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (C6.4 v1.0 locked)
+Last updated: 2026-09-27 (C6.4 Phase 1)
+
+## 2026-09-27 — C6.4 Phase 1 instrumentation
+
+**Status:** ✅ Phase 1 only. No official window. Phases 3–8 not started. C6.4 v1.0 protocol text unchanged.
+
+Shared app-log and decision-trace rows that are not C6 candidates no longer count as invalid. Recognized `STRATEGY_INJECTION`, `PLANNER_CONTEXT_ASSEMBLY`, and `memory_consolidation` rows that lack required identity or time fields still fail closed. Planner evidence emitted from `ExecutiveController` carries that goal’s `session_id` on a thread-local log context that is restored after `create_plan`. Historical JSONL rows were not rewritten.
+
+---
 
 ## 2026-09-27 — C6.4 v1.0 protocol locked
 

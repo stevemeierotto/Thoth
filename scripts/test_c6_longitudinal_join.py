@@ -233,6 +233,79 @@ def test_input_immutability(
         raise TestFailure("benchmark_env rows mutated during join")
 
 
+def _strategy_row(event_name: str, *, session_id: str = "session-ok", timestamp_ms: int | None = 1_700_000_000_000) -> dict:
+    row: dict[str, Any] = {
+        "event_name": event_name,
+        "session_id": session_id,
+        "metadata": {"strategy_id": "strat-1", "strategy_injection": True},
+    }
+    if timestamp_ms is not None:
+        row["timestamp_ms"] = timestamp_ms
+    return row
+
+
+def _consolidation_row(*, finished_at_ms: int | None = 1_700_000_000_000, stages: Any = None) -> dict:
+    row: dict[str, Any] = {"trace_type": "memory_consolidation"}
+    if finished_at_ms is not None:
+        row["finished_at_ms"] = finished_at_ms
+    if stages is not None:
+        row["stages"] = stages
+    return row
+
+
+def test_shared_stream_validation() -> None:
+    """Unrelated shared-stream rows are ignored. Malformed recognized rows stay invalid."""
+    committed = [
+        {
+            "name": "consolidation_committed",
+            "success": True,
+            "metadata": {"session_id": "session-ok"},
+        }
+    ]
+    app_rows = [
+        _strategy_row("PLANNER_CONTEXT_ASSEMBLY"),
+        {"event_name": "query_start", "message": "unrelated", "timestamp_ms": 1},
+        {"component": "gui", "level": "INFO"},
+        _strategy_row("STRATEGY_INJECTION"),
+    ]
+    trace_rows = [
+        _consolidation_row(stages=committed),
+        {"event_type": "STEP_STARTED", "plan_id": "plan-x", "timestamp_ms": 1},
+        {"trace_type": "workflow_step", "finished_at_ms": 2},
+    ]
+    summary = join.ValidationSummary()
+    valid_app = join.validate_app_log_rows(app_rows, summary, False)
+    valid_trace = join.validate_trace_rows(trace_rows, summary, False)
+    if summary.total_invalid != 0:
+        raise TestFailure(f"mixed well-formed stream expected total_invalid 0, got {summary.total_invalid}")
+    if len(valid_app) != 2 or len(valid_trace) != 1:
+        raise TestFailure("mixed stream dropped or kept the wrong recognized rows")
+
+    summary = join.ValidationSummary()
+    join.validate_app_log_rows([{"event_name": "LOOP_EXIT"}], summary, False)
+    join.validate_trace_rows([{"controller_state": "IDLE"}], summary, False)
+    if summary.total_invalid != 0:
+        raise TestFailure("unrelated rows without C6 fields were counted invalid")
+
+    summary = join.ValidationSummary()
+    join.validate_app_log_rows([_strategy_row("STRATEGY_INJECTION", session_id="")], summary, False)
+    if summary.invalid_app_log_rows != 1:
+        raise TestFailure("strategy row missing session_id was not invalid")
+
+    summary = join.ValidationSummary()
+    join.validate_app_log_rows([_strategy_row("PLANNER_CONTEXT_ASSEMBLY", timestamp_ms=None)], summary, False)
+    if summary.invalid_app_log_rows != 1:
+        raise TestFailure("planner row missing timestamp was not invalid")
+
+    summary = join.ValidationSummary()
+    join.validate_trace_rows([_consolidation_row(finished_at_ms=None, stages=committed)], summary, False)
+    join.validate_trace_rows([_consolidation_row(stages=None)], summary, False)
+    if summary.invalid_trace_rows != 2:
+        raise TestFailure(
+            f"malformed memory_consolidation rows expected 2 invalid, got {summary.invalid_trace_rows}"
+        )
+
+
 def test_validation_smoke(artifacts: join.JoinArtifacts, records: list[join.JoinedGoalRecord]) -> None:
     if artifacts.validation.total_invalid != 0:
         raise TestFailure(f"expected total_invalid == 0, got {artifacts.validation.total_invalid}")
@@ -303,6 +376,7 @@ def run_all_tests(fixtures_dir: Path, verbose: bool) -> dict[str, bool]:
             "missing_artifact_case",
             lambda: test_missing_decision_trace(metric_rows, app_log_rows, env_rows),
         ),
+        ("shared_stream_validation", test_shared_stream_validation),
     ]
 
     for name, fn in tests:
@@ -328,6 +402,7 @@ def print_success_banner(results: dict[str, bool]) -> None:
     print("  input_immutability:       ok")
     print("  validation_smoke:         ok")
     print("  missing_artifact_case:    ok")
+    print("  shared_stream_validation: ok")
     print("  OK")
 
 

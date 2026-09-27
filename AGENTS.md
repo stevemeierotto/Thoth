@@ -5,7 +5,7 @@
 This document describes the architecture, conventions, and critical rules for this project. Following these guidelines ensures changes integrate cleanly and preserve the system's design integrity.
 
 **Last Updated**: 2026-09-27  
-**Status**: Current — product baseline `e5d5e24`. E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3 machinery, **C6.4 v1.0 locked 2026-09-27 (not implemented; no official window)**, ALP-A–F, **ALP1 CERTIFIED — 2026-09-27**, G2b superseded/closed, R6 closed, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
+**Status**: Current — product baseline `e5d5e24`. E2 Phases A–E, M1–M4, G1e production weight, C6 Phase 3 machinery, **C6.4 v1.0 locked 2026-09-27 (Phase 1 instrumentation done; no official window)**, ALP-A–F, **ALP1 CERTIFIED — 2026-09-27**, G2b superseded/closed, R6 closed, CSG-B, and the shipped Decision Tape are in the status section below. Lock-time protocol text stays historical.
 
 ---
 
@@ -652,7 +652,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 - Security enforcement (ConstraintChecker, sandbox boundaries)
 - E2 evaluation kernel + Phases A–E (Phase E v0.1 certified — see `docs/phases/PHASE_E_COMPLETE.md`)
 - C6 Phase 3 longitudinal analyzer, operator guide, and fixtures (`94012a4`). No official C6.3 window was collected
-- C6.4 v1.0 prospective protocol locked 2026-09-27 (`docs/C6_phase4_protocol.md`). Instrumentation and the first window are not started
+- C6.4 v1.0 prospective protocol locked 2026-09-27 (`docs/C6_phase4_protocol.md`). Phase 1 instrumentation is implemented. Later phases and the first window are not started
 - TCB mandatory sequence through TCB4 (2026-07-23). TCB5/TCB6 remain optional
 - ALP attachment lifecycle A–F (2026-07-26). **ALP1 CERTIFIED — 2026-09-27** against product baseline `e5d5e24` and Engine `a308ef4` (`docs/ATTACHMENT_LIFECYCLE_PROTOCOL.md` § ALP1 Certification Record). ALP-G **G3** remains **VERIFIED**. **G2b — SUPERSEDED/CLOSED** and was not marked PASS. The obsolete manual procedure was not executed.
 - CSG-B B.1–B.4, including manual acceptance 2026-09-13
@@ -671,7 +671,7 @@ The left Knowledge Base sidebar must remain stable and scrollable. Never add sec
 
 - **Missing implementation:** LLM step cancellation after a soft timeout. The 900-second budget is deployed. `std::async` still joins the timed-out step before `STEP_FAILED` (timeout Phase B, recorded 2026-09-16).
 - **Missing verification:** Optional R3 and R4 GUI sign-off remain open (`docs/GUI_RESTORATION_PROTOCOL.md`). GUI restoration R6 is **CLOSED** (2026-09-27). ALP1 is **CERTIFIED** (2026-09-27). G3 remains **VERIFIED**. G2b remains **SUPERSEDED/CLOSED**.
-- **Research awaiting an owner decision:** B1 publication suite is a candidate awaiting freeze (`docs/B1_PROTOCOL.md`). E3 SCR harness is specified and not built. M5 vector-store benchmark scaffold is not built. G1e further magnitude probes stay paused. C6.4 v1.0 is locked; its implementation phases are not approved and no official window is open.
+- **Research awaiting an owner decision:** B1 publication suite is a candidate awaiting freeze (`docs/B1_PROTOCOL.md`). E3 SCR harness is specified and not built. M5 vector-store benchmark scaffold is not built. G1e further magnitude probes stay paused. C6.4 Phase 1 instrumentation is implemented. Phases 3–8 are not approved and no official window is open.
 - **Small product gap:** File → Export Session shows an unimplemented menu message.
 
 ### 🔮 Deferred / out of scope (do not treat as active work)
