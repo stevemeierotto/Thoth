@@ -20076,18 +20076,41 @@ static void installCoreTestIsolation() {
 }
 
 #if THOTH_HAS_GUI
-static bool localNoteDeleteButtonHasPositiveGeometry(const wxButton* button) {
-    if (!button || !button->IsShown()) {
-        return false;
-    }
-    const wxSize size = button->GetSize();
-    return size.GetWidth() > 0 && size.GetHeight() > 0;
+static wxRect localNoteWidgetRect(const wxWindow* window) {
+    return wxRect(window->GetPosition(), window->GetSize());
+}
+
+static bool localNoteRectsOverlap(const wxRect& a, const wxRect& b) {
+    const int left = std::max(a.x, b.x);
+    const int right = std::min(a.x + a.width, b.x + b.width);
+    const int top = std::max(a.y, b.y);
+    const int bottom = std::min(a.y + a.height, b.y + b.height);
+    return right > left && bottom > top;
+}
+
+static bool localNoteRectInside(const wxRect& inner, const wxSize& pane) {
+    return inner.x >= 0 && inner.y >= 0
+        && inner.width > 0 && inner.height > 0
+        && inner.x + inner.width <= pane.x
+        && inner.y + inner.height <= pane.y;
+}
+
+/** True when the X is in the label's row and immediately to its right. */
+static bool localNoteXAssociatesWithLabel(const wxRect& label, const wxRect& button) {
+    const int labelCenter = label.y + label.height / 2;
+    const int buttonCenter = button.y + button.height / 2;
+    const int delta = labelCenter > buttonCenter
+        ? labelCenter - buttonCenter
+        : buttonCenter - labelCenter;
+    return delta <= button.height / 2
+        && button.x >= label.x + label.width;
 }
 
 /**
- * Occupied slots are shown one at a time, the same hidden → shown transition
- * that left later X controls with no geometry. The pane is held at the
- * computed minimum so Send to Engine must still fit.
+ * The notes pane is sized once while every X is hidden. Occupancy then grows
+ * without resizing the pane. Each step shows or hides buttons and refreshes
+ * through layoutLocalNotesOwner(), the same call RefreshRagPanel() makes after
+ * a slot update. Positive size alone is not enough.
  */
 static bool testLocalNoteSlotDeleteButtonGeometry() {
     // A console wx app never opens a display, and the next widget then aborts GTK.
@@ -20123,8 +20146,9 @@ static bool testLocalNoteSlotDeleteButtonGeometry() {
     panel->SetMinSize(wxSize(900, paneMin));
     frame->SetClientSize(wxSize(1000, paneMin));
     frame->Show();
-    panel->Layout();
-    frame->Layout();
+    // One owner layout at the final pane size, with every X still hidden.
+    Thoth::LocalNoteSlotLayout::layoutLocalNotesOwner(panel);
+    const wxSize frozenPane = panel->GetClientSize();
 
     const char* paths[] = {
         "/host/g3-cert.md",
@@ -20140,53 +20164,79 @@ static bool testLocalNoteSlotDeleteButtonGeometry() {
             auto* label = grid.slots[static_cast<std::size_t>(i)].label;
             if (i < occupied) {
                 Thoth::LocalNoteSlotLayout::showLocalNoteDeleteButton(button);
-                label->SetLabel(wxString::FromUTF8(paths[i]));
+                label->SetLabel(wxString::FromUTF8(std::string(paths[i]) + " " + documents[i]));
             } else {
                 Thoth::LocalNoteSlotLayout::hideLocalNoteDeleteButton(button);
                 label->SetLabel(wxString::Format("Empty Slot %d", i + 1));
             }
         }
-        panel->Layout();
-        frame->Layout();
-
-        if (occupied == 0) {
-            for (const auto& slot : grid.slots) {
-                if (slot.remove->IsShown()) {
-                    std::cerr << "testLocalNoteSlotDeleteButtonGeometry: empty X shown\n";
-                    frame->Destroy();
-                    return false;
-                }
-            }
-            continue;
+        // Production refresh. Do not resize the pane and do not call
+        // panel->Layout() from the test.
+        Thoth::LocalNoteSlotLayout::layoutLocalNotesOwner(panel);
+        if (panel->GetClientSize() != frozenPane) {
+            std::cerr << "testLocalNoteSlotDeleteButtonGeometry: pane resized at occupied "
+                      << occupied << "\n";
+            frame->Destroy();
+            return false;
         }
 
-        for (int i = 0; i < occupied; ++i) {
-            const auto& slot = grid.slots[static_cast<std::size_t>(i)];
-            if (!localNoteDeleteButtonHasPositiveGeometry(slot.remove)) {
-                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
-                          << (i + 1) << " of " << occupied << " has no geometry\n";
-                frame->Destroy();
-                return false;
-            }
-            if (slot.slotNumber != i + 1
-                || Thoth::LocalNoteSlotLayout::localNoteSlotPathIndex(slot.slotNumber) != i
-                || slot.label->GetLabel() != wxString::FromUTF8(paths[i])) {
-                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
-                          << (i + 1) << " does not map to its path\n";
-                frame->Destroy();
-                return false;
-            }
-            if (std::string(documents[i]).empty()) {
-                frame->Destroy();
-                return false;
-            }
-        }
         for (int i = occupied; i < 4; ++i) {
             if (grid.slots[static_cast<std::size_t>(i)].remove->IsShown()) {
                 std::cerr << "testLocalNoteSlotDeleteButtonGeometry: empty slot "
                           << (i + 1) << " X is visible\n";
                 frame->Destroy();
                 return false;
+            }
+        }
+        if (occupied == 0) {
+            continue;
+        }
+
+        wxRect shown[4];
+        for (int i = 0; i < occupied; ++i) {
+            const auto& slot = grid.slots[static_cast<std::size_t>(i)];
+            const wxString expected =
+                wxString::FromUTF8(std::string(paths[i]) + " " + documents[i]);
+            if (!slot.remove->IsShown()
+                || slot.remove->GetSize().GetWidth() <= 0
+                || slot.remove->GetSize().GetHeight() <= 0) {
+                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
+                          << (i + 1) << " of " << occupied << " is not shown\n";
+                frame->Destroy();
+                return false;
+            }
+            if (slot.slotNumber != i + 1
+                || Thoth::LocalNoteSlotLayout::localNoteSlotPathIndex(slot.slotNumber) != i
+                || slot.label->GetLabel() != expected) {
+                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
+                          << (i + 1) << " does not map to its path\n";
+                frame->Destroy();
+                return false;
+            }
+            const wxRect labelRect = localNoteWidgetRect(slot.label);
+            const wxRect buttonRect = localNoteWidgetRect(slot.remove);
+            shown[i] = buttonRect;
+            if (!localNoteRectInside(buttonRect, frozenPane)
+                || !localNoteRectInside(labelRect, frozenPane)) {
+                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
+                          << (i + 1) << " escapes the notes pane\n";
+                frame->Destroy();
+                return false;
+            }
+            if (!localNoteXAssociatesWithLabel(labelRect, buttonRect)) {
+                std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
+                          << (i + 1) << " X is not in its label row\n";
+                frame->Destroy();
+                return false;
+            }
+            for (int earlier = 0; earlier < i; ++earlier) {
+                if (localNoteRectsOverlap(shown[earlier], buttonRect)
+                    || shown[earlier].GetPosition() == buttonRect.GetPosition()) {
+                    std::cerr << "testLocalNoteSlotDeleteButtonGeometry: slot "
+                              << (i + 1) << " X overlaps slot " << (earlier + 1) << "\n";
+                    frame->Destroy();
+                    return false;
+                }
             }
         }
     }
@@ -20196,10 +20246,9 @@ static bool testLocalNoteSlotDeleteButtonGeometry() {
         frame->Destroy();
         return false;
     }
-    const int sendBottom = send->GetPosition().y + send->GetSize().GetHeight();
-    if (sendBottom > panel->GetClientSize().GetHeight()) {
-        std::cerr << "testLocalNoteSlotDeleteButtonGeometry: Send clipped at pane min ("
-                  << sendBottom << " > " << panel->GetClientSize().GetHeight() << ")\n";
+    const wxRect sendRect = localNoteWidgetRect(send);
+    if (!localNoteRectInside(sendRect, frozenPane)) {
+        std::cerr << "testLocalNoteSlotDeleteButtonGeometry: Send to Engine is outside the pane\n";
         frame->Destroy();
         return false;
     }

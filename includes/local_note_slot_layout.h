@@ -46,6 +46,19 @@ inline void applyStableDeleteButtonSize(wxButton* button) {
     button->InvalidateBestSize();
 }
 
+/**
+ * Lay out the panel that owns the Local Note grid.
+ * RefreshRagTabLayout() resizes the notebook and splitter. When that size
+ * does not change, the notes pane does not receive a new size event, so a
+ * newly shown X stays at the parent origin until this owner layout runs.
+ */
+inline void layoutLocalNotesOwner(wxWindow* notesPanel) {
+    if (!notesPanel) {
+        return;
+    }
+    notesPanel->Layout();
+}
+
 /** Show a previously hidden X and force the next layout to honor its min size. */
 inline void showLocalNoteDeleteButton(wxButton* button) {
     if (!button) {
@@ -120,7 +133,11 @@ inline LocalNoteDeleteGrid makeLocalNoteDeleteGrid(wxWindow* parent) {
         applyStableDeleteButtonSize(button);
         hideLocalNoteDeleteButton(button);
         sizer->Add(label, 1, wxALIGN_CENTER_VERTICAL | wxALL, 5);
-        sizer->Add(button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+        // Reserve the cell while the X is hidden. A later Show() must not
+        // realize the button at the notes pane origin.
+        sizer->Add(button, 0,
+                   wxALIGN_CENTER_VERTICAL | wxRIGHT | wxRESERVE_SPACE_EVEN_IF_HIDDEN,
+                   5);
         built.grid->Add(sizer, 1, wxEXPAND);
         built.slots[static_cast<std::size_t>(i)] =
             LocalNoteSlotWidgets{label, button, i + 1};

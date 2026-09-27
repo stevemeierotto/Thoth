@@ -148,6 +148,8 @@ private:
     wxStaticText* m_corpusStatus = nullptr;
     wxTextCtrl* m_corpusText = nullptr;
     wxPanel* m_ragTab = nullptr;
+    /** Owns the Local Note grid sizer. RefreshRagPanel lays this out directly. */
+    wxPanel* m_localNotesPanel = nullptr;
     wxButton* m_sendToEngineBtn = nullptr;
 
     // Data model for the chat list

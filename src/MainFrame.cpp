@@ -555,6 +555,7 @@ void MainFrame::RefreshRagPanel() {
         ApplyIngestControls(agent ? agent->eventStreamSnapshot()
                                   : Thoth::localEventStreamSnapshot(NowMs()));
         RefreshRagTabLayout();
+        Thoth::LocalNoteSlotLayout::layoutLocalNotesOwner(m_localNotesPanel);
         return;
     }
 
@@ -585,6 +586,7 @@ void MainFrame::RefreshRagPanel() {
         }
     }
     RefreshRagTabLayout();
+    Thoth::LocalNoteSlotLayout::layoutLocalNotesOwner(m_localNotesPanel);
 }
 
 void MainFrame::RefreshCorpusPanel() {
@@ -1487,7 +1489,8 @@ MainFrame::MainFrame()
     corpusSizer->Add(m_corpusText, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 5);
     corpusPanel->SetSizer(corpusSizer);
 
-    wxPanel* localNotesPanel = new wxPanel(ragSplit, wxID_ANY);
+    m_localNotesPanel = new wxPanel(ragSplit, wxID_ANY);
+    wxPanel* localNotesPanel = m_localNotesPanel;
     wxBoxSizer* localNotesOuter = new wxBoxSizer(wxVERTICAL);
     wxStaticText* localNotesHeader = new wxStaticText(
         localNotesPanel, wxID_ANY,
