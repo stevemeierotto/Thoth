@@ -19637,6 +19637,63 @@ static bool testAlpECorpusMatchLegacyMap() {
     return true;
 }
 
+static bool testG32CorpusRecoveryRefresh() {
+    using namespace Thoth::LocalNoteEngineSync;
+
+    if (shouldRefreshCorpusOnUsabilityReturn(false, true, true) != true) {
+        std::cerr << "testG32CorpusRecoveryRefresh: failed list must refresh once "
+                     "when usability returns\n";
+        return false;
+    }
+    if (shouldRefreshCorpusOnUsabilityReturn(true, true, true) != false
+        || shouldRefreshCorpusOnUsabilityReturn(true, true, false) != false
+        || shouldRefreshCorpusOnUsabilityReturn(false, false, true) != false
+        || shouldRefreshCorpusOnUsabilityReturn(false, true, false) != false) {
+        std::cerr << "testG32CorpusRecoveryRefresh: refresh must be one-shot "
+                     "on the usability rising edge only\n";
+        return false;
+    }
+
+    const auto skipped = reconcileStateWithoutIntentQuery();
+    if (skipped == LocalNoteReconcileState::Ready
+        || skipped != LocalNoteReconcileState::Unverified) {
+        std::cerr << "testG32CorpusRecoveryRefresh: ingest unavailable must stay "
+                     "Unverified\n";
+        return false;
+    }
+    if (authoritativeAllNotesAlreadySent(LocalNoteReconcileState::Ready, true, false, false)
+        || authoritativeAllNotesAlreadySent(skipped, true, false, false)) {
+        std::cerr << "testG32CorpusRecoveryRefresh: empty intents without a query "
+                     "must not be already-sent\n";
+        return false;
+    }
+
+    LocalNoteIntent created;
+    created.host_path = "/tmp/gui/rag/g3-cert.md";
+    created.canonical_name = "g3-cert.md";
+    created.action = "create";
+    created.query_ok = true;
+    const auto candidates = collectPickerCandidates({created});
+    if (candidates.size() != 1 || candidates.front().action != "create"
+        || actionPickerLabel("create") != "Send") {
+        std::cerr << "testG32CorpusRecoveryRefresh: host-only recovery must yield "
+                     "create\n";
+        return false;
+    }
+    if (!sendToEngineEnabled(true, true, true, LocalNoteReconcileState::Ready, true)) {
+        std::cerr << "testG32CorpusRecoveryRefresh: create must enable Send\n";
+        return false;
+    }
+    if (sendToEngineEnabled(true, true, false, skipped, true)
+        || authoritativeAllNotesAlreadySent(
+               LocalNoteReconcileState::Ready, true, true, true)) {
+        std::cerr << "testG32CorpusRecoveryRefresh: Send/all-sent after a real "
+                     "create is wrong\n";
+        return false;
+    }
+    return true;
+}
+
 static bool testAlpEReconcileStateMachine() {
     using namespace Thoth::LocalNoteEngineSync;
 
@@ -20600,6 +20657,7 @@ int main() {
     if (!testAlpEUpgradeLegacyDocumentIds()) failures++;
     if (!testAlpELocalNoteDeleteClearsCacheOnly()) failures++;
     if (!testAlpEIntentResponseParsing()) failures++;
+    if (!testG32CorpusRecoveryRefresh()) failures++;
     if (!testAlpEReconcileStateMachine()) failures++;
     if (!testAlpEIndexingEventDocumentIdWins()) failures++;
     if (!testAlpEIndexingEventNoBasenameOnlyAlpGui()) failures++;

@@ -170,6 +170,8 @@ private:
     std::vector<Thoth::LocalNoteEngineSync::LocalNoteIntent> m_localNoteIntents;
     Thoth::LocalNoteEngineSync::LocalNoteReconcileState m_localNoteReconcileState =
         Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
+    /** True only after reconcile queried Engine intent for the active session. */
+    bool m_localNoteIntentQueryCompleted = false;
 
     static std::int64_t NowMs();
     std::string BuildSessionTitle(const wxString& firstUserMessage) const;
@@ -347,6 +349,10 @@ private:
     wxTimer m_chatTurnElapsedTimer;
     wxTimer m_chatTurnRefreshRetryTimer;
     std::int64_t m_lastCorpusPollForIndexingMs = 0;
+    /** Previous poll's engine HTTP usability. Rising edge drives one corpus refresh. */
+    bool m_engineHttpWasUsable = false;
+    /** Last corpus panel fetch failed; cleared only by a successful authority list. */
+    bool m_corpusAuthorityUnavailable = false;
 
     void SetupMenuBar();
     void ShowMenuStatus(const wxString& title, const wxString& message);

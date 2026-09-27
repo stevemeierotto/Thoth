@@ -37,6 +37,45 @@ inline bool reconcileAllowsSend(LocalNoteReconcileState state, bool alp_gui) {
     return state == LocalNoteReconcileState::Ready;
 }
 
+/**
+ * One corpus-authority refresh when HTTP usability returns after an unavailable
+ * listing. False on later polls while usability stays true, so recovery is not
+ * a 1-second poll.
+ */
+inline bool shouldRefreshCorpusOnUsabilityReturn(bool engine_was_usable,
+                                                  bool engine_now_usable,
+                                                  bool corpus_authority_unavailable) {
+    return corpus_authority_unavailable && engine_now_usable && !engine_was_usable;
+}
+
+/** No Engine intent query ran (ingest unavailable). Reconcile is not complete. */
+inline LocalNoteReconcileState reconcileStateWithoutIntentQuery() {
+    return LocalNoteReconcileState::Unverified;
+}
+
+inline bool sendToEngineEnabled(bool can_ingest,
+                                bool engine_usable,
+                                bool has_picker_candidate,
+                                LocalNoteReconcileState state,
+                                bool alp_gui) {
+    return can_ingest && engine_usable && has_picker_candidate
+           && reconcileAllowsSend(state, alp_gui);
+}
+
+/**
+ * "All notes already sent" only after a reconcile pass that actually queried
+ * Engine intent. An empty intent list from a skipped query is not that result.
+ */
+inline bool authoritativeAllNotesAlreadySent(LocalNoteReconcileState state,
+                                              bool has_rag_files,
+                                              bool has_picker_candidates,
+                                              bool authoritative_intent_query) {
+    if (!authoritative_intent_query) {
+        return false;
+    }
+    return has_rag_files && !has_picker_candidates && reconcileAllowsSend(state, true);
+}
+
 /** Per-intent HTTP budget aligns with ThothRemoteHttp::kControlTimeoutSec (30s). */
 inline constexpr int kReconcilePerIntentTimeoutMs = 30000;
 /** Total startup reconcile budget — partial failures must not block GUI forever. */

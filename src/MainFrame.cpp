@@ -595,6 +595,7 @@ void MainFrame::RefreshCorpusPanel() {
     m_corpusText->Clear();
 
     if (!caps.supportsCorpusList) {
+        m_corpusAuthorityUnavailable = true;
         m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kUnavailableLabel));
         return;
     }
@@ -605,12 +606,14 @@ void MainFrame::RefreshCorpusPanel() {
     const nlohmann::json body = agent->listCorpusDocuments();
     std::string err;
     if (!Thoth::CorpusDocuments::hasRequiredV1Fields(body, err)) {
+        m_corpusAuthorityUnavailable = true;
         m_corpusStatus->SetLabel(wxString::FromUTF8(Thoth::CorpusDocuments::kUnavailableLabel));
         if (UseAlpGuiPicker()) {
             ReconcileLocalNotesEngine(Thoth::CorpusDocuments::emptyV1List());
         }
         return;
     }
+    m_corpusAuthorityUnavailable = false;
 
     const auto disposition = Thoth::disposePanelData(
         true, Thoth::CorpusDocuments::isEffectivelyEmpty(body));
@@ -687,9 +690,11 @@ void MainFrame::ApplyIngestControls(const Thoth::EventStreamSnapshot& snap) {
             const auto candidates =
                 Thoth::LocalNoteEngineSync::collectPickerCandidates(m_localNoteIntents);
             hasNote = !candidates.empty();
-            allNotesSent = !session.ragFilePaths.empty() && candidates.empty()
-                           && Thoth::LocalNoteEngineSync::reconcileAllowsSend(
-                               m_localNoteReconcileState, alp_gui);
+            allNotesSent = Thoth::LocalNoteEngineSync::authoritativeAllNotesAlreadySent(
+                m_localNoteReconcileState,
+                !session.ragFilePaths.empty(),
+                !candidates.empty(),
+                m_localNoteIntentQueryCompleted);
         } else {
             const auto unsent =
                 Thoth::LocalNoteEngineSync::collectUnsentLocalNotePaths(session);
@@ -701,7 +706,8 @@ void MainFrame::ApplyIngestControls(const Thoth::EventStreamSnapshot& snap) {
     const bool reconcile_ready =
         Thoth::LocalNoteEngineSync::reconcileAllowsSend(m_localNoteReconcileState, alp_gui);
     m_sendToEngineBtn->Show(canIngest || hasNote);
-    m_sendToEngineBtn->Enable(canIngest && hasNote && engine_usable && reconcile_ready);
+    m_sendToEngineBtn->Enable(Thoth::LocalNoteEngineSync::sendToEngineEnabled(
+        canIngest, engine_usable, hasNote, m_localNoteReconcileState, alp_gui));
     if (!canIngest) {
         m_sendToEngineBtn->SetToolTip(
             wxString::FromUTF8("Document ingest unavailable with the current backend"));
@@ -965,6 +971,7 @@ void MainFrame::ActivateSession(std::size_t sessionIndex) {
     m_sessionId = m_sessions[sessionIndex].id;
     m_currentChatTitle = wxString::FromUTF8(m_sessions[sessionIndex].title);
     m_localNoteIntents.clear();
+    m_localNoteIntentQueryCompleted = false;
     m_localNoteReconcileState = UseAlpGuiPicker()
         ? Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Unknown
         : Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
@@ -2491,8 +2498,22 @@ void MainFrame::ApplyEngineDegradedControls(const Thoth::EventStreamSnapshot& sn
 }
 
 void MainFrame::OnConnectionPollTimer(wxTimerEvent& WXUNUSED(evt)) {
+    const auto snap = agent ? agent->eventStreamSnapshot()
+                            : Thoth::localEventStreamSnapshot(NowMs());
+    const bool now_usable = !snap.applies || Thoth::engineHttpUsable(snap.engine);
+    const bool recover_corpus =
+        Thoth::LocalNoteEngineSync::shouldRefreshCorpusOnUsabilityReturn(
+            m_engineHttpWasUsable, now_usable, m_corpusAuthorityUnavailable);
+    m_engineHttpWasUsable = now_usable;
+
     RefreshEventStreamIndicators();
-    if (!agent || !agent->capabilities().supportsCorpusList || !HasPendingLocalNoteIndexing()) {
+    if (recover_corpus) {
+        RefreshCorpusPanel();
+    }
+    if (recover_corpus
+        || !agent
+        || !agent->capabilities().supportsCorpusList
+        || !HasPendingLocalNoteIndexing()) {
         return;
     }
     const std::int64_t now = NowMs();
@@ -4152,11 +4173,18 @@ bool MainFrame::ConfirmForceReplace(const std::string& host_path,
 
 void MainFrame::ReconcileLocalNotesEngine(const nlohmann::json& corpus_body) {
     m_localNoteIntents.clear();
-    if (!UseAlpGuiPicker() || !agent || !agent->capabilities().supportsIngest) {
+    m_localNoteIntentQueryCompleted = false;
+    if (!UseAlpGuiPicker() || !agent) {
         m_localNoteReconcileState =
             Thoth::LocalNoteEngineSync::LocalNoteReconcileState::Ready;
         ApplyIngestControls(agent ? agent->eventStreamSnapshot()
                                   : Thoth::localEventStreamSnapshot(NowMs()));
+        return;
+    }
+    if (!agent->capabilities().supportsIngest) {
+        m_localNoteReconcileState =
+            Thoth::LocalNoteEngineSync::reconcileStateWithoutIntentQuery();
+        ApplyIngestControls(agent->eventStreamSnapshot());
         return;
     }
 
@@ -4214,6 +4242,7 @@ void MainFrame::ReconcileLocalNotesEngine(const nlohmann::json& corpus_body) {
         }
 
         const auto query = agent->queryCorpusDocumentIntent(host_path);
+        m_localNoteIntentQueryCompleted = true;
         if (!query.success || !query.ingest_action) {
             intent.query_ok = false;
             intent.reason = query.technical_details.empty() ? query.user_message
