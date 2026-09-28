@@ -77,7 +77,7 @@ Before making any changes:
 
 ## C6 Phase 4 — prospective longitudinal protocol (C6.4)
 
-**Status:** 🔒 **Locked** 2026-09-27. Phase 1 instrumentation is implemented. Phase 3 prospective identity is implemented. Phase 4 successor episodic evaluation is on branch `c6/phase-4`. Phase 5 window attribution is on branch `c6/phase-5`. Phase 6 analysis is on branch `c6/phase-6`. None of those branches are merged. Phases 7–8 are not started. No window opened. No authoritative episodic stratum has been run.  
+**Status:** 🔒 **Locked** 2026-09-27. Phase 1 instrumentation is implemented. Phase 3 prospective identity is implemented. Phase 4 successor episodic evaluation is on branch `c6/phase-4`. Phase 5 window attribution is on branch `c6/phase-5`. Phase 6 analysis is on branch `c6/phase-6`. Phase 7 plan event order is on branch `c6/phase-7`. None of those branches are merged. Phase 8 is not started. No window opened. No authoritative episodic stratum has been run.  
 **Authority:** [`C6_phase4_protocol.md`](C6_phase4_protocol.md) C6.4 v1.0  
 **Relationship to the section below:** C6.3 v0.2.1 and its promotion text stay historical. No official C6.3 window was collected. New prospective evidence and promotion eligibility follow C6.4. An owner-signed promotion record, when one exists, is still written in this file. None exists.
 

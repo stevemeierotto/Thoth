@@ -5846,6 +5846,91 @@ static bool testG1dA0SnapshotUsesClientBackendName() {
     return true;
 }
 
+class MockImmediateTwoNodePlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "plan-order-1";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        for (const char* id : {"step-a", "step-b"}) {
+            PlanStep step;
+            step.step_id = id;
+            step.description = id;
+            step.type = StepType::NODE;
+            step.payload = {{"node_id", id}};
+            plan.steps.push_back(step);
+        }
+        return plan;
+    }
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+static bool waitForPlanTerminal(Thoth::ExecutiveController& controller, int timeoutMs = 10000);
+
+static bool testPlanCreatedBeforeStepEvents() {
+    setenv("THOTH_MOCK_LLM", "true", 1);
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_plan_event_order.db").string();
+    auto memory = std::make_shared<Memory>(cfg);
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto idx = new IndexManager(engine.get());
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), idx, &cfg, memory.get());
+    auto planner = std::make_shared<MockImmediateTwoNodePlanner>();
+    auto registry = std::make_shared<ToolRegistry>();
+
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    controller.set_config(&cfg);
+    controller.set_max_reflections(0);
+
+    std::mutex orderMutex;
+    std::vector<EventType> order;
+    controller.set_event_callback([&](const ControllerEvent& ev) {
+        if (ev.type != EventType::PLAN_CREATED && ev.type != EventType::STEP_STARTED &&
+            ev.type != EventType::STEP_COMPLETED && ev.type != EventType::STEP_FAILED) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(orderMutex);
+        order.push_back(ev.type);
+    });
+
+    controller.execute_goal("Order the plan announcement before step execution");
+    if (!waitForPlanTerminal(controller, 15000)) {
+        std::cerr << "testPlanCreatedBeforeStepEvents: plan did not finish\n";
+        fs::remove(cfg.database_path);
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(orderMutex);
+    const auto planAt = std::find(order.begin(), order.end(), EventType::PLAN_CREATED);
+    const auto firstStep = std::find_if(order.begin(), order.end(), [](EventType type) {
+        return type == EventType::STEP_STARTED || type == EventType::STEP_COMPLETED ||
+               type == EventType::STEP_FAILED;
+    });
+    if (planAt == order.end() || firstStep == order.end() || planAt > firstStep) {
+        std::cerr << "testPlanCreatedBeforeStepEvents: a step event preceded PLAN_CREATED\n";
+        fs::remove(cfg.database_path);
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+    int starts = 0;
+    for (EventType type : order) {
+        if (type == EventType::STEP_STARTED) {
+            ++starts;
+        }
+    }
+    if (starts < 2) {
+        std::cerr << "testPlanCreatedBeforeStepEvents: expected both steps to start after the plan\n";
+        fs::remove(cfg.database_path);
+        unsetenv("THOTH_MOCK_LLM");
+        return false;
+    }
+    fs::remove(cfg.database_path);
+    unsetenv("THOTH_MOCK_LLM");
+    return true;
+}
+
 class MockSingleLlmPlanner : public IPlanner {
 public:
     Plan create_plan(const std::string& goal) override {
@@ -5866,7 +5951,7 @@ public:
     Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
 };
 
-static bool waitForPlanTerminal(Thoth::ExecutiveController& controller, int timeoutMs = 10000) {
+static bool waitForPlanTerminal(Thoth::ExecutiveController& controller, int timeoutMs) {
     const int stepMs = 50;
     int waited = 0;
     while (waited < timeoutMs) {
@@ -21148,6 +21233,7 @@ int main() {
     if (!testSelfCorrectTool()) failures++;
     if (!testConstraintChecker()) failures++;
     if (!testReflectionLoop()) failures++;
+    if (!testPlanCreatedBeforeStepEvents()) failures++;
     if (!testGmailReadMessagesTool()) failures++;
     if (!testCognitiveSpine()) failures++;
     if (!testBenchmarkRAGMode()) failures++;

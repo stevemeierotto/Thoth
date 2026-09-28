@@ -1,6 +1,14 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (C6.4 Phase 6)
+Last updated: 2026-09-27 (C6.4 Phase 7)
+
+## 2026-09-27 — C6.4 Phase 7 plan event order
+
+**Status:** On branch `c6/phase-7` only. Not merged. No official window is open. Planner fallback and strategy threshold are unchanged.
+
+`execute_goal` emits plan reuse and `PLAN_CREATED` before the execution loop starts. A live `/goal` run showed the plan before `STEP_STARTED`, then success on both steps. Decision Tape lines are still emitted only when the controller has an event; planning and synthesis themselves stay quiet.
+
+---
 
 ## 2026-09-27 — C6.4 Phase 6 longitudinal analysis
 
