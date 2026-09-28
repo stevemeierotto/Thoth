@@ -133,6 +133,51 @@ Compose-owned keys (`THOTH_WORKSPACE_PATH`, `THOTH_LOGS_PATH`, `THOTH_INFERENCE_
 
 Use **named local volumes** for SQLite (`memory.db`). Do not mount workspace over NFS — WAL corruption risk.
 
+## Isolated environments (DEV, C6-LIVE, EGAR-LAB)
+
+DEV is the existing project and is not recreated by the experimental scripts.
+
+| Environment | Compose project | Host port | Workspace volume | Logs volume | Inference |
+|-------------|-----------------|-----------|------------------|---------------|-----------|
+| DEV | `thoth` | 8090 | `thoth_thoth-workspace` | `thoth_thoth-logs` | this project's llama servers |
+| C6-LIVE | `thoth-c6` | 8091 | `thoth-c6_thoth-workspace` | `thoth-c6_thoth-logs` | its own llama servers |
+| EGAR-LAB | `thoth-egar` | 8092 | `thoth-egar_thoth-workspace` | `thoth-egar_thoth-logs` | its own llama servers |
+
+```bash
+docker compose up -d                  # DEV only
+./docker/isolated-up.sh c6 up         # C6 engine, no second model load
+./docker/isolated-up.sh egar up       # EGAR engine, no second model load
+./docker/isolated-up.sh c6 down       # stop; volumes are kept
+```
+
+`--with-inference` also starts that project's llama.cpp servers. Run only one inference stack on this machine. The script refuses to start a second llama.cpp server while one is already running.
+
+Do not pass the isolated overlay to project `thoth`. That would bind the experimental retrieval file onto the DEV workspace.
+
+**Models.** Experimental llama servers mount the existing volume `thoth_llama-models` at `/models:ro`. The GGUF bytes are shared. The servers cannot write them. DEV's compose file is unchanged and already mounts that volume read-only. Hash the actual files when an experiment is frozen, not the filename:
+
+```bash
+./docker/record-gguf-sha256.sh
+```
+
+**Engine image.** DEV may rebuild `thoth-engine:local`. Experimental projects do not build (`build` is removed in `docker/compose.isolated.yml`). Before a cohort or S0 freeze, record the image id and pin it:
+
+```bash
+docker image inspect thoth-engine:local --format '{{.Id}}'
+# Id looks like sha256:…
+THOTH_ENGINE_IMAGE=thoth-engine@sha256:… ./docker/isolated-up.sh c6 up
+```
+
+A later DEV rebuild moves the `thoth-engine:local` tag. It does not move that digest. This phase does not freeze either experiment, so the default image remains the local tag until the owner pins it.
+
+**Retrieval weights.** `docker/experiment/retrieval_config.json` is the G1e production set (`query` 0.4, `direction` 0.4, `trajectory` -0.05, `keyword` 0.3), the same values as the host workspace file. `isolated-up.sh` copies that file into the new workspace volume, mode `0444`, before the Engine process starts. The running image's entrypoint runs `chown -R` on `/workspace` and fails if that path is a read-only bind, so the file lives in the volume rather than as a bind mount. The Engine writes `retrieval_config.json` only when it is missing, so first boot cannot persist the constructor default `trajectory` 0.2. If a different file is already present, the script refuses to overwrite it. These are the production weights, not a new experimental choice.
+
+**C6 window.** `docker/compose.c6.yml` sets `THOTH_C64_WINDOW_FILE=/workspace/c64/window.json` on C6-LIVE only. The file is not created. `THOTH_C64_CURRENT_FINGERPRINT` is not set. EGAR-LAB and DEV do not have the variable. The official window stays closed.
+
+**GUI.** A remote GUI banner is `Backend: Engine` plus the `THOTH_ENGINE_URL` it opened. Port 8090, 8091, or 8092 is which deployment will receive the goal. The banner does not invent a name. Compose records the name in `THOTH_ENVIRONMENT_LABEL` (`C6-LIVE` or `EGAR-LAB`) on that Engine's environment.
+
+**Cognitive state and the C6.4 pin.** The sealed cohort fingerprint is unchanged. It does not cover plans, trajectories, or strategies. A future starting-state digest is a hash of the workspace archive plus the GGUF hashes and the Engine image id. Do not treat the cohort fingerprint as that digest. EGAR S0 is not created by these scripts.
+
 ## Environment (compose defaults)
 
 | Variable | Value |

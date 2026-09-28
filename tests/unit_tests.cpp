@@ -7981,6 +7981,20 @@ static bool testGuiPhase2BackendCapabilitiesAndPresentation() {
         std::cerr << "testGuiPhase2: mode label must not say Remote\n";
         return false;
     }
+    const std::string engineWithUrl =
+        backendModeLabelWithEndpoint(true, "http://127.0.0.1:8091");
+    if (engineWithUrl != std::string(kBackendModeEngine) + " http://127.0.0.1:8091") {
+        std::cerr << "testGuiPhase2: remote banner must include the Engine URL\n";
+        return false;
+    }
+    if (backendModeLabelWithEndpoint(false, "http://127.0.0.1:8090") != kBackendModeLocal) {
+        std::cerr << "testGuiPhase2: local banner must not append an Engine URL\n";
+        return false;
+    }
+    if (engineWithUrl.find("Remote") != std::string::npos) {
+        std::cerr << "testGuiPhase2: endpoint banner must not say Remote\n";
+        return false;
+    }
     const std::string unavailable = kUnavailableWithCurrentBackend;
     if (unavailable.find("Plan K") != std::string::npos) {
         std::cerr << "testGuiPhase2: Unavailable copy must not mention Plan K\n";

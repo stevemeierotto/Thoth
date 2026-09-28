@@ -1,0 +1,8 @@
+# C6-LIVE only. The window file is a future path inside the C6 workspace.
+# This file does not create that record and does not set THOTH_C64_CURRENT_FINGERPRINT.
+# The official C6.4 window stays closed until an owner opens it.
+
+services:
+  thoth-engine:
+    environment:
+      THOTH_C64_WINDOW_FILE: /workspace/c64/window.json

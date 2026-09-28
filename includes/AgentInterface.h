@@ -64,7 +64,7 @@ public:
     /** Explicit feature surface for capability-driven UI (Phase 2). */
     Thoth::BackendCapabilities capabilities() const;
 
-    /** User-facing mode banner: "Backend: Engine" or "Backend: Local". */
+    /** User-facing mode banner. Remote includes the Engine base URL. */
     std::string backendModeLabel() const;
 
     /** Phase 6 — SSE connection + engine health (Local: applies=false). */
@@ -127,4 +127,6 @@ private:
     std::atomic<bool> shuttingDown{false};
     std::atomic<bool> workerBusy{false};
     std::string activeSessionId;
+    /** Set only when THOTH_ENGINE_URL selected the remote backend. */
+    std::string remoteEndpoint;
 };

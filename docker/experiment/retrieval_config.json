@@ -1,0 +1,8 @@
+{
+    "retrieval_weights": {
+        "query": 0.4,
+        "direction": 0.4,
+        "trajectory": -0.05,
+        "keyword": 0.3
+    }
+}

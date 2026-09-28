@@ -72,6 +72,20 @@ inline const char* backendModeLabel(bool is_remote) {
     return is_remote ? kBackendModeEngine : kBackendModeLocal;
 }
 
+/**
+ * Remote banner includes the Engine base URL selected at startup.
+ * The URL is the runtime identity (port 8090 / 8091 / 8092). Names are not
+ * hard-coded here; they are Compose labels on the deployment that owns that URL.
+ */
+inline std::string backendModeLabelWithEndpoint(bool is_remote, const std::string& endpoint) {
+    std::string label = backendModeLabel(is_remote);
+    if (is_remote && !endpoint.empty()) {
+        label.push_back(' ');
+        label += endpoint;
+    }
+    return label;
+}
+
 inline std::string backendModeLabel(const BackendCapabilities& caps) {
     // Engine mode is the sparse matrix (no cognate/benchmark surfaces yet).
     const bool looks_local = caps.supportsStrategies && caps.supportsBenchmarks

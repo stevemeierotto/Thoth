@@ -1,0 +1,24 @@
+# Experimental isolation overlay. Never combine this file with Compose project "thoth".
+# DEV stays on docker-compose.yml alone (port 8090, volumes thoth_thoth-*).
+#
+# This overlay:
+# - does not build the Engine (a DEV rebuild of thoth-engine:local cannot rewrite a digest pin)
+# - copies the production retrieval weights into the workspace before first Engine start
+# - reuses the existing model volume read-only (no second copy of the GGUF files)
+#
+# C6-LIVE:  ./docker/isolated-up.sh c6 up
+# EGAR-LAB: ./docker/isolated-up.sh egar up
+# Freeze later by exporting THOTH_ENGINE_IMAGE=thoth-engine@sha256:<image id>
+# before up. Do not pass --build.
+
+services:
+  thoth-engine:
+    image: ${THOTH_ENGINE_IMAGE:-thoth-engine:local}
+    build: !reset null
+    environment:
+      THOTH_ENVIRONMENT_LABEL: ${THOTH_ENVIRONMENT_LABEL:?THOTH_ENVIRONMENT_LABEL is required}
+
+volumes:
+  llama-models:
+    name: thoth_llama-models
+    external: true

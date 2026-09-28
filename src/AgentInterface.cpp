@@ -25,6 +25,7 @@ AgentInterface::AgentInterface() {
         // K4: only AgentInterface reads THOTH_ENGINE_URL. Backends never read env.
         const auto remote_url = ThothRemoteHttp::resolveThothEngineUrlFromEnv();
         if (remote_url.has_value()) {
+            remoteEndpoint = *remote_url;
             backend = std::make_unique<RemoteAgentBackend>(*remote_url);
             std::cerr << "[AgentInterface] backend=remote url=" << *remote_url << "\n";
         } else {
@@ -119,7 +120,7 @@ Thoth::BackendCapabilities AgentInterface::capabilities() const {
 }
 
 std::string AgentInterface::backendModeLabel() const {
-    return Thoth::backendModeLabel(isRemote());
+    return Thoth::backendModeLabelWithEndpoint(isRemote(), remoteEndpoint);
 }
 
 Thoth::EventStreamSnapshot AgentInterface::eventStreamSnapshot() const {
