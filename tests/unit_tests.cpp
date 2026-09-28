@@ -114,6 +114,8 @@
 #include "corpus_create.h"
 #include "conversation_authority.h"
 #include "research_resources.h"
+#include "trajectory_research_listing.h"
+#include "trajectory_row_status.h"
 #include "graph_statistics.h"
 #include "prompt_factory.h"
 #include "llama_server_client.h"
@@ -9494,6 +9496,117 @@ static bool testEngineHttpConversationEndpoints() {
         runtime->shutdown();
         return false;
     }
+}
+
+static bool testTrajectoryResearchListKeepsOlderCompletedScores() {
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_traj_list_display.db").string();
+    const std::string dbPath = cfg.database_path;
+    bool ok = true;
+    std::string detail;
+
+    {
+        auto memory = std::make_shared<Memory>(cfg);
+        constexpr int kCount = 22;
+        for (int i = 0; i < kCount; ++i) {
+            Memory::CognateTrajectoryRecord rec;
+            if (i == 0) {
+                rec.trajectory_id = "traj-old-success";
+                rec.goal = "older completed success";
+                rec.success_score = 1.0f;
+                rec.created_at = 1000;
+            } else if (i == 1) {
+                rec.trajectory_id = "traj-old-zero";
+                rec.goal = "older completed zero";
+                rec.success_score = 0.0f;
+                rec.created_at = 2000;
+            } else {
+                rec.trajectory_id = "traj-newer-" + std::to_string(i);
+                rec.goal = "newer trajectory";
+                rec.success_score = 0.5f;
+                rec.created_at = 10000 + i;
+            }
+            rec.trajectory_json = "{}";
+            rec.usage_count = 0;
+            rec.tier = 0;
+            if (!memory->saveTrajectory(rec)) {
+                ok = false;
+                detail = "saveTrajectory failed for " + rec.trajectory_id;
+            }
+        }
+
+        Memory::EpisodeStepRecord orphan;
+        orphan.episode_id = "traj-no-terminal";
+        orphan.goal_id = "plan-no-terminal";
+        orphan.step_index = 0;
+        orphan.state_summary = "Retrieve relevant corpus context";
+        orphan.action_taken = "retrieval";
+        orphan.result_status = "SUCCESS";
+        orphan.timestamp_ms = 1500;
+        memory->storeEpisodeStep(orphan);
+
+        const auto loaded = memory->getAllTrajectories();
+        if (loaded.size() != static_cast<std::size_t>(kCount)) {
+            ok = false;
+            detail = "persisted trajectory count " + std::to_string(loaded.size());
+        }
+
+        const auto collection = Thoth::listTrajectoryResearchCollection(loaded);
+        std::string err;
+        if (!Thoth::ResearchResources::hasRequiredCollectionFields(collection, err)) {
+            ok = false;
+            detail = err;
+        }
+        if (collection.value("total_items", -1) != kCount) {
+            ok = false;
+            detail = "total_items truncated";
+        }
+        const auto items = Thoth::ResearchResources::itemsArray(collection);
+        if (items.size() != static_cast<std::size_t>(kCount)) {
+            ok = false;
+            detail = "research items truncated to " + std::to_string(items.size());
+        }
+
+        const std::string successLabel =
+            Thoth::trajectoryParentStatusColumn("traj-old-success", items);
+        const std::string zeroLabel =
+            Thoth::trajectoryParentStatusColumn("traj-old-zero", items);
+        const std::string openLabel =
+            Thoth::trajectoryParentStatusColumn("traj-no-terminal", items);
+        if (successLabel != "1.00" || successLabel == Thoth::kUnterminatedTrajectoryLabel) {
+            ok = false;
+            detail = "older success displayed as '" + successLabel + "'";
+        }
+        if (zeroLabel != "0.00" || zeroLabel == Thoth::kUnterminatedTrajectoryLabel) {
+            ok = false;
+            detail = "older zero displayed as '" + zeroLabel + "'";
+        }
+        if (openLabel != Thoth::kUnterminatedTrajectoryLabel || openLabel == "1.00" ||
+            openLabel == "0.00") {
+            ok = false;
+            detail = "unterminated episode displayed as '" + openLabel + "'";
+        }
+
+        bool orphanPersisted = false;
+        for (const auto& step : memory->getAllEpisodeSteps()) {
+            if (step.episode_id == "traj-no-terminal" && step.result_status == "SUCCESS") {
+                orphanPersisted = true;
+            }
+        }
+        if (!orphanPersisted) {
+            ok = false;
+            detail = "unterminated episode step was not preserved";
+        }
+    }
+
+    std::error_code ec;
+    fs::remove(dbPath, ec);
+    fs::remove(dbPath + "-wal", ec);
+    fs::remove(dbPath + "-shm", ec);
+    if (!ok) {
+        std::cerr << "testTrajectoryResearchListKeepsOlderCompletedScores: " << detail << "\n";
+    }
+    return ok;
 }
 
 static bool testGuiPhase11ResearchResources() {
@@ -21373,6 +21486,7 @@ int main() {
     if (!testGuiPhase9CorpusCreate()) failures++;
     if (!testTcb4CreateDocumentRequestSessionId()) failures++;
     if (!testGuiPhase10ConversationAuthority()) failures++;
+    if (!testTrajectoryResearchListKeepsOlderCompletedScores()) failures++;
     if (!testGuiPhase11ResearchResources()) failures++;
     if (!testGuiPhase12AGraphStatistics()) failures++;
     if (!testIndexManagerCreateCorpusDocumentAtomic()) failures++;

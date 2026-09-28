@@ -6,9 +6,8 @@
 
 #include "TrajectoryViewer.h"
 #include "backend_capabilities.h"
+#include "trajectory_row_status.h"
 #include <wx/sizer.h>
-#include <iomanip>
-#include <sstream>
 #include <map>
 #include <vector>
 #include <algorithm>
@@ -118,16 +117,14 @@ void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson
     for (auto const& [tid, trajPtr] : trajMap) {
         const auto& traj = *trajPtr;
         std::string goal = traj.value("goal", "n/a");
-        float score = traj.value("success_score", 0.0f);
         long long ts = traj.value("created_at", 0LL);
         wxDateTime dt(static_cast<time_t>(ts / 1000));
-
-        std::stringstream ssScore;
-        ssScore << std::fixed << std::setprecision(2) << score;
+        const std::string scoreLabel = Thoth::formatTrajectorySuccessScore(
+            traj.value("success_score", 0.0));
 
         wxTreeListItem parent = m_treeList->AppendItem(root, wxString::FromUTF8(goal));
         m_treeList->SetItemText(parent, 1, wxString::FromUTF8(tid));
-        m_treeList->SetItemText(parent, 2, wxString::FromUTF8(ssScore.str()));
+        m_treeList->SetItemText(parent, 2, wxString::FromUTF8(scoreLabel));
         m_treeList->SetItemText(parent, 3, dt.Format("%Y-%m-%d %H:%M:%S"));
 
         if (traj.contains("trajectory") && traj["trajectory"].contains("plan_initial")) {
@@ -170,7 +167,9 @@ void TrajectoryViewer::UpdateTrajectories(const nlohmann::json& trajectoriesJson
                 wxString::FromUTF8(firstStep->value("state_summary", "Execution in progress...")));
             
             m_treeList->SetItemText(parent, 1, wxString::FromUTF8(eid));
-            m_treeList->SetItemText(parent, 2, "In-Prog");
+            m_treeList->SetItemText(
+                parent, 2,
+                wxString::FromUTF8(Thoth::trajectoryParentStatusColumn(eid, trajectoriesJson)));
             m_treeList->SetItemText(parent, 3, dt.Format("%Y-%m-%d %H:%M:%S"));
 
             for (const auto* stepPtr : steps) {
