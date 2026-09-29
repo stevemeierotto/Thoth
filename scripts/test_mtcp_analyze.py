@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from mtcp_analyze import Call, load_calls, material, pressure_count, select  # noqa: E402
-from mtcp_manifest import validate  # noqa: E402
+from mtcp_manifest import observe_model_bytes, observe_repository, validate  # noqa: E402
 
 
 def call(task, kind, *, length=False, fallback=False, overflow=False, tokens=10, requested=512, provider_ok=True, validation_ok=True):
@@ -156,12 +156,30 @@ def test_manifest_and_s0():
         "stage": "A",
         "started_at": "2026-09-28T00:00:00Z",
     }
-    if validate(good):
-        raise SystemExit(f"valid manifest rejected: {validate(good)}")
+    observed = {
+        "product_sha": good["product_sha"],
+        "engine_sha": good["engine_sha"],
+        "chat_model_sha256": good["chat_model_sha256"],
+        "embedding_model_sha256": good["embedding_model_sha256"],
+    }
+    if validate(good, observed):
+        raise SystemExit(f"valid manifest rejected: {validate(good, observed)}")
+    if not validate(good):
+        raise SystemExit("manifest without observed identity was accepted")
     bad = dict(good)
     bad["n_ctx"] = 2048
-    if not validate(bad):
+    if not validate(bad, observed):
         raise SystemExit("bad context was accepted")
+    for key, wrong in (
+        ("product_sha", "deadbeef"),
+        ("engine_sha", "deadbeef"),
+        ("chat_model_sha256", "a" * 64),
+        ("embedding_model_sha256", "b" * 64),
+    ):
+        trial = dict(good)
+        trial[key] = wrong
+        if not validate(trial, observed):
+            raise SystemExit(f"wrong {key} was accepted")
 
     retrieval = (ROOT / "docker/experiment/retrieval_config.json").read_bytes()
     with tempfile.TemporaryDirectory() as tmp:
@@ -186,6 +204,23 @@ def test_manifest_and_s0():
             raise SystemExit("restore left contamination in place")
 
 
+def test_observed_identity_bytes():
+    observed_repo = observe_repository(ROOT)
+    if len(observed_repo["product_sha"]) != 40 or len(observed_repo["engine_sha"]) != 40:
+        raise SystemExit(f"observed SHAs were not git revisions: {observed_repo}")
+    with tempfile.TemporaryDirectory() as tmp:
+        chat = Path(tmp) / "chat.gguf"
+        embed = Path(tmp) / "embed.gguf"
+        chat.write_bytes(b"chat-model-bytes")
+        embed.write_bytes(b"embed-model-bytes")
+        observed = observe_model_bytes(chat, embed)
+        import hashlib
+        if observed["chat_model_sha256"] != hashlib.sha256(b"chat-model-bytes").hexdigest():
+            raise SystemExit("chat hash was not computed from file bytes")
+        if observed["embedding_model_sha256"] != hashlib.sha256(b"embed-model-bytes").hexdigest():
+            raise SystemExit("embedding hash was not computed from file bytes")
+
+
 def test_c6_ignores_generation_rows():
     sys.path.insert(0, str(ROOT / "scripts"))
     from c6_longitudinal_join import validate_app_log_rows  # noqa: E402
@@ -200,5 +235,6 @@ def test_c6_ignores_generation_rows():
 if __name__ == "__main__":
     test_stage_branches()
     test_manifest_and_s0()
+    test_observed_identity_bytes()
     test_c6_ignores_generation_rows()
     print("mtcp synthetic checks passed")
