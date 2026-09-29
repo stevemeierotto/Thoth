@@ -21416,6 +21416,7 @@ int main() {
     if (!testMtcpCallScopedMetadata()) failures++;
     if (!testMtcpRevisionWrapperStable()) failures++;
     if (!testMtcpSynthesisTaskIdPropagation()) failures++;
+    if (!testMtcpV11UsageAndObserver()) failures++;
     if (!testChatRolePromptAssembly()) failures++;
     if (!testChatMultiTurnMessageAssembly()) failures++;
     if (!testPlanNGreetingSkipTelemetryUnchanged()) failures++;

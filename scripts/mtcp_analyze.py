@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply sealed MTCP v1.0 section 17. No thresholds are configurable."""
+"""Apply sealed MTCP section 17. No thresholds are configurable."""
 
 from __future__ import annotations
 
@@ -26,16 +26,20 @@ class Call:
     kept_existing_plan: bool
     context_overflow: bool
     generation_id: str
+    usage_unavailable: bool = False
+    synthesis_observed_empty: bool = False
 
     @property
     def overflow_invalid(self) -> bool:
+        if self.usage_unavailable:
+            return False
         if self.context_overflow:
             return True
         return self.prompt_tokens + self.requested_max_tokens > OVERFLOW_LIMIT
 
     @property
     def ceiling_pressure(self) -> bool:
-        if self.overflow_invalid or not self.provider_ok:
+        if self.usage_unavailable or self.overflow_invalid or not self.provider_ok:
             return False
         if self.finish_reason == "length":
             return True
@@ -45,10 +49,13 @@ class Call:
 
     @property
     def structured_failure(self) -> bool:
+        if self.usage_unavailable:
+            return False
         if self.call_type in {"plan", "plan_retry", "revision", "revision_retry"}:
             return self.validation_ok is False or self.fallback_used or self.kept_existing_plan
         if self.call_type == "synthesis":
-            return self.provider_ok and self.completion_tokens == 0 and self.finish_reason != "stop"
+            # Completed empty provider text only. A zero token count is not this flag.
+            return self.provider_ok and self.synthesis_observed_empty
         return False
 
     @property
@@ -61,11 +68,14 @@ def load_calls(rows: list[dict], *, mode: str) -> tuple[list[Call], list[str]]:
     calls = []
     invalid = []
     for row in rows:
+        if row.get("event") in {"GENERATION_PROGRESS", "GENERATION_PROGRESS_GAP"}:
+            continue
         if row.get("event") != "GENERATION_CALL" and "call_type" not in row:
             continue
         task_id = row.get("task_id") or ""
         call_type = row["call_type"]
         grouped[(task_id, call_type)] += 1
+        usage_unavailable = row.get("provider_usage") == "unavailable"
         call = Call(
             task_id=task_id,
             call_type=call_type,
@@ -80,8 +90,13 @@ def load_calls(rows: list[dict], *, mode: str) -> tuple[list[Call], list[str]]:
             kept_existing_plan=bool(row.get("kept_existing_plan")),
             context_overflow=bool(row.get("context_overflow")),
             generation_id=row.get("generation_id") or "",
+            usage_unavailable=usage_unavailable,
+            synthesis_observed_empty=bool(row.get("synthesis_observed_empty")),
         )
-        if call.overflow_invalid or not call.provider_ok:
+        if usage_unavailable:
+            call.prompt_tokens = 0
+            call.completion_tokens = 0
+        if call.overflow_invalid or not call.provider_ok or usage_unavailable:
             invalid.append(call.generation_id or f"{task_id}:{call_type}")
             if mode == "strict":
                 continue
@@ -127,8 +142,12 @@ def adequate(calls: list[Call]) -> bool:
     return pressure_count(calls) == 0 and length_failures(calls) == 0
 
 
+def decision_blocked(call: Call) -> bool:
+    return call.usage_unavailable or not call.provider_ok or call.overflow_invalid
+
+
 def select(stage_a_low: list[Call], stage_a_high: list[Call], stage_b: list[Call] | None) -> dict:
-    if any(call.overflow_invalid for call in stage_a_low + stage_a_high):
+    if any(decision_blocked(call) for call in stage_a_low + stage_a_high):
         return {"status": "invalid_condition", "selected": None, "stage_b": False}
     improved = material(stage_a_low, stage_a_high)
     if not improved:
@@ -149,7 +168,7 @@ def select(stage_a_low: list[Call], stage_a_high: list[Call], stage_b: list[Call
         }
     if stage_b is None:
         return {"status": "stage_b_required", "selected": None, "stage_b": True, "label": "Stage B required"}
-    if any(call.overflow_invalid for call in stage_b):
+    if any(decision_blocked(call) for call in stage_b):
         return {"status": "invalid_condition", "selected": None, "stage_b": True}
     residual = pressure_count(stage_a_high)
     if material(stage_a_high, stage_b, residual=residual):

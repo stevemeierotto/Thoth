@@ -56,6 +56,28 @@ SEALED = {
     "appendix_asset_sha256": "7d8a3b4bd07663737c50d3a56304dedaca37e2b6db9cddea8c6e0140a353ec39",
     "task_set_sha256": "a41031ff84308edbaf40804f4e96aae8b85395a0ff9e00fffc7afe402002ec90",
 }
+V11_CONSTANTS = {
+    "protocol": "MTCP v1.1",
+    "lifecycle": "SEALED",
+    "seal_commit": "bf6602ca26c580e75ea61b07f09896ee788dee94",
+    "n_ctx": 8192,
+    "text_timeout_seconds": 4356,
+    "embedding_timeout_seconds": 300,
+    "slots_observer_enabled": True,
+    "slots_poll_seconds": 60,
+    "llama_server_slots_debug": False,
+    "retrieval_config_sha256": SEALED["retrieval_config_sha256"],
+    "corpus_set_sha256": SEALED["corpus_set_sha256"],
+    "appendix_asset_sha256": SEALED["appendix_asset_sha256"],
+    "task_set_sha256": SEALED["task_set_sha256"],
+}
+V11_PRODUCT_SEAL = "bf6602ca26c580e75ea61b07f09896ee788dee94"
+V11_ENGINE_BASELINE = "4a2d8a8f37114a2509632f7998eb3b72382e20a3"
+V11_EXTRA = (
+    "slots_observer_enabled",
+    "slots_poll_seconds",
+    "llama_server_slots_debug",
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -88,14 +110,31 @@ def observe_model_bytes(chat_model: Path, embedding_model: Path) -> dict[str, st
     }
 
 
-def validate(document: dict, observed: dict | None = None) -> list[str]:
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", ancestor, descendant],
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def validate(document: dict, observed: dict | None = None, repo: Path | None = None) -> list[str]:
     errors = []
     for key in REQUIRED:
         if key not in document:
             errors.append(f"missing {key}")
-    for key, expected in SEALED.items():
-        if document.get(key) != expected:
-            errors.append(f"{key} mismatch")
+    v11 = document.get("protocol") == "MTCP v1.1"
+    if v11:
+        for key in V11_EXTRA:
+            if key not in document:
+                errors.append(f"missing {key}")
+        for key, expected in V11_CONSTANTS.items():
+            if document.get(key) != expected:
+                errors.append(f"{key} mismatch")
+    else:
+        for key, expected in SEALED.items():
+            if document.get(key) != expected:
+                errors.append(f"{key} mismatch")
     if not observed:
         errors.append("runtime identity was not observed")
     else:
@@ -110,6 +149,12 @@ def validate(document: dict, observed: dict | None = None) -> list[str]:
                 errors.append(f"{key} was not observed")
             elif document.get(key) != actual:
                 errors.append(f"{key} does not match observed bytes")
+        if v11 and repo is not None:
+            engine_repo = repo / "external" / "basic_agent"
+            if not _is_ancestor(repo, V11_PRODUCT_SEAL, observed["product_sha"]):
+                errors.append("product_sha does not contain the v1.1 seal")
+            if not _is_ancestor(engine_repo, V11_ENGINE_BASELINE, observed["engine_sha"]):
+                errors.append("engine_sha does not contain the v1.1 baseline")
     if document.get("s0_char_ok") is not True:
         errors.append("s0_char_ok is not true")
     if document.get("stage") == "B" and document.get("stage_b_predicate") is not True:

@@ -1,7 +1,9 @@
 #include "generation_budget.h"
 #include "generation_call.h"
 #include "generation_call_log.h"
+#include "generation_progress_observer.h"
 #include "llama_server_client.h"
+#include "llm_timeout_policy.h"
 #include "llm_interface.h"
 #include "llm_planner.h"
 #include "mock_inference_client.h"
@@ -13,6 +15,11 @@
 #include "memory.h"
 #include "alp_sha256.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <fstream>
+#include <mutex>
 #include <thread>
 
 namespace {
@@ -437,4 +444,161 @@ static bool testMtcpSynthesisTaskIdPropagation() {
         setenv("THOTH_MOCK_LLM", saved_mock_value.c_str(), 1);
     }
     return ok;
+}
+
+static bool testMtcpV11UsageAndObserver() {
+    const auto measured = Thoth::LlamaServerClient::parseCompletionResponse(
+        R"({"choices":[{"text":"","finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":0,"total_tokens":4}})");
+    if (!measured.ok || !measured.provider_usage_reported || measured.token_usage.completion_tokens != 0
+        || measured.token_usage.prompt_tokens != 4) {
+        std::cerr << "mtcp measured zero was not preserved\n";
+        return false;
+    }
+    const auto missing = Thoth::LlamaServerClient::parseCompletionResponse(
+        R"({"choices":[{"text":"hello","finish_reason":"stop"}]})");
+    if (!missing.ok || missing.provider_usage_reported) {
+        std::cerr << "mtcp missing usage object was treated as reported\n";
+        return false;
+    }
+
+    {
+        ScopeRestoreEnv timeout_env("THOTH_LLM_TIMEOUT_SECONDS", "4356");
+        if (Thoth::LlmTimeoutPolicy::timeoutSeconds() != 4356) {
+            std::cerr << "mtcp 4356 timeout was not accepted\n";
+            return false;
+        }
+    }
+    if (std::getenv("THOTH_LLM_TIMEOUT_SECONDS") == nullptr
+        && Thoth::LlmTimeoutPolicy::timeoutSeconds() != 900) {
+        std::cerr << "mtcp default timeout is no longer 900\n";
+        return false;
+    }
+
+    const std::string call_log = "/tmp/thoth-mtcp-v11-usage.jsonl";
+    const std::string progress_log = "/tmp/thoth-mtcp-v11-progress.jsonl";
+    std::filesystem::remove(call_log);
+    std::filesystem::remove(progress_log);
+    ScopeRestoreEnv calls_env("THOTH_GENERATION_CALLS_LOG", call_log.c_str());
+    ScopeRestoreEnv progress_env("THOTH_GENERATION_PROGRESS_LOG", progress_log.c_str());
+
+    Thoth::GenerationRecordFields fields;
+    Thoth::GenerationOutcome timed_out;
+    timed_out.generation_id = "timeout-1";
+    timed_out.ok = false;
+    timed_out.error = "Timeout was reached";
+    timed_out.context.call_type = "plan_retry";
+    timed_out.context.task_id = "G2";
+    timed_out.requested_max_tokens = 1024;
+    timed_out.prompt_tokens = 50;
+    timed_out.completion_tokens = 50;
+    timed_out.provider_usage_reported = false;
+    if (!Thoth::GenerationCallLog::append(timed_out, fields)) {
+        std::cerr << "mtcp unavailable usage log failed\n";
+        return false;
+    }
+    Thoth::GenerationOutcome measured_zero;
+    measured_zero.generation_id = "zero-1";
+    measured_zero.ok = true;
+    measured_zero.provider_usage_reported = true;
+    measured_zero.prompt_tokens = 4;
+    measured_zero.completion_tokens = 0;
+    measured_zero.has_total_tokens = true;
+    measured_zero.total_tokens = 4;
+    measured_zero.finish_reason = "length";
+    measured_zero.context.call_type = "synthesis";
+    measured_zero.context.task_id = "G2";
+    measured_zero.requested_max_tokens = 512;
+    if (!Thoth::GenerationCallLog::append(measured_zero, fields)) {
+        std::cerr << "mtcp measured zero log failed\n";
+        return false;
+    }
+    const std::string logged = std::string(std::istreambuf_iterator<char>(std::ifstream(call_log).rdbuf()),
+                                           std::istreambuf_iterator<char>());
+    const auto timeout_line = logged.substr(0, logged.find('\n'));
+    if (timeout_line.find("\"provider_usage\":\"unavailable\"") == std::string::npos
+        || timeout_line.find("prompt_tokens") != std::string::npos
+        || timeout_line.find("completion_tokens") != std::string::npos
+        || timeout_line.find("synthesis_observed_empty") != std::string::npos) {
+        std::cerr << "mtcp timeout row stored numeric usage\n";
+        return false;
+    }
+    if (logged.find("\"provider_usage\":\"reported\"") == std::string::npos
+        || logged.find("\"completion_tokens\":0") == std::string::npos) {
+        std::cerr << "mtcp measured zero was not recorded\n";
+        return false;
+    }
+
+    Thoth::InferenceGenerateRequest request;
+    request.model = "chat";
+    request.prompt = "unchanged";
+    request.max_tokens = 512;
+    const std::string payload = Thoth::LlamaServerClient::serializeGeneratePayload(request);
+    if (payload.find("fail_on_no_slot") != std::string::npos || payload.find("/slots") != std::string::npos) {
+        std::cerr << "mtcp completion payload was changed\n";
+        return false;
+    }
+
+    std::atomic<int> fetches{0};
+    std::atomic<bool> release{false};
+    std::mutex block_mutex;
+    std::condition_variable block_cv;
+    Thoth::setProgressObserverTestHooks({
+        [](std::chrono::milliseconds delay) {
+            if (delay != std::chrono::seconds(60)) {
+                std::cerr << "mtcp observer interval was not 60 seconds\n";
+            }
+        },
+        [&]() {
+            const int which = ++fetches;
+            Thoth::InferenceHttpResponse http;
+            http.ok = true;
+            if (which == 1) {
+                std::unique_lock<std::mutex> lock(block_mutex);
+                block_cv.wait(lock, [&] { return release.load(); });
+                http.body = R"([{"is_processing":true,"prompt":"secret text","next_token":{"n_decoded":1}}])";
+            } else {
+                http.body = R"([{"is_processing":true,"n_prompt_tokens":8,"next_token":{"n_decoded":3,"n_remain":4}}])";
+            }
+            return http;
+        },
+    });
+    {
+        Thoth::GenerationProgressSession first("gen-a", "http://llama-server:8080/slots");
+        for (int i = 0; i < 200 && fetches.load() < 1; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        {
+            Thoth::GenerationProgressSession second("gen-b", "http://llama-server:8080/slots?fail_on_no_slot=1");
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            if (fetches.load() != 1) {
+                std::cerr << "mtcp observer allowed more than one request in flight\n";
+                release = true;
+                block_cv.notify_all();
+                Thoth::clearProgressObserverTestHooks();
+                return false;
+            }
+        }
+        release = true;
+        block_cv.notify_all();
+    }
+    {
+        Thoth::GenerationProgressSession clean("gen-c", "http://llama-server:8080/slots");
+        for (int i = 0; i < 200 && fetches.load() < 2; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+    Thoth::clearProgressObserverTestHooks();
+    const std::string progress = std::string(std::istreambuf_iterator<char>(std::ifstream(progress_log).rdbuf()),
+                                             std::istreambuf_iterator<char>());
+    if (progress.find("secret text") != std::string::npos
+        || progress.find("\"prompt\"") != std::string::npos
+        || progress.find("discarded_text") == std::string::npos
+        || progress.find("in_flight") == std::string::npos
+        || progress.find("\"n_decoded\":3") == std::string::npos) {
+        std::cerr << "mtcp progress log did not keep the observer contract\n";
+        return false;
+    }
+    std::filesystem::remove(call_log);
+    std::filesystem::remove(progress_log);
+    return true;
 }
