@@ -20894,6 +20894,8 @@ static bool testLocalNoteSlotDeleteButtonGeometry() {
 }
 #endif
 
+#include "mtcp_generation_checks.inc"
+
 int main() {
     if (const char* focused = std::getenv("THOTH_LLM_TIMEOUT_TESTS")) {
         if (std::string(focused) == "1") {
@@ -21410,6 +21412,9 @@ int main() {
     if (!testChatRagMetadataOffPresentation()) failures++;
     if (!testChatInferenceModeEnvDefault()) failures++;
     if (!testLlamaChatPayloadSerialization()) failures++;
+    if (!testMtcpGenerationBudgetAndSeed()) failures++;
+    if (!testMtcpCallScopedMetadata()) failures++;
+    if (!testMtcpRevisionWrapperStable()) failures++;
     if (!testChatRolePromptAssembly()) failures++;
     if (!testChatMultiTurnMessageAssembly()) failures++;
     if (!testPlanNGreetingSkipTelemetryUnchanged()) failures++;
