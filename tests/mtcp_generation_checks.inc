@@ -322,3 +322,119 @@ static bool testMtcpRevisionWrapperStable() {
     }
     return true;
 }
+
+class MtcpSynthesisProvenancePlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "mtcp-synth-plan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        PlanStep step;
+        step.step_id = "mtcp-synth-step";
+        step.description = "Synthesize the characterization answer";
+        step.type = StepType::LLM;
+        step.payload = {{"prompt", "MTCP_SYNTH_PROMPT_MARKER"}};
+        plan.steps.push_back(step);
+        return plan;
+    }
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+static bool testMtcpSynthesisTaskIdPropagation() {
+    Thoth::RobustnessMockResponses::reset();
+    UnsetDev unset_dev;
+    const char* saved_mock = std::getenv("THOTH_MOCK_LLM");
+    const std::string saved_mock_value = saved_mock ? saved_mock : "";
+    unsetenv("THOTH_MOCK_LLM");
+    Thoth::GenerationBudget::resetForTests();
+
+    const fs::path db_path = makeTempPath("thoth_mtcp_synthesis_task.db");
+    const std::string log_path = "/tmp/thoth-mtcp-synthesis-task.jsonl";
+    std::filesystem::remove(log_path);
+    ScopeRestoreEnv log_env("THOTH_GENERATION_CALLS_LOG", log_path.c_str());
+
+    Config cfg;
+    cfg.database_path = db_path.string();
+    auto memory = std::make_shared<Memory>(cfg);
+    auto embedding = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto index = new IndexManager(embedding.get());
+    auto rag = std::make_shared<RAGPipeline>(std::move(embedding), index, &cfg, memory.get());
+    auto planner = std::make_shared<MtcpSynthesisProvenancePlanner>();
+    auto registry = std::make_shared<ToolRegistry>();
+
+    auto llm = std::make_unique<LLMInterface>(LLMBackend::Ollama, &cfg);
+    auto client = std::make_unique<Thoth::MockInferenceClient>();
+    client->on_generate = [](const Thoth::InferenceGenerateRequest&) {
+        Thoth::InferenceGenerateResult result;
+        result.ok = true;
+        result.text = "MTCP_SYNTH_COMPLETION_MARKER";
+        result.finish_reason = "stop";
+        result.token_usage.prompt_tokens = 11;
+        result.token_usage.completion_tokens = 4;
+        result.token_usage.total_tokens = 15;
+        return result;
+    };
+    llm->setInferenceClientForTests(std::move(client));
+    llm->useModel("chat");
+
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    controller.set_config(&cfg);
+    controller.set_llm_interface(llm.get());
+    controller.set_max_reflections(0);
+    controller.set_session_id("mtcp-synth-session");
+    controller.execute_goal("mtcp synthesis provenance goal", {}, "G2");
+    const bool finished = waitForPlanTerminal(controller, 15000);
+
+    bool ok = finished;
+    std::string logged;
+    if (ok) {
+        std::ifstream in(log_path);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        logged = buffer.str();
+        if (logged.find("MTCP_SYNTH_PROMPT_MARKER") != std::string::npos
+            || logged.find("MTCP_SYNTH_COMPLETION_MARKER") != std::string::npos) {
+            std::cerr << "mtcp synthesis telemetry logged prompt or completion text\n";
+            ok = false;
+        }
+    } else {
+        std::cerr << "mtcp synthesis provenance goal did not finish\n";
+    }
+
+    bool saw_synthesis = false;
+    if (ok) {
+        std::stringstream lines(logged);
+        std::string line;
+        while (std::getline(lines, line)) {
+            if (line.empty()) {
+                continue;
+            }
+            const auto row = nlohmann::json::parse(line);
+            if (row.value("call_type", "") != "synthesis") {
+                continue;
+            }
+            saw_synthesis = true;
+            if (row.value("task_id", "") != "G2"
+                || row.value("session_id", "") != "mtcp-synth-session"
+                || row.value("plan_id", "") != "mtcp-synth-plan"
+                || row.contains("prompt") || row.contains("completion") || row.contains("text")
+                || row.contains("raw_completion") || row.contains("chain_of_thought")) {
+                std::cerr << "mtcp synthesis provenance fields missing or text fields present\n";
+                ok = false;
+            }
+        }
+        if (!saw_synthesis) {
+            std::cerr << "mtcp synthesis generation record absent\n";
+            ok = false;
+        }
+    }
+
+    std::filesystem::remove(log_path);
+    fs::remove(db_path);
+    Thoth::GenerationBudget::resetForTests();
+    if (!saved_mock_value.empty()) {
+        setenv("THOTH_MOCK_LLM", saved_mock_value.c_str(), 1);
+    }
+    return ok;
+}
