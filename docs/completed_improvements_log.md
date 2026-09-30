@@ -1,6 +1,27 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-29 (EGAR production loop closure)
+Last updated: 2026-09-29 (cognitive-spine success path)
+
+## 2026-09-29 — Production cognitive-spine success path verified
+
+**Status:** End-to-end verified 2026-09-29 for the default success path only. The check is opt-in (`THOTH_SPINE_CAUSAL_CHAIN=1`) because it uses the production External embedder. It does not verify failure/revision, reflection, timeout cancellation, crash/resume, GRAG score quality, EGAR lift, or answer quality.
+
+**Designed.** The default cognitive spine is the standard goal loop: a goal enters `ExecutiveController`, `LLMPlanner` builds the plan, `StandardExecutionMode` drives `decide_transition`, `WorkflowEngine` dispatches steps, and success ends in `COMPLETED` with `PLAN_COMPLETED`, active-plan removal, and a typed trajectory. Scientific mode, chat retrieval, and EGAR promotion are separate paths.
+
+**Implemented and exercised.** The opt-in test uses production `LLMPlanner`, `ExecutiveController`, `StandardExecutionMode`, `WorkflowEngine`, `ConstraintChecker`, SQLite `Memory`, and `RAGPipeline` on a temporary database and workspace. Generation is a deterministic fake. Embeddings are External `nomic-embed-text:v1.5`, dimension 768, under `THOTH_EMBED_STRICT=1`. The frozen goal, marker `SPINEQX7F3C`, retrieval query, and `RETRIEVAL` then `LLM` plan fixture were unchanged.
+
+**End-to-end verified** on that run: goal admission in `PLANNING` → parsed production plan (no fallback) → active plan persisted before step events → dense nonzero goal embedding (length 768, norm 1) → context-scoped retrieval returned the marker → the synthesis prompt contained the goal and that marker → both steps `SUCCESS` with no revision or reflection → `COMPLETED` and `PLAN_COMPLETED` → active plan removed → one past plan and one trajectory `RETRIEVAL->LLM`, with no strategy promoted from that single run.
+
+**Verified architecture, not repaired:**
+
+- Default Agent Context retrieval accepts only `session_attachment` chunks owned by the active context. An indexed note is not automatically eligible.
+- With ALP flags unset, the live corpus path is `createCorpusDocumentLegacy`: `registerAttachmentOwner` then index. Retrieval uses `Memory::getActiveSessionId()`. ALP document/session links replace that ownership route only when `THOTH_ALP_ENABLED` and `THOTH_ALP_TX_INDEX` are both set.
+- An empty scoped retrieval can still be a successful retrieval operation (`retrieval_empty` with a populated index).
+- Terminal controller state can become externally observable before the matching `PLAN_COMPLETED` or `PLAN_FAILED` callback. See `architectural_facts.md` §4.
+
+**Observed and not reclassified.** On the verified success run, `PLAN_CREATED` carried controller state `IDLE`, and `current_index` remained 0.
+
+---
 
 ## 2026-09-29 — Production EGAR loop closure verified
 

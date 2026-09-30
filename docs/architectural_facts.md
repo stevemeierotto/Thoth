@@ -53,6 +53,12 @@ For a successful final step, emission order is:
 
 When the controller loop runs, a `STATE_CHANGED` may precede that sequence in the same iteration.
 
+**Verified lifecycle ordering (2026-09-29):** the controller sets `COMPLETED` or `FAILED`, stores plan history, and releases its lock before it emits `PLAN_COMPLETED` or `PLAN_FAILED`. Terminal controller state can become externally observable before the corresponding terminal event callback is delivered.
+
+**Verified default retrieval scope (2026-09-29):** goal retrieval admits only `session_attachment` chunks whose owner matches `Memory::getActiveSessionId()`. Indexed content is not automatically eligible. With ALP flags unset, corpus create registers attachment ownership and then indexes. ALP document/session links supersede that route only when `THOTH_ALP_ENABLED` and `THOTH_ALP_TX_INDEX` are both set. An empty scoped retrieval can still be reported as a successful retrieval step.
+
+**Observed, not reclassified (2026-09-29):** on the verified two-step success path, `PLAN_CREATED` was emitted with controller state `IDLE`, and `current_index` stayed 0.
+
 ---
 
 ## 5. Metadata Shape (DecisionTraceLogger)
