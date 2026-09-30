@@ -294,7 +294,7 @@ int main() {
 
 📋 **Planned Test Expansion:**
 - ExecutiveController full lifecycle (beyond reflection replan)
-- Plan revision scenarios (`revise_plan` mid-execution, distinct from reflection)
+- Plan revision scenarios (`revise_plan` mid-execution, distinct from reflection). ✅ 2026-09-29 — see `completed_improvements_log.md`
 - Strategy engine pattern detection (partial coverage exists)
 - Scientific execution mode (partial coverage exists)
 - Graph memory operations

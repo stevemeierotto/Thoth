@@ -3087,6 +3087,89 @@ public:
     std::string backendName() const override { return "spine-failure-fake"; }
 };
 
+// Initial generation must carry the flag. The schema default does not, and the
+// test does not patch the plan after parsing.
+const char* kSpineRevisionPlanResponse =
+    "{\"plan\":[{\"step_id\":\"retrieve-context\",\"step_type\":\"RETRIEVAL\","
+    "\"description\":\"Retrieve relevant corpus context\",\"payload\":{\"query\":\"SPINEQX7F3C\",\"top_k\":5}},"
+    "{\"step_id\":\"synthesize\",\"step_type\":\"LLM\",\"description\":\"Summarize findings\","
+    "\"depends_on\":[\"retrieve-context\"],\"payload\":{},"
+    "\"failure_policy\":{\"revise_plan_on_failure\":true}}]}";
+const char* kSpineRevisedPlanResponse =
+    "{\"plan\":[{\"step_id\":\"retrieve-revised\",\"step_type\":\"RETRIEVAL\","
+    "\"description\":\"Retrieve relevant corpus context\",\"payload\":{\"query\":\"SPINEQX7F3C\",\"top_k\":5}},"
+    "{\"step_id\":\"synthesize-revised\",\"step_type\":\"LLM\",\"description\":\"Summarize findings\","
+    "\"depends_on\":[\"retrieve-revised\"],\"payload\":{}}]}";
+
+class SpineRevisionInferenceClient : public Thoth::InferenceClient {
+public:
+    std::vector<std::string> prompts;
+    std::atomic<bool>* planningSeen = nullptr;
+    bool planningSeenBeforePlanGenerate = false;
+    bool sawPlanGenerate = false;
+    int synthesisErrorCount = 0;
+
+    Thoth::InferenceGenerateResult generate(const Thoth::InferenceGenerateRequest& request) override {
+        prompts.push_back(request.prompt);
+        Thoth::InferenceGenerateResult result;
+        result.finish_reason = "stop";
+        result.provider_usage_reported = true;
+        result.token_usage.prompt_tokens = 32;
+        result.elapsed_ms = 1;
+        const bool schemaPrompt = request.prompt.find("\nSchema:\n") != std::string::npos;
+        const bool revisionPrompt = schemaPrompt
+            && request.prompt.find("Failed Step Result:") != std::string::npos;
+        if (revisionPrompt) {
+            result.ok = true;
+            result.text = kSpineRevisedPlanResponse;
+            result.token_usage.completion_tokens = 48;
+        } else if (schemaPrompt) {
+            if (!sawPlanGenerate) {
+                planningSeenBeforePlanGenerate = planningSeen && planningSeen->load();
+                sawPlanGenerate = true;
+            }
+            result.ok = true;
+            result.text = kSpineRevisionPlanResponse;
+            result.token_usage.completion_tokens = 48;
+        } else if (synthesisErrorCount == 0) {
+            ++synthesisErrorCount;
+            result.ok = false;
+            result.error = kSpineFailureSynthesisError;
+            result.finish_reason = "error";
+            result.provider_usage_reported = false;
+        } else {
+            result.ok = true;
+            result.text = kSpineSynthesisText;
+            result.token_usage.completion_tokens = 4;
+        }
+        result.token_usage.total_tokens =
+            result.token_usage.prompt_tokens + result.token_usage.completion_tokens;
+        return result;
+    }
+
+    Thoth::InferenceGenerateResult generateChat(const Thoth::InferenceChatRequest&) override {
+        Thoth::InferenceGenerateResult result;
+        result.ok = false;
+        result.error = "SpineRevisionInferenceClient does not serve chat";
+        return result;
+    }
+
+    Thoth::InferenceEmbedResult embed(const Thoth::InferenceEmbedRequest&) override {
+        Thoth::InferenceEmbedResult result;
+        result.ok = false;
+        result.error = "SpineRevisionInferenceClient does not embed";
+        return result;
+    }
+
+    Thoth::InferenceHealthResult health() override {
+        Thoth::InferenceHealthResult result;
+        result.reachable = true;
+        return result;
+    }
+
+    std::string backendName() const override { return "spine-revision-fake"; }
+};
+
 bool waitForGoalTerminal(Thoth::ExecutiveController& controller) {
     for (int i = 0; i < 200; ++i) {
         const auto state = controller.get_state();
@@ -4173,6 +4256,594 @@ static bool testProductionSpineFailureChain() {
             std::lock_guard<std::mutex> lock(eventMutex);
             for (const auto& ev : events) {
                 std::cout << "SPINE_FAILURE event " << static_cast<int>(ev.type)
+                          << " state " << ev.state << " step " << ev.stepId << "\n";
+            }
+        }
+    }
+
+    std::error_code ec;
+    fs::remove(cfg.database_path, ec);
+    fs::remove_all(workspace, ec);
+    restoreEnv();
+    return passed;
+}
+
+static bool testProductionSpineRevisionChain() {
+    const char* previousDev = std::getenv("THOTH_TEST_SUITE_DEV");
+    const std::string savedDev = previousDev ? previousDev : "";
+    unsetenv("THOTH_TEST_SUITE_DEV");
+    const char* previousMock = std::getenv("THOTH_MOCK_LLM");
+    const std::string savedMock = previousMock ? previousMock : "";
+    unsetenv("THOTH_MOCK_LLM");
+    const char* previousStepTimeout = std::getenv("THOTH_MOCK_STEP_TIMEOUT");
+    const std::string savedStepTimeout = previousStepTimeout ? previousStepTimeout : "";
+    unsetenv("THOTH_MOCK_STEP_TIMEOUT");
+    const char* previousAlp = std::getenv("THOTH_ALP_ENABLED");
+    const std::string savedAlp = previousAlp ? previousAlp : "";
+    unsetenv("THOTH_ALP_ENABLED");
+    const char* previousAlpTx = std::getenv("THOTH_ALP_TX_INDEX");
+    const std::string savedAlpTx = previousAlpTx ? previousAlpTx : "";
+    unsetenv("THOTH_ALP_TX_INDEX");
+    const char* previousLogs = std::getenv("THOTH_LOGS_PATH");
+    const std::string savedLogs = previousLogs ? previousLogs : "";
+    const char* previousStrict = std::getenv("THOTH_EMBED_STRICT");
+    const std::string savedStrict = previousStrict ? previousStrict : "";
+    setenv("THOTH_EMBED_STRICT", "1", 1);
+    const char* previousBackend = std::getenv("THOTH_INFERENCE_BACKEND");
+    const std::string savedBackend = previousBackend ? previousBackend : "";
+    setenv("THOTH_INFERENCE_BACKEND", "llama_cpp", 1);
+
+    const fs::path workspace = makeTempPath("spine_revision_workspace");
+    const fs::path logs = workspace / "logs";
+    fs::create_directories(logs);
+    fs::create_directories(workspace / "rag");
+    WorkspaceEnvGuard workspaceGuard(workspace.string());
+    setenv("THOTH_LOGS_PATH", logs.string().c_str(), 1);
+
+    const fs::path notePath = workspace / "rag" / "spine_note.md";
+    {
+        std::ofstream out(notePath);
+        out << "Isolated workspace note. Marker " << kSpineToken << " appears only in this file.\n";
+    }
+
+    Config cfg;
+    cfg.database_path = makeTempPath("spine_revision.db").string();
+    cfg.llm_model = "deterministic-fake";
+    const std::string sessionId = "spine-revision-chain";
+
+    auto restoreEnv = [&]() {
+        auto restore = [](const char* name, const std::string& saved) {
+            if (saved.empty()) {
+                unsetenv(name);
+            } else {
+                setenv(name, saved.c_str(), 1);
+            }
+        };
+        restore("THOTH_TEST_SUITE_DEV", savedDev);
+        restore("THOTH_MOCK_LLM", savedMock);
+        restore("THOTH_MOCK_STEP_TIMEOUT", savedStepTimeout);
+        restore("THOTH_ALP_ENABLED", savedAlp);
+        restore("THOTH_ALP_TX_INDEX", savedAlpTx);
+        restore("THOTH_LOGS_PATH", savedLogs);
+        restore("THOTH_EMBED_STRICT", savedStrict);
+        restore("THOTH_INFERENCE_BACKEND", savedBackend);
+    };
+
+    bool passed = false;
+    std::string planCreatedState;
+    int finalIndex = -1;
+    {
+        auto memory = std::make_shared<Memory>(cfg);
+        memory->setActiveSessionId(sessionId);
+        auto embedder = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::External, &cfg);
+        auto* embedderRaw = embedder.get();
+        auto index = std::make_unique<IndexManager>(embedder.get());
+        index->registerAttachmentOwner(notePath.string(), sessionId);
+        index->indexFile(notePath.string());
+        const int chunkCount = static_cast<int>(index->getChunks().size());
+        std::cout << "SPINE_REVISION indexed_chunks " << chunkCount << "\n";
+        auto rag = std::make_shared<RAGPipeline>(std::move(embedder), index.get(), &cfg, memory.get());
+        auto promptFactory = std::make_shared<PromptFactory>(*memory, *rag);
+        LLMInterface llm(LLMBackend::Ollama, &cfg);
+        auto fake = std::make_unique<SpineRevisionInferenceClient>();
+        auto* fakeRaw = fake.get();
+        std::atomic<bool> planningSeen{false};
+        fakeRaw->planningSeen = &planningSeen;
+        llm.setInferenceClientForTests(std::move(fake));
+        auto planner = std::make_shared<LLMPlanner>(memory, rag, promptFactory, &llm);
+        auto registry = std::make_shared<ToolRegistry>();
+        Thoth::ExecutiveController controller(planner, registry, rag, memory);
+        controller.set_llm_interface(&llm);
+        controller.set_config(&cfg);
+        controller.set_max_reflections(cfg.max_reflections);
+        controller.set_session_id(sessionId);
+
+        struct SpineEvent {
+            EventType type;
+            std::string state;
+            std::string planId;
+            std::string stepId;
+            nlohmann::json metadata;
+        };
+        std::mutex eventMutex;
+        std::vector<SpineEvent> events;
+        bool activePlanAtCreated = false;
+        bool activeStepsStillOpen = false;
+        bool embeddingAccepted = false;
+        bool embeddingFailed = false;
+        bool recordedFirstPlan = false;
+        bool activeRevisedMatches = false;
+        Plan createdPlan;
+        bool createdPlanCaptured = false;
+        std::string createdPlanId;
+        std::size_t goalEmbedLen = 0;
+        float goalEmbedNorm = 0.0f;
+
+        controller.set_event_callback([&](const ControllerEvent& ev) {
+            if (ev.type == EventType::STATE_CHANGED && ev.controller_state_name == "PLANNING") {
+                planningSeen.store(true);
+            }
+            if (ev.type == EventType::EMBEDDING_FAILED) {
+                embeddingFailed = true;
+            }
+            if (ev.type == EventType::PLAN_CREATED && !recordedFirstPlan) {
+                recordedFirstPlan = true;
+                planCreatedState = ev.controller_state_name;
+                createdPlanId = ev.plan_id;
+                createdPlan = controller.get_current_plan();
+                createdPlanCaptured = true;
+                const auto active = memory->getActivePlan(sessionId);
+                if (active && active->plan_id == ev.plan_id && active->goal == kSpineGoal) {
+                    activePlanAtCreated = true;
+                    try {
+                        const Plan stored = Plan::from_json(nlohmann::json::parse(active->steps_json));
+                        activeStepsStillOpen = !stored.steps.empty();
+                        for (const auto& step : stored.steps) {
+                            if (step.status == StepStatus::SUCCESS) {
+                                activeStepsStillOpen = false;
+                            }
+                        }
+                    } catch (...) {
+                        activeStepsStillOpen = false;
+                    }
+                }
+                const auto goalEmbedding = controller.get_goal_embedding();
+                goalEmbedLen = goalEmbedding.size();
+                float sumSquares = 0.0f;
+                bool goalNonZero = false;
+                for (float value : goalEmbedding) {
+                    sumSquares += value * value;
+                    if (std::abs(value) > Thoth::TrajectoryReuse::kZeroVectorEpsilon) {
+                        goalNonZero = true;
+                    }
+                }
+                goalEmbedNorm = std::sqrt(sumSquares);
+                bool pipelineNonZero = false;
+                for (float value : rag->goalEmbedding) {
+                    if (std::abs(value) > Thoth::TrajectoryReuse::kZeroVectorEpsilon) {
+                        pipelineNonZero = true;
+                    }
+                }
+                embeddingAccepted = goalNonZero && pipelineNonZero
+                    && !rag->goalEmbedding.empty()
+                    && goalEmbedding.size() == rag->goalEmbedding.size()
+                    && embedderRaw->getMethod() == EmbeddingEngine::Method::External
+                    && embedderRaw->getDimension() == 768
+                    && static_cast<int>(goalEmbedding.size()) == 768;
+            }
+            if (ev.type == EventType::PLAN_REVISED) {
+                const auto active = memory->getActivePlan(sessionId);
+                bool stepsMatch = false;
+                if (active && active->plan_id == ev.plan_id) {
+                    try {
+                        const Plan stored = Plan::from_json(nlohmann::json::parse(active->steps_json));
+                        stepsMatch = !stored.steps.empty()
+                            && stored.steps[0].step_id == "retrieve-revised";
+                    } catch (...) {
+                        stepsMatch = false;
+                    }
+                }
+                std::lock_guard<std::mutex> lock(eventMutex);
+                activeRevisedMatches = stepsMatch;
+            }
+            std::lock_guard<std::mutex> lock(eventMutex);
+            events.push_back(SpineEvent{ev.type, ev.controller_state_name, ev.plan_id, ev.step_id, ev.metadata});
+        });
+
+        std::string stopReason;
+        auto stop = [&](const char* checkpoint, const std::string& why) {
+            if (stopReason.empty()) {
+                stopReason = std::string(checkpoint) + " — " + why;
+            }
+        };
+
+        if (controller.get_max_reflections() != 2) {
+            stop("A", "harness did not leave max_reflections at the production default 2");
+        }
+
+        const std::string accepted = controller.execute_goal(kSpineGoal);
+        if (!stopReason.empty()) {
+        } else if (accepted.rfind("GOAL ACCEPTED", 0) != 0 || !fakeRaw->planningSeenBeforePlanGenerate) {
+            stop("A", "goal was not accepted in PLANNING before the planner returned");
+        } else if (!createdPlanCaptured) {
+            stop("B", "PLAN_CREATED did not capture the parsed plan");
+        } else {
+            const Plan& planned = createdPlan;
+            const bool shape = planned.steps.size() == 2
+                && planned.steps[0].type == StepType::RETRIEVAL
+                && planned.steps[1].type == StepType::LLM
+                && planned.steps[0].step_id == "retrieve-context"
+                && planned.steps[1].step_id == "synthesize"
+                && planned.steps[1].description == "Summarize findings"
+                && planned.steps[0].payload.value("query", "") == kSpineToken
+                && planned.steps[1].depends_on.size() == 1
+                && planned.steps[1].depends_on[0] == "retrieve-context"
+                && planned.steps[0].type != StepType::NODE
+                && planned.steps[1].type != StepType::NODE;
+            const bool flag = shape
+                && !planned.steps[0].failure_policy.revise_plan_on_failure
+                && planned.steps[1].failure_policy.revise_plan_on_failure
+                && !planned.steps[0].failure_policy.abort_on_failure
+                && !planned.steps[1].failure_policy.abort_on_failure
+                && planned.steps[1].failure_policy.max_retries == 0;
+            if (!shape) {
+                stop("B", "LLMPlanner did not keep the pre-registered RETRIEVAL then LLM plan");
+            } else if (!flag) {
+                stop("B", "synthesis revise_plan_on_failure was not kept, abort_on_failure was set, or LLM max_retries was not 0");
+            } else {
+                bool planBeforeStep = false;
+                {
+                    std::lock_guard<std::mutex> lock(eventMutex);
+                    const auto planAt = std::find_if(events.begin(), events.end(), [](const SpineEvent& ev) {
+                        return ev.type == EventType::PLAN_CREATED && ev.metadata.contains("plan");
+                    });
+                    const auto firstStep = std::find_if(events.begin(), events.end(), [](const SpineEvent& ev) {
+                        return ev.type == EventType::STEP_STARTED || ev.type == EventType::STEP_COMPLETED
+                            || ev.type == EventType::STEP_FAILED;
+                    });
+                    planBeforeStep = planAt != events.end()
+                        && (firstStep == events.end() || planAt < firstStep);
+                }
+                if (!planBeforeStep) {
+                    stop("C", "PLAN_CREATED with plan JSON did not precede step events");
+                } else if (!activePlanAtCreated || !activeStepsStillOpen || createdPlanId.empty()) {
+                    stop("C", "active plan was not persisted with unfinished steps at PLAN_CREATED");
+                } else {
+                    std::cout << "SPINE_REVISION embed_method External\n";
+                    std::cout << "SPINE_REVISION embed_model " << embedderRaw->getModelName() << "\n";
+                    std::cout << "SPINE_REVISION embed_dimension " << embedderRaw->getDimension() << "\n";
+                    std::cout << "SPINE_REVISION goal_embed_len " << goalEmbedLen
+                              << " goal_embed_norm " << goalEmbedNorm << "\n";
+                    std::cout << "SPINE_REVISION plan_created_state " << planCreatedState << "\n";
+                    if (!embeddingAccepted || embeddingFailed) {
+                        stop("D", "goal embedding was empty, zero, or EMBEDDING_FAILED");
+                    }
+                }
+            }
+        }
+
+        if (stopReason.empty()) {
+            for (int i = 0; i < 400; ++i) {
+                const auto state = controller.get_state();
+                if (state == Thoth::ControllerState::COMPLETED || state == Thoth::ControllerState::FAILED
+                    || state == Thoth::ControllerState::ABORTED) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            for (int i = 0; i < 200; ++i) {
+                bool delivered = false;
+                {
+                    std::lock_guard<std::mutex> lock(eventMutex);
+                    delivered = std::any_of(events.begin(), events.end(), [](const SpineEvent& ev) {
+                        return ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_FAILED
+                            || ev.type == EventType::PLAN_ABORTED;
+                    });
+                }
+                if (delivered) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+
+            std::vector<SpineEvent> snapshot;
+            bool revisedActive = false;
+            {
+                std::lock_guard<std::mutex> lock(eventMutex);
+                snapshot = events;
+                revisedActive = activeRevisedMatches;
+            }
+
+            const auto firstRetrievalStarted = std::find_if(snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                return ev.type == EventType::STEP_STARTED && ev.stepId == "retrieve-context"
+                    && ev.metadata.value("step_type", -1) == static_cast<int>(StepType::RETRIEVAL);
+            });
+            const auto firstRetrievalCompleted = std::find_if(
+                firstRetrievalStarted == snapshot.end() ? snapshot.end() : firstRetrievalStarted,
+                snapshot.end(),
+                [](const SpineEvent& ev) {
+                    return ev.type == EventType::STEP_COMPLETED && ev.stepId == "retrieve-context"
+                        && ev.metadata.dump().find(kSpineToken) != std::string::npos;
+                });
+            const bool retrievalFailedFirst = std::any_of(
+                snapshot.begin(),
+                firstRetrievalCompleted == snapshot.end() ? snapshot.end() : firstRetrievalCompleted,
+                [](const SpineEvent& ev) {
+                    return ev.type == EventType::STEP_FAILED && ev.stepId == "retrieve-context";
+                });
+            if (firstRetrievalStarted == snapshot.end() || firstRetrievalCompleted == snapshot.end()
+                || retrievalFailedFirst) {
+                stop("E", "retrieval did not return the seeded corpus token on the known-good prefix");
+            } else {
+                const auto synthesisStarted = std::find_if(firstRetrievalCompleted, snapshot.end(), [](const SpineEvent& ev) {
+                    return ev.type == EventType::STEP_STARTED && ev.stepId == "synthesize"
+                        && ev.metadata.value("step_type", -1) == static_cast<int>(StepType::LLM);
+                });
+                const auto synthesisFailed = std::find_if(
+                    synthesisStarted == snapshot.end() ? snapshot.end() : synthesisStarted,
+                    snapshot.end(),
+                    [](const SpineEvent& ev) {
+                        return ev.type == EventType::STEP_FAILED && ev.stepId == "synthesize";
+                    });
+                std::string firstSynthesisPrompt;
+                for (const auto& prompt : fakeRaw->prompts) {
+                    if (prompt.find("\nSchema:\n") != std::string::npos) {
+                        continue;
+                    }
+                    firstSynthesisPrompt = prompt;
+                    break;
+                }
+                const bool promptHasContext = firstSynthesisPrompt.find(kSpineGoal) != std::string::npos
+                    && firstSynthesisPrompt.find(kSpineToken) != std::string::npos;
+                const auto revisedAt = std::find_if(snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                    return ev.type == EventType::PLAN_REVISED;
+                });
+                const bool reflectionBeforeRevision = std::any_of(
+                    snapshot.begin(),
+                    revisedAt == snapshot.end() ? snapshot.end() : revisedAt,
+                    [](const SpineEvent& ev) {
+                        return ev.type == EventType::REFLECTION_REPLAN;
+                    });
+                const bool sawRetrying = std::any_of(snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                    return ev.type == EventType::STEP_RETRYING;
+                });
+                const std::string failError = synthesisFailed == snapshot.end()
+                    ? std::string()
+                    : synthesisFailed->metadata.value("error", "");
+                const bool timeoutShaped = failError.find("timeout") != std::string::npos
+                    || failError.find("timed out") != std::string::npos;
+                if (synthesisStarted == snapshot.end()) {
+                    stop("F", "LLM synthesis did not start after the retrieved token");
+                } else if (!promptHasContext) {
+                    stop("F", "first synthesis prompt did not contain the goal and the retrieved token");
+                } else if (synthesisFailed == snapshot.end()) {
+                    stop("F", "deterministic synthesis error still completed the step");
+                } else if (synthesisFailed->metadata.value("next_action", "") != "revise") {
+                    stop("F", "STEP_FAILED next_action was not revise");
+                } else if (synthesisFailed->metadata.value("success", true) != false) {
+                    stop("F", "STEP_FAILED success was not false");
+                } else if (failError.find(kSpineFailureSynthesisError) == std::string::npos || timeoutShaped) {
+                    stop("F", "STEP_FAILED error was not the deterministic non-timeout synthesis failure");
+                } else if (sawRetrying) {
+                    stop("F", "STEP_RETRYING was emitted");
+                } else if (reflectionBeforeRevision) {
+                    stop("F", "REFLECTION_REPLAN preceded PLAN_REVISED");
+                } else {
+                    const int planCreatedCount = static_cast<int>(std::count_if(
+                        snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                            return ev.type == EventType::PLAN_CREATED;
+                        }));
+                    const int planRevisedCount = static_cast<int>(std::count_if(
+                        snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                            return ev.type == EventType::PLAN_REVISED;
+                        }));
+                    bool revisedPending = false;
+                    int revisedIndex = -1;
+                    std::string revisedPlanId;
+                    std::string revisedState;
+                    if (revisedAt != snapshot.end() && revisedAt->metadata.contains("plan")) {
+                        revisedState = revisedAt->state;
+                        revisedPlanId = revisedAt->planId;
+                        revisedIndex = revisedAt->metadata.value("current_index", -1);
+                        try {
+                            const Plan revised = Plan::from_json(revisedAt->metadata["plan"]);
+                            revisedPending = revised.steps.size() == 2
+                                && revised.steps[0].step_id == "retrieve-revised"
+                                && revised.steps[0].type == StepType::RETRIEVAL
+                                && revised.steps[0].status == StepStatus::PENDING
+                                && revised.steps[1].step_id == "synthesize-revised"
+                                && revised.steps[1].type == StepType::LLM
+                                && revised.steps[1].status == StepStatus::PENDING
+                                && revised.current_index == 0;
+                        } catch (...) {
+                            revisedPending = false;
+                        }
+                    }
+                    if (planRevisedCount != 1 || revisedAt == snapshot.end()) {
+                        stop("G", "expected exactly one PLAN_REVISED");
+                    } else if (revisedState != "REVISING_PLAN") {
+                        stop("G", "PLAN_REVISED controller state was " + revisedState);
+                    } else if (revisedPlanId.empty() || revisedPlanId != createdPlanId) {
+                        stop("G", "PLAN_REVISED plan id did not match PLAN_CREATED");
+                    } else if (!revisedPending || revisedIndex != 0) {
+                        stop("G", "PLAN_REVISED plan was not the pending revised steps at current_index 0");
+                    } else if (planCreatedCount != 1) {
+                        stop("G", "a second PLAN_CREATED was emitted");
+                    } else if (!revisedActive) {
+                        stop("G", "active plan row at PLAN_REVISED was not the same plan id with retrieve-revised");
+                    } else {
+                        std::string revisionPrompt;
+                        int revisionPrompts = 0;
+                        bool retryPrompt = false;
+                        bool reflectionPrompt = false;
+                        for (const auto& prompt : fakeRaw->prompts) {
+                            const bool schema = prompt.find("\nSchema:\n") != std::string::npos;
+                            const bool revision = schema && prompt.find("Failed Step Result:") != std::string::npos;
+                            if (revision) {
+                                ++revisionPrompts;
+                                if (revisionPrompt.empty()) {
+                                    revisionPrompt = prompt;
+                                }
+                            }
+                            if (prompt.find("Previous Response:") != std::string::npos) {
+                                retryPrompt = true;
+                            }
+                            if (prompt.find("Reflection:") != std::string::npos) {
+                                reflectionPrompt = true;
+                            }
+                        }
+                        bool facingOk = false;
+                        if (!revisionPrompt.empty()) {
+                            const auto at = revisionPrompt.find("Existing Plan: ");
+                            if (at != std::string::npos) {
+                                const std::string shown = revisionPrompt.substr(at + std::string("Existing Plan: ").size());
+                                const auto lineEnd = shown.find('\n');
+                                const std::string shownPlan = shown.substr(0, lineEnd);
+                                try {
+                                    const auto facing = nlohmann::json::parse(shownPlan);
+                                    const bool rootPlan = facing.contains("plan") && facing["plan"].is_array()
+                                        && !facing["plan"].empty()
+                                        && facing["plan"][0].value("step_type", "").find("RETRIEVAL") != std::string::npos
+                                        && shownPlan.find("step_type") != std::string::npos
+                                        && shownPlan.find("failure_policy") == std::string::npos;
+                                    facingOk = rootPlan;
+                                } catch (...) {
+                                    facingOk = false;
+                                }
+                            }
+                        }
+                        const bool revisionBody = !revisionPrompt.empty()
+                            && revisionPrompt.find(kSpineGoal) != std::string::npos
+                            && revisionPrompt.find("Existing Plan:") != std::string::npos
+                            && revisionPrompt.find("Failed Step Result:") != std::string::npos
+                            && revisionPrompt.find(kSpineFailureSynthesisError) != std::string::npos;
+                        if (revisionPrompts != 1 || !revisionBody || !facingOk) {
+                            stop("H", "revision prompt was not a single llm-facing Existing Plan plus the failed step result");
+                        } else if (reflectionPrompt || retryPrompt) {
+                            stop("H", "revision prompt contained Reflection or a revision retry");
+                        } else if (fakeRaw->synthesisErrorCount != 1) {
+                            stop("H", "expected exactly one synthesis error before resumed execution");
+                        } else {
+                            const auto recoveryRetrievalStarted = std::find_if(revisedAt, snapshot.end(), [](const SpineEvent& ev) {
+                                return ev.type == EventType::STEP_STARTED && ev.stepId == "retrieve-revised"
+                                    && ev.metadata.value("step_type", -1) == static_cast<int>(StepType::RETRIEVAL);
+                            });
+                            const auto recoveryRetrievalCompleted = std::find_if(
+                                recoveryRetrievalStarted == snapshot.end() ? snapshot.end() : recoveryRetrievalStarted,
+                                snapshot.end(),
+                                [](const SpineEvent& ev) {
+                                    return ev.type == EventType::STEP_COMPLETED && ev.stepId == "retrieve-revised"
+                                        && ev.metadata.dump().find(kSpineToken) != std::string::npos;
+                                });
+                            const auto recoverySynthesisStarted = std::find_if(
+                                recoveryRetrievalCompleted == snapshot.end() ? snapshot.end() : recoveryRetrievalCompleted,
+                                snapshot.end(),
+                                [](const SpineEvent& ev) {
+                                    return ev.type == EventType::STEP_STARTED && ev.stepId == "synthesize-revised"
+                                        && ev.metadata.value("step_type", -1) == static_cast<int>(StepType::LLM);
+                                });
+                            const auto recoverySynthesisCompleted = std::find_if(
+                                recoverySynthesisStarted == snapshot.end() ? snapshot.end() : recoverySynthesisStarted,
+                                snapshot.end(),
+                                [](const SpineEvent& ev) {
+                                    return ev.type == EventType::STEP_COMPLETED && ev.stepId == "synthesize-revised"
+                                        && ev.metadata.value("success", false);
+                                });
+                            const bool recoveryFailed = std::any_of(revisedAt, snapshot.end(), [](const SpineEvent& ev) {
+                                return ev.type == EventType::STEP_FAILED
+                                    && (ev.stepId == "retrieve-revised" || ev.stepId == "synthesize-revised");
+                            });
+                            std::string recoverySynthesisPrompt;
+                            bool skippedFirstSynthesis = false;
+                            for (const auto& prompt : fakeRaw->prompts) {
+                                if (prompt.find("\nSchema:\n") != std::string::npos) {
+                                    continue;
+                                }
+                                if (!skippedFirstSynthesis) {
+                                    skippedFirstSynthesis = true;
+                                    continue;
+                                }
+                                if (prompt.find(kSpineGoal) != std::string::npos
+                                    && prompt.find(kSpineToken) != std::string::npos) {
+                                    recoverySynthesisPrompt = prompt;
+                                }
+                            }
+                            if (recoveryRetrievalStarted == snapshot.end() || recoveryRetrievalCompleted == snapshot.end()
+                                || recoverySynthesisStarted == snapshot.end() || recoverySynthesisCompleted == snapshot.end()
+                                || recoveryFailed || recoverySynthesisPrompt.empty()) {
+                                stop("I", "revised plan did not retrieve the marker and complete synthesis");
+                            } else {
+                                const bool sawReflection = std::any_of(snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                                    return ev.type == EventType::REFLECTION_REPLAN;
+                                });
+                                const bool sawFailedTerminal = std::any_of(snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                                    return ev.type == EventType::PLAN_FAILED || ev.type == EventType::PLAN_ABORTED;
+                                });
+                                const bool sawNode = std::any_of(snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                                    return ev.metadata.value("step_type", -1) == static_cast<int>(StepType::NODE);
+                                });
+                                const bool completed = controller.get_state() == Thoth::ControllerState::COMPLETED
+                                    && std::any_of(snapshot.begin(), snapshot.end(), [](const SpineEvent& ev) {
+                                           return ev.type == EventType::PLAN_COMPLETED;
+                                       })
+                                    && controller.get_reflection_count() == 0
+                                    && !sawReflection
+                                    && !sawFailedTerminal
+                                    && !sawNode;
+                                const auto active = memory->getActivePlan(sessionId);
+                                const auto trajectories = memory->getAllTrajectories();
+                                const auto past = memory->getAllPastPlans();
+                                const auto strategies = memory->getAllStrategies();
+                                bool trajectoryShape = false;
+                                std::string pattern;
+                                if (trajectories.size() == 1) {
+                                    pattern = trajectoryPattern(trajectories.front().trajectory_json);
+                                    trajectoryShape = pattern == "RETRIEVAL->LLM->RETRIEVAL->LLM"
+                                        && trajectories.front().trajectory_json.find(kSpineFailureSynthesisError)
+                                            != std::string::npos;
+                                }
+                                const bool scoreOk = past.size() == 1
+                                    && std::abs(past.front().success_score - 1.0f) < 1e-5f;
+                                if (!completed) {
+                                    stop("J", "controller did not finish COMPLETED with PLAN_COMPLETED, "
+                                              "reflection_count 0, and no reflection, abort, or NODE");
+                                } else if (active.has_value() || !scoreOk || !trajectoryShape || !strategies.empty()) {
+                                    std::ostringstream why;
+                                    why << "terminal persistence expected a cleared active plan, one past plan "
+                                        << "at score 1.0, one RETRIEVAL->LLM->RETRIEVAL->LLM trajectory "
+                                        << "containing the failed step, and no strategy";
+                                    why << "; active=" << (active.has_value() ? active->plan_id : "none")
+                                        << " past=" << past.size();
+                                    for (const auto& plan : past) {
+                                        why << " score " << plan.success_score;
+                                    }
+                                    why << " trajectories=" << trajectories.size()
+                                        << " pattern " << pattern
+                                        << " strategies=" << strategies.size();
+                                    stop("J", why.str());
+                                } else {
+                                    finalIndex = controller.get_current_step_index();
+                                    std::cout << "SPINE_REVISION plan_created_state " << planCreatedState << "\n";
+                                    std::cout << "SPINE_REVISION current_index " << finalIndex << "\n";
+                                    std::cout << "SPINE_REVISION reflection_count "
+                                              << controller.get_reflection_count() << "\n";
+                                    std::cout << "SPINE_REVISION past_score " << past.front().success_score << "\n";
+                                    std::cout << "SPINE_REVISION trajectory " << pattern << "\n";
+                                    std::cout << "SPINE REVISION CAUSAL CHAIN VERIFIED\n";
+                                    passed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!stopReason.empty()) {
+            std::cerr << "SPINE REVISION CAUSAL CHAIN FAILED AT: " << stopReason << "\n";
+            std::lock_guard<std::mutex> lock(eventMutex);
+            for (const auto& ev : events) {
+                std::cout << "SPINE_REVISION event " << static_cast<int>(ev.type)
                           << " state " << ev.state << " step " << ev.stepId << "\n";
             }
         }
@@ -22525,6 +23196,15 @@ int main() {
             const bool ok = testProductionSpineFailureChain();
             std::cout << (ok ? "Spine failure chain test returned true.\n"
                              : "Spine failure chain test returned false.\n");
+            return ok ? 0 : 1;
+        }
+    }
+
+    if (const char* spineRevision = std::getenv("THOTH_SPINE_REVISION_CHAIN")) {
+        if (std::string(spineRevision) == "1") {
+            const bool ok = testProductionSpineRevisionChain();
+            std::cout << (ok ? "Spine revision chain test returned true.\n"
+                             : "Spine revision chain test returned false.\n");
             return ok ? 0 : 1;
         }
     }

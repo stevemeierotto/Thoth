@@ -1,6 +1,22 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-29 (cognitive-spine failure recovery)
+Last updated: 2026-09-29 (cognitive-spine plan revision)
+
+## 2026-09-29 — Production failure → plan revision → resumed execution verified
+
+**Status:** End-to-end verified 2026-09-29 for the flag-gated revision path. The check is opt-in (`THOTH_SPINE_REVISION_CHAIN=1`) because it uses the production External embedder. Generation is a deterministic fake. The frozen goal, marker `SPINEQX7F3C`, and known-good retrieval prefix match the other spine checks. The initial model JSON sets `failure_policy.revise_plan_on_failure` true on the synthesis step only. Production thresholds, prefetch, and the validator’s LLM `max_retries` override were not changed.
+
+**Demonstrated.** `revise_plan_on_failure` is policy-gated, and the parser preserved it on the failing synthesis step. A real failed production synthesis emitted `STEP_FAILED` with `next_action=revise` and the controller entered `REVISING_PLAN`. Production `LLMPlanner::revise_plan` received the LLM-facing existing plan plus the failed-step data. The successful revision kept the original plan id, replaced the active-plan steps in place, and emitted `PLAN_REVISED`. Execution resumed through `retrieve-revised` and `synthesize-revised` and reached `COMPLETED` with `PLAN_COMPLETED`. The failed step remained in the final trajectory `RETRIEVAL->LLM->RETRIEVAL->LLM`. This run produced one past plan at score 1, one combined trajectory, `reflection_count` 0, no `REFLECTION_REPLAN`, and no strategy promotion.
+
+**Distinct from reflection.** The verified reflection path starts after a finished plan scores below 0.6, calls `create_plan` with a `Reflection:` goal, allocates a new plan id, and stores the failed attempt as its own past plan and trajectory before the recovery plan completes. This revision path repairs the same plan id while execution is in progress and does not reflect.
+
+**Observed and not reclassified.** `PLAN_CREATED` state remained `IDLE`, and final `current_index` remained 0.
+
+**Left unchanged.** Frozen or historical text that describes a different revision contract was not rewritten: the MTCP direct-`revise_plan` protocol, the `StepResult` signature in `docs/PLAN.md`, and the Phase 11 trajectory wording in `docs/improvements.md`. `docs/architectural_facts.md` §1 still lists `STEP_RETRYING` with `STEP_FAILED`. This run did not emit `STEP_RETRYING`, and that table was not rewritten.
+
+**Not verified by this check:** revision retry, a rejected revision that keeps the existing plan, `abort_on_failure`, timeout handling, crash/resume, GRAG score quality, and answer quality.
+
+---
 
 ## 2026-09-29 — Production failure → reflection → recovery verified
 

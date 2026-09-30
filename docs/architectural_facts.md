@@ -85,6 +85,8 @@ Controller events appear inside the versioned envelope. Key mappings:
 
 **Verified reflection replacement (2026-09-29):** `active_plans` holds the in-flight plan. When reflection replaces that plan, the failed attempt is already stored in `past_plans` and `trajectories`. The controller then persists the recovery plan and, still holding its lock and before `PLAN_CREATED`, deletes only the retired plan id from `active_plans`. Terminal `PLAN_COMPLETED` then removes the recovery plan id. After that completion the session has no resumable active plan. Before this repair, the retired failed row stayed in `active_plans` and could become the resume target once the recovery row was deleted. History tables were already separate and were not the defect.
 
+**Verified flag-gated plan revision (2026-09-29):** `revise_plan_on_failure` stays false unless the parser reads it from the model JSON. When the failing synthesis step carries the flag, a real production synthesis failure emits `STEP_FAILED` with `next_action=revise` and enters `REVISING_PLAN`. `LLMPlanner::revise_plan` receives the LLM-facing existing plan plus the failed-step data. A successful revision keeps the original plan id, replaces the active-plan steps in place, and emits `PLAN_REVISED`. Execution then resumes on the revised steps and can reach `COMPLETED`. The failed step stays in the one combined trajectory. That verified run stored one past plan, emitted no reflection, and promoted no strategy. `PLAN_CREATED` state `IDLE` and final `current_index` 0 were observed and were not reclassified. This is a different mechanism from the reflection replacement above.
+
 ---
 
 ## 7. GRAG Logging Separation
