@@ -1,6 +1,32 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-29 (cognitive-spine plan revision)
+Last updated: 2026-09-30 (production timeout causal chain)
+
+## 2026-09-30 — Production tool timeout → terminal failure verified
+
+**Status:** End-to-end verified. The final `THOTH_SPINE_TIMEOUT_CHAIN=1` run passed all seven frozen oracles and returned exit 0 (`SPINE TIMEOUT CAUSAL CHAIN VERIFIED`). The engine-only harness uses a deterministic planner and late-returning tool with the real 30000 ms TOOL budget, production controller/workflow execution and SQLite memory, and a local TF-IDF `RAGPipeline` with a null index. The RAG pipeline outlives the controller. A non-empty goal embedding and absence of `EMBEDDING_FAILED` are required before waiting on the timeout path. This embedding precondition is harness setup, not a retrieval-quality claim. Engine revision: `2df7f0196b70ce853ef13827b4ce4b339e1f11a1`.
+
+**Demonstrated by the seven oracles:**
+
+1. One goal is accepted and its pending tool plan is persisted before step dispatch.
+2. One tool execution starts under the 30000 ms budget, with `STEP_STARTED` in `EXECUTING_STEP` and the running step persisted.
+3. At budget expiry the tool is still executing and `STEP_FAILED` has not yet been delivered.
+4. The eventual stored result is `Step execution timed out after 30000ms`, with timeout metadata, a failed step and zero retries. `STEP_FAILED` carries `success=false`, `next_action=continue`, and state `OBSERVING_RESULT`; its elapsed wall time is at least 30000 ms. The late `LATE_TOOL_OK` success is discarded.
+5. No retry, revision, reflection, successful completion, or abort occurs; planner creation and tool execution each occur once.
+6. The controller reaches `FAILED` and emits `PLAN_FAILED`.
+7. Terminal metrics record outcome `failed`, `reflection_skip_reason=timeout_failure`, trajectory score 0, zero reflections/revisions, and the unchanged reflection limit 2. One past plan has score 0; one trajectory retains the timeout error; no strategy is promoted and no active plan remains for the session.
+
+**Architecture observed, not repaired:** this is a soft timeout. The inner `std::async` future joins the late work before the outer future delivers the timeout result to the controller. The tool is not cancelled at the deadline. This check confirms the existing join-before-delivery behavior; it does not implement timeout cancellation. See `architectural_facts.md` §4.
+
+**Distinct paths:** the previously verified ordinary failure path reflects after a finished attempt scores below 0.6 and creates a replacement plan. The flag-gated revision path calls `revise_plan` during execution and retains the plan id. This timeout fixture takes neither recovery path: it records `timeout_failure` and terminates in failure. It does not establish timeout behavior with `revise_plan_on_failure` enabled or other failure-policy combinations.
+
+**Observed without reclassification:** `PLAN_CREATED` state `IDLE`, final `current_index` 0, and serialized `plan_status` 0. The asserted terminal failure is the controller state and `PLAN_FAILED` event.
+
+**Validation and separate default-suite failures:** `cmake --build --preset build-engine-only --target thoth-core-tests -j2` passed, including `libbasic_agent.so`. The separately run default suite (`ctest --test-dir build/engine-only -R '^thoth-core-tests$' --output-on-failure`, opt-in selectors unset) reported 11 failures in 98.01 seconds. Ten HTTP checks were environment-blocked: Chat, Diagnostics, GoalsAndControl, SseRouteAndReady, GracefulShutdown, Corpus, CreateDocument, Conversation, Research, and GraphStats. Direct Python and libc probes confirmed IPv4 TCP socket creation denied with `EPERM` in the restricted execution environment, before bind/listen/connect or meaningful HTTP endpoint assertions. These tests were not weakened or changed. The remaining MTCP wrapper failure is the known unrelated expectation mismatch (`to_json()` expectation versus the LLM-facing plan serialization); its frozen characterization was left untouched. The default suite is not reported as green. The subsequent separate timeout-chain rerun passed all seven oracles.
+
+**Scope preserved:** only the timeout test and current verification documentation are closed out. Production code, `store_plan_history`, database constraints, timeout behavior, thresholds, policies, and frozen timeout oracles are unchanged. Historical exclusions in the earlier verification records and September 16 timeout Phase B deferral remain historical; cancellation is still unimplemented. The §1 event table in `architectural_facts.md` still groups `STEP_RETRYING` with `STEP_FAILED`; this run emitted no retry, and the table was not rewritten. No frozen protocol text was revised. Crash/resume, inference HTTP timeouts, real LLM cancellation, other timeout budgets, GRAG quality, and answer quality were not verified by this check.
+
+---
 
 ## 2026-09-29 — Production failure → plan revision → resumed execution verified
 

@@ -59,6 +59,10 @@ When the controller loop runs, a `STATE_CHANGED` may precede that sequence in th
 
 **Observed, not reclassified (2026-09-29):** on the verified two-step success path, `PLAN_CREATED` was emitted with controller state `IDLE`, and `current_index` stayed 0.
 
+**Verified soft-timeout delivery (2026-09-30):** the opt-in production timeout chain used one deterministic TOOL step with the real 30000 ms budget. At expiry, the tool was still executing and no `STEP_FAILED` had been delivered. `WorkflowEngine::executeStepAsync` constructs the timeout result but destruction of its inner `std::async` future joins the late work before the outer future becomes ready. The controller subsequently stores the timeout failure, discards the late success, and emits `STEP_FAILED` in `OBSERVING_RESULT` with `next_action=continue`, followed by terminal `FAILED` / `PLAN_FAILED`. This is existing soft-timeout/join-before-delivery behavior, not a cancellation repair.
+
+**Verified timeout terminal path (2026-09-30):** all seven frozen timeout oracles passed. This fixture executed once, with no retry, revision, or reflection. Metrics recorded `reflection_skip_reason=timeout_failure`, trajectory score 0, and the unchanged reflection limit 2. One past plan at score 0 and one trajectory containing the timeout error remained; the session's active plan was removed and no strategy was promoted. This differs from ordinary failure → reflection → replacement plan and flag-gated failure → revision of the same plan (§6). The check does not cover a timeout with revision enabled, other policy combinations, or crash/resume. Observed values `PLAN_CREATED` state `IDLE`, final `current_index` 0, and serialized `plan_status` 0 were not reclassified. Validation limits and the separate default-suite environment/MTCP failures are recorded in `completed_improvements_log.md`, 2026-09-30.
+
 ---
 
 ## 5. Metadata Shape (DecisionTraceLogger)

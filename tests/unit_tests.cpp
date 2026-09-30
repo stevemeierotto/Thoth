@@ -4856,6 +4856,461 @@ static bool testProductionSpineRevisionChain() {
     return passed;
 }
 
+class TimeoutChainLateTool : public ITool {
+public:
+    mutable std::atomic<int> executeCount{0};
+    mutable std::atomic<bool> entered{false};
+    mutable std::atomic<bool> budgetElapsedWhileInside{false};
+    mutable std::atomic<bool> stillInside{false};
+
+    std::string name() const override { return "late_return_timeout_probe"; }
+    std::string description() const override { return "Sleeps past the production tool step budget, then returns"; }
+    nlohmann::json input_schema() const override { return nlohmann::json::object(); }
+    bool requires_confirmation() const override { return false; }
+
+    nlohmann::json execute(const nlohmann::json&) const override {
+        executeCount.fetch_add(1);
+        stillInside.store(true);
+        entered.store(true);
+        const auto budget = std::chrono::milliseconds(
+            Thoth::LlmTimeoutPolicy::stepTimeoutMs(StepType::TOOL, 30000));
+        const auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < budget) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        budgetElapsedWhileInside.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        stillInside.store(false);
+        return {{"status", "success"}, {"data", {{"marker", "LATE_TOOL_OK"}}}};
+    }
+};
+
+class TimeoutChainPlanner : public IPlanner {
+public:
+    std::atomic<int> createCount{0};
+    std::atomic<int> reviseCount{0};
+
+    Plan create_plan(const std::string& goal) override {
+        createCount.fetch_add(1);
+        Plan plan;
+        plan.plan_id = "timeout-chain-plan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        PlanStep step;
+        step.step_id = "late-tool-step";
+        step.description = "Run the late-returning tool";
+        step.type = StepType::TOOL;
+        step.payload = {{"tool", "late_return_timeout_probe"}};
+        plan.steps.push_back(step);
+        return plan;
+    }
+
+    Plan revise_plan(const Plan& existing_plan, const nlohmann::json&) override {
+        reviseCount.fetch_add(1);
+        return existing_plan;
+    }
+};
+
+static bool testProductionSpineTimeoutChain() {
+    const char* previousMock = std::getenv("THOTH_MOCK_LLM");
+    const std::string savedMock = previousMock ? previousMock : "";
+    unsetenv("THOTH_MOCK_LLM");
+    const char* previousDelay = std::getenv("THOTH_MOCK_LLM_DELAY_MS");
+    const std::string savedDelay = previousDelay ? previousDelay : "";
+    unsetenv("THOTH_MOCK_LLM_DELAY_MS");
+    const char* previousStepTimeout = std::getenv("THOTH_MOCK_STEP_TIMEOUT");
+    const std::string savedStepTimeout = previousStepTimeout ? previousStepTimeout : "";
+    unsetenv("THOTH_MOCK_STEP_TIMEOUT");
+    const char* previousMaxReflections = std::getenv("THOTH_MAX_REFLECTIONS");
+    const std::string savedMaxReflections = previousMaxReflections ? previousMaxReflections : "";
+    unsetenv("THOTH_MAX_REFLECTIONS");
+    const char* previousLogs = std::getenv("THOTH_LOGS_PATH");
+    const std::string savedLogs = previousLogs ? previousLogs : "";
+    const char* previousMetrics = std::getenv("THOTH_COGNITIVE_METRICS_LOG");
+    const std::string savedMetrics = previousMetrics ? previousMetrics : "";
+
+    const fs::path workspace = makeTempPath("spine_timeout_workspace");
+    const fs::path logs = workspace / "logs";
+    fs::create_directories(logs);
+    setenv("THOTH_LOGS_PATH", logs.string().c_str(), 1);
+    const fs::path metricsPath = logs / "cognitive_metrics.jsonl";
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsPath.string().c_str(), 1);
+
+    auto restoreEnv = [&]() {
+        auto restore = [](const char* name, const std::string& saved) {
+            if (saved.empty()) {
+                unsetenv(name);
+            } else {
+                setenv(name, saved.c_str(), 1);
+            }
+        };
+        restore("THOTH_MOCK_LLM", savedMock);
+        restore("THOTH_MOCK_LLM_DELAY_MS", savedDelay);
+        restore("THOTH_MOCK_STEP_TIMEOUT", savedStepTimeout);
+        restore("THOTH_MAX_REFLECTIONS", savedMaxReflections);
+        restore("THOTH_LOGS_PATH", savedLogs);
+        restore("THOTH_COGNITIVE_METRICS_LOG", savedMetrics);
+    };
+
+    const int toolBudget = Thoth::LlmTimeoutPolicy::stepTimeoutMs(StepType::TOOL, 30000);
+    if (toolBudget != 30000) {
+        std::cerr << "SPINE TIMEOUT CAUSAL CHAIN FAILED AT: precondition — "
+                  << "stepTimeoutMs(TOOL, 30000) is " << toolBudget
+                  << "; the production tool budget was not left at 30000\n";
+        restoreEnv();
+        std::error_code ec;
+        fs::remove_all(workspace, ec);
+        return false;
+    }
+
+    Config cfg;
+    cfg.database_path = makeTempPath("spine_timeout.db").string();
+    const std::string sessionId = "spine-timeout-chain";
+    const std::string goal = "Production tool timeout chain";
+
+    bool passed = false;
+    std::string stopReason;
+    std::string classification;
+    auto stop = [&](const char* oracle, const std::string& why, const std::string& kind) {
+        if (stopReason.empty()) {
+            stopReason = std::string(oracle) + " — " + why;
+            classification = kind;
+        }
+    };
+
+    struct TimeoutEvent {
+        EventType type;
+        std::string state;
+        std::string stepId;
+        nlohmann::json metadata;
+        int64_t timestampMs = 0;
+    };
+
+    {
+        auto memory = std::make_shared<Memory>(cfg);
+        memory->setActiveSessionId(sessionId);
+        auto planner = std::make_shared<TimeoutChainPlanner>();
+        auto registry = std::make_shared<ToolRegistry>();
+        auto tool = std::make_unique<TimeoutChainLateTool>();
+        auto* toolRaw = tool.get();
+        registry->registerTool(std::move(tool));
+        auto embedder = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+        auto rag = std::make_shared<RAGPipeline>(std::move(embedder), nullptr);
+        Thoth::ExecutiveController controller(planner, registry, rag, memory);
+        if (controller.get_max_reflections() != 2) {
+            stop("precondition",
+                 "controller max_reflections is " + std::to_string(controller.get_max_reflections()),
+                 "harness precondition: reflection default is not 2 after THOTH_MAX_REFLECTIONS was unset");
+        }
+        controller.set_session_id(sessionId);
+
+        std::mutex eventMutex;
+        std::vector<TimeoutEvent> events;
+        bool activePlanAtCreated = false;
+        bool stepPendingAtCreated = false;
+        std::string planCreatedState;
+
+        controller.set_event_callback([&](const ControllerEvent& ev) {
+            if (ev.type == EventType::PLAN_CREATED) {
+                planCreatedState = ev.controller_state_name;
+                const auto active = memory->getActivePlan(sessionId);
+                if (active && active->plan_id == ev.plan_id && active->goal == goal) {
+                    activePlanAtCreated = true;
+                    try {
+                        const Plan stored = Plan::from_json(nlohmann::json::parse(active->steps_json));
+                        stepPendingAtCreated = stored.steps.size() == 1
+                            && stored.steps[0].step_id == "late-tool-step"
+                            && stored.steps[0].status == StepStatus::PENDING;
+                    } catch (...) {
+                        stepPendingAtCreated = false;
+                    }
+                }
+            }
+            std::lock_guard<std::mutex> lock(eventMutex);
+            events.push_back(TimeoutEvent{ev.type, ev.controller_state_name, ev.step_id, ev.metadata, ev.timestamp_ms});
+        });
+
+        if (stopReason.empty()) {
+            const std::string accepted = controller.execute_goal(goal);
+            bool planBeforeStep = false;
+            {
+                std::lock_guard<std::mutex> lock(eventMutex);
+                const auto planAt = std::find_if(events.begin(), events.end(), [](const TimeoutEvent& ev) {
+                    return ev.type == EventType::PLAN_CREATED && ev.metadata.contains("plan");
+                });
+                const auto firstStep = std::find_if(events.begin(), events.end(), [](const TimeoutEvent& ev) {
+                    return ev.type == EventType::STEP_STARTED || ev.type == EventType::STEP_COMPLETED
+                        || ev.type == EventType::STEP_FAILED;
+                });
+                planBeforeStep = planAt != events.end() && (firstStep == events.end() || planAt < firstStep);
+            }
+            if (accepted.rfind("GOAL ACCEPTED", 0) != 0 || planner->createCount.load() != 1 || !planBeforeStep
+                || !activePlanAtCreated || !stepPendingAtCreated) {
+                std::ostringstream why;
+                why << "accepted='" << accepted << "' create_count=" << planner->createCount.load()
+                    << " plan_before_step=" << planBeforeStep
+                    << " active_plan=" << activePlanAtCreated
+                    << " pending=" << stepPendingAtCreated;
+                stop("1", why.str(),
+                     "admission did not keep a single pending tool plan before step dispatch");
+            }
+        }
+
+        if (stopReason.empty()) {
+            bool sawEmbeddingFailed = false;
+            {
+                std::lock_guard<std::mutex> lock(eventMutex);
+                sawEmbeddingFailed = std::any_of(events.begin(), events.end(), [](const TimeoutEvent& ev) {
+                    return ev.type == EventType::EMBEDDING_FAILED;
+                });
+            }
+            const auto goalEmbedding = controller.get_goal_embedding();
+            if (goalEmbedding.empty() || sawEmbeddingFailed) {
+                std::ostringstream why;
+                why << "goal_embed_len=" << goalEmbedding.size()
+                    << " embedding_failed=" << sawEmbeddingFailed;
+                stop("harness", why.str(),
+                     "local TF-IDF goal embedding was empty or EMBEDDING_FAILED before the timeout wait");
+            }
+        }
+
+        if (stopReason.empty()) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!toolRaw->entered.load() && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            std::vector<TimeoutEvent> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(eventMutex);
+                snapshot = events;
+            }
+            const auto started = std::find_if(snapshot.begin(), snapshot.end(), [](const TimeoutEvent& ev) {
+                return ev.type == EventType::STEP_STARTED && ev.stepId == "late-tool-step"
+                    && ev.metadata.value("step_type", -1) == static_cast<int>(StepType::TOOL)
+                    && ev.metadata.value("timeout_ms", -1) == 30000
+                    && ev.state == "EXECUTING_STEP";
+            });
+            bool runningPersisted = false;
+            const auto active = memory->getActivePlan(sessionId);
+            if (active) {
+                try {
+                    const Plan stored = Plan::from_json(nlohmann::json::parse(active->steps_json));
+                    runningPersisted = stored.steps.size() == 1
+                        && stored.steps[0].status == StepStatus::RUNNING;
+                } catch (...) {
+                    runningPersisted = false;
+                }
+            }
+            if (!toolRaw->entered.load() || toolRaw->executeCount.load() != 1 || started == snapshot.end()
+                || !toolRaw->stillInside.load() || !runningPersisted) {
+                std::ostringstream why;
+                why << "entered=" << toolRaw->entered.load()
+                    << " execute_count=" << toolRaw->executeCount.load()
+                    << " step_started=" << (started != snapshot.end())
+                    << " still_inside=" << toolRaw->stillInside.load()
+                    << " running_persisted=" << runningPersisted;
+                stop("2", why.str(),
+                     "dispatch did not start the production tool step under the 30000 ms budget");
+            }
+        }
+
+        if (stopReason.empty()) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(45);
+            while (!toolRaw->budgetElapsedWhileInside.load() && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            std::vector<TimeoutEvent> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(eventMutex);
+                snapshot = events;
+            }
+            const bool failedAlready = std::any_of(snapshot.begin(), snapshot.end(), [](const TimeoutEvent& ev) {
+                return ev.type == EventType::STEP_FAILED;
+            });
+            if (!toolRaw->budgetElapsedWhileInside.load() || !toolRaw->stillInside.load() || failedAlready) {
+                std::ostringstream why;
+                why << "budget_elapsed=" << toolRaw->budgetElapsedWhileInside.load()
+                    << " still_inside=" << toolRaw->stillInside.load()
+                    << " step_failed_delivered=" << failedAlready;
+                const char* kind = failedAlready
+                    ? "STEP_FAILED was delivered while the tool was still inside execute; the outer future became ready before the inner work returned"
+                    : "the tool did not remain inside execute after the production budget elapsed";
+                stop("3", why.str(), kind);
+            }
+        }
+
+        if (stopReason.empty()) {
+            for (int i = 0; i < 200; ++i) {
+                const auto state = controller.get_state();
+                if (state == Thoth::ControllerState::COMPLETED || state == Thoth::ControllerState::FAILED
+                    || state == Thoth::ControllerState::ABORTED) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            for (int i = 0; i < 200; ++i) {
+                bool delivered = false;
+                {
+                    std::lock_guard<std::mutex> lock(eventMutex);
+                    delivered = std::any_of(events.begin(), events.end(), [](const TimeoutEvent& ev) {
+                        return ev.type == EventType::PLAN_FAILED || ev.type == EventType::PLAN_COMPLETED
+                            || ev.type == EventType::PLAN_ABORTED;
+                    });
+                }
+                if (delivered) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+
+            std::vector<TimeoutEvent> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(eventMutex);
+                snapshot = events;
+            }
+            const auto failed = std::find_if(snapshot.begin(), snapshot.end(), [](const TimeoutEvent& ev) {
+                return ev.type == EventType::STEP_FAILED && ev.stepId == "late-tool-step";
+            });
+            const auto started = std::find_if(snapshot.begin(), snapshot.end(), [](const TimeoutEvent& ev) {
+                return ev.type == EventType::STEP_STARTED && ev.stepId == "late-tool-step";
+            });
+            const Plan finished = controller.get_current_plan();
+            const bool oneStep = finished.steps.size() == 1 && finished.steps[0].step_id == "late-tool-step";
+            const std::string resultDump = oneStep ? finished.steps[0].result.dump() : std::string();
+            const std::string error = failed == snapshot.end() ? std::string() : failed->metadata.value("error", "");
+            const bool timedOut = error == "Step execution timed out after 30000ms";
+            const bool metadataBudget = failed != snapshot.end() && failed->metadata.value("timeout_ms", -1) == 30000;
+            const bool resultBudget = oneStep && finished.steps[0].result.value("timeout_ms", -1) == 30000;
+            const bool lateKept = resultDump.find("LATE_TOOL_OK") != std::string::npos;
+            const bool successFalse = failed != snapshot.end() && failed->metadata.contains("success")
+                && failed->metadata["success"] == false;
+            const bool continueAction = failed != snapshot.end()
+                && failed->metadata.value("next_action", "") == "continue";
+            const bool observing = failed != snapshot.end() && failed->state == "OBSERVING_RESULT";
+            const bool wall = started != snapshot.end() && failed != snapshot.end()
+                && (failed->timestampMs - started->timestampMs) >= 30000;
+            const bool statusFailed = oneStep && finished.steps[0].status == StepStatus::FAILED
+                && finished.steps[0].retry_count == 0;
+            if (failed == snapshot.end() || !timedOut || !metadataBudget || !resultBudget || lateKept
+                || !successFalse || !continueAction || !observing || !wall || !statusFailed
+                || toolRaw->executeCount.load() != 1) {
+                std::ostringstream why;
+                why << "error='" << error << "' metadata_timeout="
+                    << (failed == snapshot.end() ? -1 : failed->metadata.value("timeout_ms", -1))
+                    << " result=" << resultDump
+                    << " execute_count=" << toolRaw->executeCount.load()
+                    << " wall_ok=" << wall << " status_failed=" << statusFailed;
+                const char* kind = lateKept
+                    ? "the late tool success was kept; the step-deadline result was not the result the controller stored"
+                    : (error.find("Timeout was reached") != std::string::npos
+                        ? "the stored error is the inference HTTP timeout string, not the step-deadline result"
+                        : "the stored failure is not the production step-deadline result for a 30000 ms tool step");
+                stop("4", why.str(), kind);
+            } else {
+                const bool forbidden = std::any_of(snapshot.begin(), snapshot.end(), [](const TimeoutEvent& ev) {
+                    return ev.type == EventType::STEP_COMPLETED || ev.type == EventType::STEP_RETRYING
+                        || ev.type == EventType::PLAN_REVISED || ev.type == EventType::REFLECTION_REPLAN
+                        || ev.type == EventType::PLAN_COMPLETED || ev.type == EventType::PLAN_ABORTED
+                        || ev.state == "REVISING_PLAN";
+                });
+                if (forbidden || planner->reviseCount.load() != 0 || planner->createCount.load() != 1
+                    || controller.get_reflection_count() != 0) {
+                    stop("5",
+                         "revise_count=" + std::to_string(planner->reviseCount.load())
+                             + " create_count=" + std::to_string(planner->createCount.load())
+                             + " reflection_count=" + std::to_string(controller.get_reflection_count()),
+                         "timeout handling entered revision, reflection, retry, completion, or abort");
+                } else if (controller.get_state() != Thoth::ControllerState::FAILED
+                           || !std::any_of(snapshot.begin(), snapshot.end(), [](const TimeoutEvent& ev) {
+                                  return ev.type == EventType::PLAN_FAILED;
+                              })) {
+                    stop("6", "controller did not reach FAILED with PLAN_FAILED",
+                         "the timeout failure did not end the goal in the terminal failure path");
+                } else {
+                    const int finalIndex = controller.get_current_step_index();
+                    const int planStatus = static_cast<int>(finished.status);
+                    nlohmann::json metrics;
+                    {
+                        std::ifstream in(metricsPath);
+                        std::string line;
+                        while (std::getline(in, line)) {
+                            if (line.empty()) {
+                                continue;
+                            }
+                            try {
+                                const auto parsed = nlohmann::json::parse(line);
+                                if (parsed.value("plan_id", "") == finished.plan_id
+                                    && parsed.value("event", "") == "GOAL_COGNITIVE_METRICS") {
+                                    metrics = parsed;
+                                }
+                            } catch (...) {
+                            }
+                        }
+                    }
+                    const auto active = memory->getActivePlan(sessionId);
+                    const auto past = memory->getAllPastPlans();
+                    const auto trajectories = memory->getAllTrajectories();
+                    const auto strategies = memory->getAllStrategies();
+                    std::string trajectoryError;
+                    if (trajectories.size() == 1) {
+                        try {
+                            const auto body = nlohmann::json::parse(trajectories.front().trajectory_json);
+                            if (body.contains("steps") && body["steps"].is_array() && body["steps"].size() == 1) {
+                                trajectoryError = body["steps"][0].value("error", "");
+                            }
+                        } catch (...) {
+                        }
+                    }
+                    const double trajectoryScore = metrics.value("trajectory_score", 1.0);
+                    const bool metricsOk = !metrics.is_null()
+                        && metrics.value("outcome", "") == "failed"
+                        && metrics.value("reflection_skip_reason", "") == "timeout_failure"
+                        && std::abs(trajectoryScore) < 1e-5
+                        && metrics.value("reflection_count", -1) == 0
+                        && metrics.value("revisions_count", -1) == 0
+                        && metrics.value("max_reflections", -1) == 2;
+                    const bool pastOk = past.size() == 1 && std::abs(past.front().success_score) < 1e-5f;
+                    const bool historyOk = metricsOk && pastOk && trajectories.size() == 1
+                        && trajectoryError == "Step execution timed out after 30000ms"
+                        && strategies.empty() && !active.has_value();
+                    if (!historyOk) {
+                        std::ostringstream why;
+                        why << "metrics=" << metrics.dump()
+                            << " past=" << past.size()
+                            << " trajectories=" << trajectories.size()
+                            << " trajectory_error='" << trajectoryError << "'"
+                            << " strategies=" << strategies.size()
+                            << " active=" << active.has_value();
+                        stop("7", why.str(),
+                             "terminal history did not record a skipped timeout at score 0 with the active plan removed");
+                    } else {
+                        std::cout << "SPINE_TIMEOUT plan_created_state " << planCreatedState << "\n";
+                        std::cout << "SPINE_TIMEOUT current_index " << finalIndex << "\n";
+                        std::cout << "SPINE_TIMEOUT plan_status " << planStatus << "\n";
+                        std::cout << "SPINE_TIMEOUT reflection_count " << controller.get_reflection_count() << "\n";
+                        std::cout << "SPINE_TIMEOUT reflection_skip_reason timeout_failure\n";
+                        std::cout << "SPINE_TIMEOUT trajectory_score " << trajectoryScore << "\n";
+                        std::cout << "SPINE_TIMEOUT execute_count " << toolRaw->executeCount.load() << "\n";
+                        std::cout << "SPINE TIMEOUT CAUSAL CHAIN VERIFIED\n";
+                        passed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!stopReason.empty()) {
+        std::cerr << "SPINE TIMEOUT CAUSAL CHAIN FAILED AT: " << stopReason << "\n";
+        std::cerr << "SPINE TIMEOUT CLASSIFICATION: " << classification << "\n";
+    }
+
+    std::error_code ec;
+    fs::remove(cfg.database_path, ec);
+    fs::remove_all(workspace, ec);
+    restoreEnv();
+    return passed;
+}
+
 static bool testResumeFromTrace() {
     FileHandler fh;
     const std::string tracePath = fh.getAgentWorkspacePath("decision_trace.jsonl");
@@ -23205,6 +23660,15 @@ int main() {
             const bool ok = testProductionSpineRevisionChain();
             std::cout << (ok ? "Spine revision chain test returned true.\n"
                              : "Spine revision chain test returned false.\n");
+            return ok ? 0 : 1;
+        }
+    }
+
+    if (const char* spineTimeout = std::getenv("THOTH_SPINE_TIMEOUT_CHAIN")) {
+        if (std::string(spineTimeout) == "1") {
+            const bool ok = testProductionSpineTimeoutChain();
+            std::cout << (ok ? "Spine timeout chain test returned true.\n"
+                             : "Spine timeout chain test returned false.\n");
             return ok ? 0 : 1;
         }
     }
