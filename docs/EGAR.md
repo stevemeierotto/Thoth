@@ -2,7 +2,7 @@
 
 ## Experience-Guided Autonomous Reasoning
 
-**Status:** Draft Architecture Paper
+**Status:** Draft Architecture Paper. Production loop closure verified 2026-09-29 — see §11.
 
 **Project:** Thoth Cognitive Architecture
 
@@ -259,6 +259,37 @@ These include:
 * Multi-agent experience exchange
 
 These extensions represent natural evolutions of the EGAR framework.
+
+---
+
+# 11. Production loop-closure record (2026-09-29)
+
+**Status:** verified 2026-09-29. This section records a causal-chain check of the current production path. It does not change promotion rules, the 0.40 selection floor, GRAG scoring, or certified E2 Phase E.
+
+The checked chain is:
+
+completed production goals → executed trajectories → persisted typed trajectory steps → pattern extraction → strategy promotion → strategy persistence → a later goal → production dense strategy embeddings → cosine similarity → the 0.40 selection gate → `STRATEGY_INJECTION` → promoted strategy text in the model-facing planner prompt.
+
+The pre-registered goals, the 3-trajectory / 0.8 promotion rule (`StrategyEngine`), and `PlannerInjection::kMinStrategySimilarity` (0.40) were left unchanged. Generation used a deterministic fake behind `LLMInterface`. Embeddings used the real production dense path. State was a temporary SQLite database and workspace. The integration test stays opt-in (`THOTH_EGAR_LOOP_CLOSURE=1`) because it needs a reachable embedding service; default tests do not start it.
+
+Observed on that run:
+
+- Embedding method: External (`EmbeddingEngine` on the RAG pipeline). Production uses External unless `THOTH_TEST_SUITE_DEV` selects TF-IDF.
+- Embedding model: `nomic-embed-text`. Dense dimension: 768.
+- Goal norm: `1.00000012`. Strategy norm: `1`.
+- Goal 4 cosine to the promoted strategy: `0.53022629`, above 0.40.
+- Promoted pattern: `RETRIEVAL->LLM`, after three successful trajectories, success rate `1`.
+- `STRATEGY_INJECTION` carried that strategy id. The captured planner prompt contained `Successful pattern detected: RETRIEVAL->LLM` and `["RETRIEVAL","LLM"]`.
+
+Strategy selection embeds the goal and each strategy description plus pattern with the RAG pipeline `EmbeddingEngine`, then scores them with cosine similarity. GRAG’s keyword channel is a separate `IndexManager` TF-IDF engine (`localTfIdfEngine`). Indexing updates that engine’s document frequencies. Strategy selection does not use it.
+
+When strict embedding is off, a failed External embed falls back to local TF-IDF (`THOTH_EMBED_STRICT` unset). `THOTH_EMBED_STRICT=1` returns an empty vector, or throws from `embedBatch`, instead of that fallback. Generation and embedding are separate services. This verification exercised real dense embeddings while plan text came from the fake generator.
+
+The same verification found a trajectory serialization defect and repaired it without rewriting old rows. `RecordedStep` did not store `PlanStep::type`, so executed step types were dropped on the way into trajectory JSON. `StrategyEngine` could also throw on a JSON null `tool` and drop the trajectory in `catch (...)`. The reader now uses a non-empty tool string other than `"none"`; otherwise it uses an integer `type`. A step with neither is skipped. A missing type is not treated as step type 0. Persisted rows that never stored `type` stay non-qualifying. There is no backfill.
+
+An earlier stop on the same test, at strategy similarity, was not a production similarity result. That run built a direct TF-IDF `EmbeddingEngine` whose document-frequency table was empty, so both vectors were zero and cosine returned 0. The production-faithful External rerun above produced `0.53022629`.
+
+This record establishes that the current production EGAR learning, selection, and injection chain reaches the model-facing planner prompt. It does not establish that EGAR improves answer quality, improves planning quality, produces positive longitudinal lift, or outperforms a baseline. Certified E2 Phase E remains its own frozen protocol, including `mean_episodic_lift = 0.0` on `n=3_strict_trio`. Phase E does not become this end-to-end check, and this check does not revise Phase E.
 
 ---
 

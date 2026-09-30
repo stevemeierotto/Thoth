@@ -499,7 +499,7 @@ Requirements:
 
 ## Step 4.3 — Strategy Memory & Tool Metrics
 
-**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-28 strategy promotion; planner injection).
+**Status:** ✅ Complete — see `completed_improvements_log.md` (2026-03-28 strategy promotion; planner injection). Production loop closure verified 2026-09-29 — [`EGAR.md`](EGAR.md) §11; certified E2 Phase E is unchanged.
 
 **Description:**
 Expand the Plan History system to prefer historically successful strategies.

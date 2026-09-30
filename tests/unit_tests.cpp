@@ -2820,6 +2820,406 @@ static bool testPlanLlmFacingRevisionBoundary() {
     return failures == 0;
 }
 
+static bool retryCarriesReason(const std::string& raw, const std::string& expected_reason) {
+    const Thoth::GeneratedPlanAssessment assessment =
+        Thoth::assessGeneratedPlan(raw, "reason-probe", "goal", false);
+    if (assessment.plan.has_value()) {
+        std::cerr << "retryCarriesReason: unexpected parse success for " << expected_reason << "\n";
+        return false;
+    }
+    if (assessment.reason != expected_reason) {
+        std::cerr << "retryCarriesReason: got [" << assessment.reason << "] want [" << expected_reason << "]\n";
+        return false;
+    }
+    if (assessment.reason == "JSON parse failed") {
+        return false;
+    }
+    const std::string retry = Thoth::buildPlannerRetryPrompt("BASE", assessment.reason, raw);
+    const std::string marker = "\n\nERROR: " + assessment.reason + ". Respond with JSON only.";
+    return retry.find(marker) != std::string::npos && retry.find(raw) != std::string::npos;
+}
+
+static bool testPlanParserReasonsReachRetry() {
+    int failures = 0;
+    auto check = [&](const std::string& name, bool ok) {
+        if (!ok) {
+            std::cerr << "testPlanParserReasonsReachRetry: FAILED - " << name << "\n";
+            failures++;
+        }
+    };
+    const fs::path workspace = makeTempPath("plan_parser_reason_workspace");
+    fs::create_directories(workspace);
+    WorkspaceEnvGuard workspaceGuard(workspace.string());
+
+    const std::string valid =
+        R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"Retrieve relevant corpus context","payload":{"query":"...","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize findings","depends_on":["retrieve-context"],"payload":{}}]})";
+    const auto accepted = Thoth::assessGeneratedPlan(valid, "valid", "goal", false);
+    check("valid plan accepted", accepted.plan.has_value() && accepted.reason == "ok");
+    if (accepted.plan.has_value()) {
+        check("valid retrieval then llm",
+              accepted.plan->steps.size() == 2 && accepted.plan->steps[0].type == StepType::RETRIEVAL
+                  && accepted.plan->steps[1].type == StepType::LLM);
+    }
+
+    const std::string malformed = "{\"plan\": [,]}";
+    std::string malformed_reason;
+    Thoth::PlanParser::parse(malformed, "malformed", &malformed_reason);
+    check("malformed wording", malformed_reason.rfind("Malformed JSON:", 0) == 0);
+    check("malformed reaches retry", retryCarriesReason(malformed, malformed_reason));
+
+    check("missing plan array",
+          retryCarriesReason("{\"steps\":[]}", "Root 'plan' array not found or is not an array."));
+    check("missing description",
+          retryCarriesReason(R"({"plan":[{"step_type":"LLM"}]})", "Step missing or invalid 'description'."));
+    check("invalid step type",
+          retryCarriesReason(R"({"plan":[{"step_type":"WIDGET","description":"x"}]})", "Invalid 'step_type': WIDGET"));
+    check("empty plan", retryCarriesReason(R"({"plan":[]})", "Plan contains no steps."));
+
+    const std::string tool_plan =
+        R"({"plan":[{"step_id":"t","step_type":"TOOL","description":"run a tool"},{"step_id":"s","step_type":"LLM","description":"summarize","depends_on":["t"]}]})";
+    const auto tool_assessment = Thoth::assessGeneratedPlan(tool_plan, "tool", "goal", false);
+    check("tool plan is a validation failure",
+          !tool_assessment.plan.has_value()
+              && tool_assessment.reason == "TOOL steps are not allowed for corpus Q&A plans");
+    check("tool plan is not a parser failure", tool_assessment.reason.rfind("Malformed JSON:", 0) != 0
+                                                   && tool_assessment.reason.find("step_type") == std::string::npos
+                                                   && tool_assessment.reason.find("plan' array") == std::string::npos);
+    const std::string tool_retry = Thoth::buildPlannerRetryPrompt("BASE", tool_assessment.reason, tool_plan);
+    check("validation reason reaches retry", tool_retry.find(tool_assessment.reason) != std::string::npos);
+
+    return failures == 0;
+}
+
+namespace {
+
+const char* kEgarLoopGoal1 =
+    "Using the characterization notes for incident NL-BR-4417, report the failing process name.";
+const char* kEgarLoopGoal2 =
+    "Using the characterization notes for incident NL-BR-4417, report the last log line of the failing process.";
+const char* kEgarLoopGoal3 =
+    "Using the characterization notes for incident NL-BR-4417, report the in-force integer value of badge.queue.limit.";
+const char* kEgarLoopGoal4 =
+    "Using the characterization notes for incident NL-BR-4417, report the recovery order.";
+
+const char* kEgarLoopPlanResponse =
+    "{\"plan\":[{\"step_id\":\"retrieve-context\",\"step_type\":\"RETRIEVAL\","
+    "\"description\":\"Retrieve relevant corpus context\",\"payload\":{\"query\":\"NL-BR-4417\",\"top_k\":5}},"
+    "{\"step_id\":\"synthesize\",\"step_type\":\"LLM\",\"description\":\"Summarize findings\","
+    "\"depends_on\":[\"retrieve-context\"],\"payload\":{}}]}";
+
+class EgarLoopInferenceClient : public Thoth::InferenceClient {
+public:
+    std::vector<std::string> prompts;
+
+    Thoth::InferenceGenerateResult generate(const Thoth::InferenceGenerateRequest& request) override {
+        prompts.push_back(request.prompt);
+        Thoth::InferenceGenerateResult result;
+        result.ok = true;
+        result.finish_reason = "stop";
+        result.provider_usage_reported = true;
+        result.token_usage.prompt_tokens = 32;
+        result.elapsed_ms = 1;
+        const bool planPrompt = request.prompt.find("\nSchema:\n") != std::string::npos;
+        if (planPrompt) {
+            result.text = kEgarLoopPlanResponse;
+            result.token_usage.completion_tokens = 48;
+        } else {
+            result.text = "relay-cache";
+            result.token_usage.completion_tokens = 2;
+        }
+        result.token_usage.total_tokens =
+            result.token_usage.prompt_tokens + result.token_usage.completion_tokens;
+        return result;
+    }
+
+    Thoth::InferenceGenerateResult generateChat(const Thoth::InferenceChatRequest&) override {
+        Thoth::InferenceGenerateResult result;
+        result.ok = false;
+        result.error = "EgarLoopInferenceClient does not serve chat";
+        return result;
+    }
+
+    Thoth::InferenceEmbedResult embed(const Thoth::InferenceEmbedRequest&) override {
+        Thoth::InferenceEmbedResult result;
+        result.ok = false;
+        result.error = "EgarLoopInferenceClient does not embed";
+        return result;
+    }
+
+    Thoth::InferenceHealthResult health() override {
+        Thoth::InferenceHealthResult result;
+        result.reachable = true;
+        return result;
+    }
+
+    std::string backendName() const override { return "egar-loop-fake"; }
+};
+
+bool waitForGoalTerminal(Thoth::ExecutiveController& controller) {
+    for (int i = 0; i < 200; ++i) {
+        const auto state = controller.get_state();
+        if (state == Thoth::ControllerState::COMPLETED || state == Thoth::ControllerState::FAILED
+            || state == Thoth::ControllerState::ABORTED) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
+std::string trajectoryPattern(const std::string& trajectory_json) {
+    try {
+        const auto parsed = nlohmann::json::parse(trajectory_json);
+        if (!parsed.contains("steps") || !parsed["steps"].is_array()) {
+            return "<no steps>";
+        }
+        std::ostringstream pattern;
+        bool first = true;
+        for (const auto& step : parsed["steps"]) {
+            if (!first) {
+                pattern << "->";
+            }
+            first = false;
+            const int type = step.value("type", -1);
+            if (step.contains("tool") && step["tool"].is_string() && !step["tool"].get<std::string>().empty()
+                && step["tool"].get<std::string>() != "none") {
+                pattern << "TOOL:" << step["tool"].get<std::string>();
+            } else if (type == 1) {
+                pattern << "RETRIEVAL";
+            } else if (type == 2) {
+                pattern << "LLM";
+            } else if (type < 0) {
+                pattern << "NO_TYPE";
+            } else {
+                pattern << "STEP_" << type;
+            }
+        }
+        return pattern.str();
+    } catch (const std::exception& ex) {
+        return std::string("<unreadable:") + ex.what() + ">";
+    }
+}
+
+}  // namespace
+
+static bool testProductionEgarLoopClosure() {
+    const char* previousDev = std::getenv("THOTH_TEST_SUITE_DEV");
+    const std::string savedDev = previousDev ? previousDev : "";
+    unsetenv("THOTH_TEST_SUITE_DEV");
+    const char* previousLogs = std::getenv("THOTH_LOGS_PATH");
+    const std::string savedLogs = previousLogs ? previousLogs : "";
+    const char* previousStrict = std::getenv("THOTH_EMBED_STRICT");
+    const std::string savedStrict = previousStrict ? previousStrict : "";
+    setenv("THOTH_EMBED_STRICT", "1", 1);
+    const char* previousBackend = std::getenv("THOTH_INFERENCE_BACKEND");
+    const std::string savedBackend = previousBackend ? previousBackend : "";
+    setenv("THOTH_INFERENCE_BACKEND", "llama_cpp", 1);
+    const char* embedUrl = std::getenv("THOTH_EMBED_BASE_URL");
+    const std::string embedBase = embedUrl ? embedUrl : "";
+
+    const fs::path workspace = makeTempPath("egar_loop_workspace");
+    const fs::path logs = workspace / "logs";
+    fs::create_directories(logs);
+    fs::create_directories(workspace / "rag");
+    WorkspaceEnvGuard workspaceGuard(workspace.string());
+    setenv("THOTH_LOGS_PATH", logs.string().c_str(), 1);
+
+    const fs::path notePath = workspace / "rag" / "nl_br_4417.md";
+    {
+        std::ofstream out(notePath);
+        out << "Incident NL-BR-4417. Failing process relay-cache. Last log line cache refused. "
+               "badge.queue.limit 24. Recovery order stop cache, then start cache.\n";
+    }
+
+    Config cfg;
+    cfg.database_path = makeTempPath("egar_loop.db").string();
+    cfg.llm_model = "deterministic-fake";
+    auto memory = std::make_shared<Memory>(cfg);
+    auto embedder = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::External, &cfg);
+    auto* embedderRaw = embedder.get();
+    auto index = new IndexManager(embedder.get());
+    index->indexFile(notePath.string());
+    auto rag = std::make_shared<RAGPipeline>(std::move(embedder), index);
+    auto promptFactory = std::make_shared<PromptFactory>(*memory, *rag);
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    auto fake = std::make_unique<EgarLoopInferenceClient>();
+    auto* fakeRaw = fake.get();
+    llm.setInferenceClientForTests(std::move(fake));
+    auto planner = std::make_shared<LLMPlanner>(memory, rag, promptFactory, &llm);
+    auto registry = std::make_shared<ToolRegistry>();
+    Thoth::ExecutiveController controller(planner, registry, rag, memory);
+    controller.set_llm_interface(&llm);
+    controller.set_session_id("egar-loop-closure");
+    controller.set_max_reflections(0);
+
+    std::cout << "EGAR_LOOP pre-registered goals\n";
+    std::cout << "  1: " << kEgarLoopGoal1 << "\n";
+    std::cout << "  2: " << kEgarLoopGoal2 << "\n";
+    std::cout << "  3: " << kEgarLoopGoal3 << "\n";
+    std::cout << "  4: " << kEgarLoopGoal4 << "\n";
+    std::cout << "EGAR_LOOP db " << cfg.database_path << "\n";
+    std::cout << "EGAR_LOOP workspace " << workspace.string() << "\n";
+    const bool outsideDev = cfg.database_path.find("agent_workspace") == std::string::npos
+        && workspace.string().find("/agent_workspace") == std::string::npos;
+    std::cout << "EGAR_LOOP avoids_agent_workspace " << (outsideDev ? "yes" : "no") << "\n";
+    std::cout << "EGAR_LOOP initial trajectories " << memory->getAllTrajectories().size() << "\n";
+    std::cout << "EGAR_LOOP initial strategies " << memory->getAllStrategies().size() << "\n";
+
+    auto finish = [&](bool ok) {
+        if (savedDev.empty()) {
+            unsetenv("THOTH_TEST_SUITE_DEV");
+        } else {
+            setenv("THOTH_TEST_SUITE_DEV", savedDev.c_str(), 1);
+        }
+        if (savedLogs.empty()) {
+            unsetenv("THOTH_LOGS_PATH");
+        } else {
+            setenv("THOTH_LOGS_PATH", savedLogs.c_str(), 1);
+        }
+        if (savedStrict.empty()) {
+            unsetenv("THOTH_EMBED_STRICT");
+        } else {
+            setenv("THOTH_EMBED_STRICT", savedStrict.c_str(), 1);
+        }
+        if (savedBackend.empty()) {
+            unsetenv("THOTH_INFERENCE_BACKEND");
+        } else {
+            setenv("THOTH_INFERENCE_BACKEND", savedBackend.c_str(), 1);
+        }
+        std::error_code ec;
+        fs::remove(cfg.database_path, ec);
+        return ok;
+    };
+
+    if (!outsideDev || !memory->getAllTrajectories().empty() || !memory->getAllStrategies().empty()) {
+        std::cerr << "PRODUCTION EGAR LOOP CLOSURE FAILED AT: A — initial state is not clean\n";
+        return finish(false);
+    }
+    if (embedBase.empty() || embedderRaw->getMethod() != EmbeddingEngine::Method::External) {
+        std::cerr << "PRODUCTION EGAR LOOP CLOSURE CANNOT YET BE OBSERVED AT: J — external dense embedding unavailable\n";
+        return finish(false);
+    }
+    std::cout << "EGAR_LOOP embed_method External\n";
+    std::cout << "EGAR_LOOP embed_dimension " << embedderRaw->getDimension() << "\n";
+    std::cout << "EGAR_LOOP embed_model " << embedderRaw->getModelName() << "\n";
+    std::cout << "EGAR_LOOP embed_base_url " << embedBase << "\n";
+
+    const char* goals[4] = {kEgarLoopGoal1, kEgarLoopGoal2, kEgarLoopGoal3, kEgarLoopGoal4};
+    std::string promotedId;
+    std::string promotedDescription;
+    std::string promotedPattern;
+    float promotedRate = 0.0f;
+    for (int goalIndex = 0; goalIndex < 3; ++goalIndex) {
+        controller.execute_goal(goals[goalIndex]);
+        const bool finished = waitForGoalTerminal(controller);
+        const auto state = controller.get_state();
+        const auto trajectories = memory->getAllTrajectories();
+        const auto strategies = memory->getAllStrategies();
+        std::cout << "EGAR_LOOP goal " << (goalIndex + 1) << " state " << static_cast<int>(state)
+                  << " finished " << (finished ? "yes" : "no") << " trajectories " << trajectories.size()
+                  << " strategies " << strategies.size() << "\n";
+        if (!trajectories.empty()) {
+            const auto& last = trajectories.back();
+            std::cout << "EGAR_LOOP trajectory_id " << last.trajectory_id << " success " << last.success_score
+                      << " pattern " << trajectoryPattern(last.trajectory_json) << "\n";
+            std::cout << "EGAR_LOOP trajectory_json " << last.trajectory_json << "\n";
+        }
+        if (!finished || state != Thoth::ControllerState::COMPLETED || trajectories.size() != static_cast<size_t>(goalIndex + 1)) {
+            std::cerr << "PRODUCTION EGAR LOOP CLOSURE FAILED AT: B — goal did not persist a completed trajectory\n";
+            return finish(false);
+        }
+        if (goalIndex < 2 && !strategies.empty()) {
+            std::cerr << "PRODUCTION EGAR LOOP CLOSURE FAILED AT: F — strategy appeared before three qualifying trajectories\n";
+            return finish(false);
+        }
+        if (goalIndex == 2) {
+            if (strategies.size() != 1 || strategies.front().success_rate < 0.8f) {
+                std::cerr << "PRODUCTION EGAR LOOP CLOSURE FAILED AT: F — no strategy after three completed goals\n";
+                return finish(false);
+            }
+            promotedId = strategies.front().strategy_id;
+            promotedDescription = strategies.front().description;
+            promotedPattern = strategies.front().step_pattern_json;
+            promotedRate = strategies.front().success_rate;
+            std::cout << "EGAR_LOOP promoted_id " << promotedId << "\n";
+            std::cout << "EGAR_LOOP promoted_description " << promotedDescription << "\n";
+            std::cout << "EGAR_LOOP promoted_pattern " << promotedPattern << "\n";
+            std::cout << "EGAR_LOOP promoted_success_rate " << promotedRate << "\n";
+        }
+    }
+
+    const int promptsBefore = static_cast<int>(fakeRaw->prompts.size());
+    controller.execute_goal(kEgarLoopGoal4);
+    waitForGoalTerminal(controller);
+    const std::string embedText = promotedDescription + " " + promotedPattern;
+    const auto goalVector = embedderRaw->embed(std::string(kEgarLoopGoal4));
+    const auto strategyVector = embedderRaw->embed(embedText);
+    const auto vectorNorm = [](const std::vector<float>& values) {
+        float sum = 0.0f;
+        for (float value : values) {
+            sum += value * value;
+        }
+        return std::sqrt(sum);
+    };
+    const float goalNorm = vectorNorm(goalVector);
+    const float strategyNorm = vectorNorm(strategyVector);
+    std::cout << "EGAR_LOOP similarity_text " << embedText << "\n";
+    std::cout << "EGAR_LOOP goal_embed_len " << goalVector.size() << " goal_embed_norm " << std::setprecision(17)
+              << goalNorm << "\n";
+    std::cout << "EGAR_LOOP strategy_embed_len " << strategyVector.size() << " strategy_embed_norm "
+              << strategyNorm << "\n";
+    const bool dense = embedderRaw->getMethod() == EmbeddingEngine::Method::External
+        && goalVector.size() == 768 && strategyVector.size() == 768 && goalNorm > 1e-9f
+        && strategyNorm > 1e-9f;
+    if (!dense) {
+        std::cerr << "PRODUCTION EGAR LOOP CLOSURE CANNOT YET BE OBSERVED AT: J — external dense embedding unavailable\n";
+        return finish(false);
+    }
+    const float similarity = GragScorer::cosine_similarity(goalVector, strategyVector);
+    std::cout << "EGAR_LOOP similarity_raw " << similarity << "\n";
+    std::cout << "EGAR_LOOP threshold " << Thoth::PlannerInjection::kMinStrategySimilarity << "\n";
+    if (!(similarity >= Thoth::PlannerInjection::kMinStrategySimilarity)) {
+        std::cerr << "PRODUCTION EGAR LOOP CLOSURE FAILED AT: J — strategy similarity/selection\n";
+        return finish(false);
+    }
+
+    bool sawInjection = false;
+    std::string injectedId;
+    std::ifstream logIn(workspace / "app_log.jsonl");
+    std::string line;
+    while (std::getline(logIn, line)) {
+        if (line.find("STRATEGY_INJECTION") == std::string::npos && line.find("PLAN_REUSE") == std::string::npos
+            && line.find("PLANNER_CONTEXT_ASSEMBLY") == std::string::npos) {
+            continue;
+        }
+        std::cout << "EGAR_LOOP log " << line << "\n";
+        try {
+            const auto entry = nlohmann::json::parse(line);
+            if (entry.value("event_name", "") == "STRATEGY_INJECTION") {
+                sawInjection = true;
+                injectedId = entry["metadata"].value("strategy_id", "");
+            }
+        } catch (...) {
+        }
+    }
+    std::string planPrompt;
+    for (int i = promptsBefore; i < static_cast<int>(fakeRaw->prompts.size()); ++i) {
+        if (fakeRaw->prompts[static_cast<size_t>(i)].find("\nSchema:\n") != std::string::npos) {
+            planPrompt = fakeRaw->prompts[static_cast<size_t>(i)];
+        }
+    }
+    const bool containsStrategy = planPrompt.find(promotedDescription) != std::string::npos
+        && planPrompt.find(promotedPattern) != std::string::npos;
+    std::cout << "EGAR_LOOP injection_id " << injectedId << " prompt_contains_strategy "
+              << (containsStrategy ? "yes" : "no") << "\n";
+    if (!sawInjection || injectedId != promotedId || !containsStrategy) {
+        std::cerr << "PRODUCTION EGAR LOOP CLOSURE FAILED AT: M — strategy did not reach the inference prompt\n";
+        return finish(false);
+    }
+    std::cout << "PRODUCTION EGAR LOOP CLOSURE VERIFIED\n";
+    return finish(true);
+}
+
 static bool testResumeFromTrace() {
     FileHandler fh;
     const std::string tracePath = fh.getAgentWorkspacePath("decision_trace.jsonl");
@@ -5358,6 +5758,74 @@ static bool testStrategyPromotion() {
     fs::remove(cfg.database_path);
     if (!ok) std::cerr << "testStrategyPromotion: strategy not promoted correctly (count: " << strategies.size() << ")\n";
     return ok;
+}
+
+static bool testRecordedStepTypeRoundTripAndPromotion() {
+    Thoth::RecordedStep retrieval;
+    retrieval.step_id = "retrieve-context";
+    retrieval.description = "Retrieve relevant corpus context";
+    retrieval.type = StepType::RETRIEVAL;
+    retrieval.tool = nullptr;
+    const Thoth::RecordedStep retrievalLoaded = Thoth::RecordedStep::from_json(retrieval.to_json());
+    Thoth::RecordedStep synthesis;
+    synthesis.step_id = "synthesize";
+    synthesis.description = "Summarize findings";
+    synthesis.type = StepType::LLM;
+    synthesis.tool = nullptr;
+    const Thoth::RecordedStep synthesisLoaded = Thoth::RecordedStep::from_json(synthesis.to_json());
+    const Thoth::RecordedStep legacy = Thoth::RecordedStep::from_json(
+        {{"step_id", "old"}, {"description", "Retrieve relevant corpus context"}, {"tool", nullptr}});
+    if (!retrievalLoaded.type.has_value() || *retrievalLoaded.type != StepType::RETRIEVAL
+        || !synthesisLoaded.type.has_value() || *synthesisLoaded.type != StepType::LLM
+        || legacy.type.has_value()) {
+        std::cerr << "testRecordedStepTypeRoundTripAndPromotion: type did not round-trip\n";
+        return false;
+    }
+
+    Config cfg;
+    cfg.database_path = makeTempPath("thoth_recorded_step_type.db").string();
+    auto memory = std::make_shared<Memory>(cfg);
+    Thoth::StrategyEngine engine(memory);
+    nlohmann::json legacySteps = nlohmann::json::array();
+    legacySteps.push_back({{"description", "Retrieve relevant corpus context"}, {"tool", nullptr}});
+    legacySteps.push_back({{"description", "Summarize findings"}, {"tool", nullptr}});
+    for (int i = 0; i < 3; ++i) {
+        Memory::CognateTrajectoryRecord incomplete;
+        incomplete.trajectory_id = "legacy-" + std::to_string(i);
+        incomplete.goal = "old goal";
+        incomplete.trajectory_json = nlohmann::json{{"steps", legacySteps}}.dump();
+        incomplete.success_score = 1.0f;
+        incomplete.created_at = 1 + i;
+        memory->saveTrajectory(incomplete);
+    }
+    engine.processTrajectories();
+    if (!memory->getAllStrategies().empty()) {
+        std::cerr << "testRecordedStepTypeRoundTripAndPromotion: untyped trajectory was promoted\n";
+        fs::remove(cfg.database_path);
+        return false;
+    }
+
+    nlohmann::json steps = nlohmann::json::array();
+    steps.push_back(retrieval.to_json());
+    steps.push_back(synthesis.to_json());
+    for (int i = 0; i < 3; ++i) {
+        Memory::CognateTrajectoryRecord rec;
+        rec.trajectory_id = "typed-" + std::to_string(i);
+        rec.goal = "typed goal";
+        rec.trajectory_json = nlohmann::json{{"steps", steps}}.dump();
+        rec.success_score = 1.0f;
+        rec.created_at = 10 + i;
+        memory->saveTrajectory(rec);
+    }
+    engine.processTrajectories();
+    const auto strategies = memory->getAllStrategies();
+    const bool promoted = strategies.size() == 1
+        && strategies[0].description.find("RETRIEVAL->LLM") != std::string::npos;
+    fs::remove(cfg.database_path);
+    if (!promoted) {
+        std::cerr << "testRecordedStepTypeRoundTripAndPromotion: production-shaped steps were not promoted\n";
+    }
+    return promoted;
 }
 
 static bool testLlmTokenUsage() {
@@ -21070,9 +21538,18 @@ static bool testLocalNoteSlotDeleteButtonGeometry() {
 #include "mtcp_generation_checks.inc"
 
 int main() {
+    if (const char* egarLoop = std::getenv("THOTH_EGAR_LOOP_CLOSURE")) {
+        if (std::string(egarLoop) == "1") {
+            const bool ok = testProductionEgarLoopClosure();
+            std::cout << (ok ? "EGAR loop closure test returned true.\n" : "EGAR loop closure test returned false.\n");
+            return ok ? 0 : 1;
+        }
+    }
+
     if (const char* planSchema = std::getenv("THOTH_PLAN_SCHEMA_TESTS")) {
         if (std::string(planSchema) == "1") {
-            const bool ok = testPlanParser() && testPlanLlmFacingRevisionBoundary();
+            const bool ok = testPlanParser() && testPlanLlmFacingRevisionBoundary()
+                            && testPlanParserReasonsReachRetry();
             std::cout << (ok ? "Plan schema tests passed.\n" : "Plan schema tests failed.\n");
             return ok ? 0 : 1;
         }
@@ -21495,6 +21972,7 @@ int main() {
     if (!testBootstrapIndexing()) failures++;
     if (!testPlanParser()) failures++;
     if (!testPlanLlmFacingRevisionBoundary()) failures++;
+    if (!testPlanParserReasonsReachRetry()) failures++;
     if (!testResumeFromTrace()) failures++;
     if (!testProjectAnalyzeTool()) failures++;
     if (!testRunTestsTool()) failures++;
@@ -21556,6 +22034,7 @@ int main() {
     if (!testScientificLoopStages()) failures++;
     if (!testScientificConvergence()) failures++;
     if (!testStrategyPromotion()) failures++;
+    if (!testRecordedStepTypeRoundTripAndPromotion()) failures++;
     if (!testStrategyInjection()) failures++;
     if (!testPlannerEvidenceSessionId()) failures++;
     if (!testEpisodicAuthoritativeV2()) failures++;

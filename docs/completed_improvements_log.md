@@ -1,6 +1,18 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-27 (C6.4 Phase 7)
+Last updated: 2026-09-29 (EGAR production loop closure)
+
+## 2026-09-29 — Production EGAR loop closure verified
+
+**Status:** Causal chain verified 2026-09-29. Promotion rule (3 trajectories, mean success ≥ 0.8) and selection floor 0.40 unchanged. Certified E2 Phase E, including `mean_episodic_lift = 0.0` on `n=3_strict_trio`, is unchanged and is not this check.
+
+The production path reached the model-facing planner prompt: completed goals, typed trajectories, pattern extraction, promotion, persistence, a later goal, External `nomic-embed-text` embeddings (dimension 768), cosine `0.53022629` against 0.40, `STRATEGY_INJECTION`, and prompt text `Successful pattern detected: RETRIEVAL->LLM` plus `["RETRIEVAL","LLM"]`. Generation stayed a deterministic fake. GRAG’s local TF-IDF keyword engine is separate; External embed failure falls back to TF-IDF only when `THOTH_EMBED_STRICT` is off. An earlier cosine of 0 came from an empty-vocabulary TF-IDF engine in the test, not from production dense similarity.
+
+`RecordedStep` now persists step type, and `StrategyEngine` no longer drops a trajectory on a null `tool`. Legacy rows without `type` were not backfilled. The loop test remains opt-in (`THOTH_EGAR_LOOP_CLOSURE=1`).
+
+Record: [`EGAR.md`](EGAR.md) §11.
+
+---
 
 ## 2026-09-27 — C6.4 Phase 7 plan event order
 
