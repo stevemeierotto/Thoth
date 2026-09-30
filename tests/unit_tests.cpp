@@ -2647,6 +2647,179 @@ static bool testPlanParser() {
     return test_failures == 0;
 }
 
+struct WorkspaceEnvGuard {
+    bool had = false;
+    std::string previous;
+    explicit WorkspaceEnvGuard(const std::string& next) {
+        if (const char* current = std::getenv("THOTH_WORKSPACE_PATH")) {
+            had = true;
+            previous = current;
+        }
+        setenv("THOTH_WORKSPACE_PATH", next.c_str(), 1);
+    }
+    ~WorkspaceEnvGuard() {
+        if (had) {
+            setenv("THOTH_WORKSPACE_PATH", previous.c_str(), 1);
+        } else {
+            unsetenv("THOTH_WORKSPACE_PATH");
+        }
+    }
+};
+
+static nlohmann::json frozenR1ProductionPlan() {
+    const nlohmann::json failed = {
+        {"data", {{"query", "MTCP-DOC-404"}, {"retrieved_chunk_count", 0}}},
+        {"error_message", "Retrieval returned no documents for query MTCP-DOC-404."},
+        {"status", "error"},
+    };
+    const nlohmann::json retrieve = {
+        {"step_id", "mtcp-r1-retrieve"},
+        {"description", "Retrieve notes for query MTCP-DOC-404"},
+        {"type", 1},
+        {"tool", nlohmann::json::object()},
+        {"payload", {{"query", "MTCP-DOC-404"}, {"top_k", 5}}},
+        {"status", 3},
+        {"retry_count", 0},
+        {"failure_policy",
+         {{"max_retries", 1}, {"abort_on_failure", false}, {"revise_plan_on_failure", true}}},
+        {"result", failed},
+        {"outcome", {{"run_block_reason", "NONE"}}},
+        {"reasoning", ""},
+        {"started_at_ms", 1710000001000},
+        {"completed_at_ms", 1710000001000},
+        {"depends_on", nlohmann::json::array()},
+    };
+    const nlohmann::json synthesize = {
+        {"step_id", "mtcp-r1-synthesize"},
+        {"description", "Report the failing process and last log line from retrieved notes"},
+        {"type", 2},
+        {"tool", nlohmann::json::object()},
+        {"payload", nlohmann::json::object()},
+        {"status", 0},
+        {"retry_count", 0},
+        {"failure_policy",
+         {{"max_retries", 1}, {"abort_on_failure", false}, {"revise_plan_on_failure", false}}},
+        {"result", nullptr},
+        {"outcome", {{"run_block_reason", "NONE"}}},
+        {"reasoning", ""},
+        {"started_at_ms", 0},
+        {"completed_at_ms", 0},
+        {"depends_on", nlohmann::json::array({"mtcp-r1-retrieve"})},
+    };
+    return {
+        {"plan_id", "mtcp-r1-plan"},
+        {"goal",
+         "Report the failing process and the last log line for Northline Badge Relay incident "
+         "NL-BR-4417 using the characterization notes."},
+        {"current_index", 0},
+        {"status", 0},
+        {"created_at_ms", 1710000000000},
+        {"updated_at_ms", 1710000000000},
+        {"steps", nlohmann::json::array({retrieve, synthesize})},
+    };
+}
+
+static bool testPlanLlmFacingRevisionBoundary() {
+    int failures = 0;
+    auto check = [&](const std::string& name, bool ok) {
+        if (!ok) {
+            std::cerr << "testPlanLlmFacingRevisionBoundary: FAILED - " << name << "\n";
+            failures++;
+        }
+    };
+    const fs::path workspace = makeTempPath("plan_llm_facing_workspace");
+    fs::create_directories(workspace);
+    WorkspaceEnvGuard workspaceGuard(workspace.string());
+
+    const std::string templateSchema =
+        R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"Retrieve relevant corpus context","payload":{"query":"...","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize findings","depends_on":["retrieve-context"],"payload":{}}]})";
+    const auto templatePlan = Thoth::PlanParser::parse(templateSchema, "template");
+    check("template schema parses", templatePlan.has_value() && templatePlan->steps.size() == 2);
+    if (templatePlan.has_value()) {
+        Plan mutableTemplate = *templatePlan;
+        const auto validation = Thoth::PlanValidator::validateAndRepair(mutableTemplate, false);
+        check("template schema validates", validation.valid);
+    }
+
+    const Plan production = Plan::from_json(frozenR1ProductionPlan());
+    const std::string productionDump = production.to_json().dump();
+    const nlohmann::json facing = production.toLlmFacingJson();
+    const std::string facingDump = facing.dump();
+
+    check("production serialization still has steps", productionDump.find("\"steps\"") != std::string::npos);
+    check("direct production parse still fails",
+          !Thoth::PlanParser::parse(productionDump, "production-direct").has_value());
+
+    check("rendered root is plan", facing.contains("plan") && facing["plan"].is_array() && facing["plan"].size() == 2);
+    check("rendered plan omits runtime root fields",
+          !facing.contains("plan_id") && !facing.contains("steps") && !facing.contains("created_at_ms")
+              && !facing.contains("status") && !facing.contains("goal"));
+    const auto& retrieval = facing["plan"][0];
+    const auto& synthesis = facing["plan"][1];
+    check("retrieval step type", retrieval.value("step_type", "") == "RETRIEVAL");
+    check("llm step type", synthesis.value("step_type", "") == "LLM");
+    check("retrieval omits integer type", !retrieval.contains("type"));
+    check("synthesis omits integer type", !synthesis.contains("type"));
+    check("runtime step fields omitted",
+          !retrieval.contains("failure_policy") && !retrieval.contains("result") && !retrieval.contains("tool")
+              && !retrieval.contains("outcome") && !retrieval.contains("reasoning") && !retrieval.contains("status")
+              && !synthesis.contains("failure_policy") && !synthesis.contains("result"));
+    check("step ids survive",
+          retrieval.value("step_id", "") == "mtcp-r1-retrieve"
+              && synthesis.value("step_id", "") == "mtcp-r1-synthesize");
+    check("descriptions survive",
+          retrieval.value("description", "") == "Retrieve notes for query MTCP-DOC-404"
+              && synthesis.value("description", "") == "Report the failing process and last log line from retrieved notes");
+    check("retrieval payload survives",
+          retrieval.contains("payload") && retrieval["payload"].value("query", "") == "MTCP-DOC-404"
+              && retrieval["payload"].value("top_k", 0) == 5);
+    check("dependency survives",
+          synthesis.contains("depends_on") && synthesis["depends_on"].is_array()
+              && synthesis["depends_on"].size() == 1
+              && synthesis["depends_on"][0] == "mtcp-r1-retrieve");
+
+    const auto rendered = Thoth::PlanParser::parse(facingDump, production.plan_id);
+    check("rendered plan parses", rendered.has_value() && rendered->steps.size() == 2);
+    if (rendered.has_value()) {
+        check("parsed retrieval type", rendered->steps[0].type == StepType::RETRIEVAL);
+        check("parsed llm type", rendered->steps[1].type == StepType::LLM);
+        check("parsed dependency",
+              rendered->steps[1].depends_on.size() == 1
+                  && rendered->steps[1].depends_on[0] == "mtcp-r1-retrieve");
+        check("parsed payload",
+              rendered->steps[0].payload.value("query", "") == "MTCP-DOC-404"
+                  && rendered->steps[0].payload.value("top_k", 0) == 5);
+    }
+
+    Config cfg;
+    cfg.database_path = makeTempPath("plan_llm_facing.db").string();
+    auto memory = std::make_shared<Memory>(cfg);
+    auto embedder = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto index = new IndexManager(embedder.get());
+    auto rag = std::make_shared<RAGPipeline>(std::move(embedder), index);
+    auto prompts = std::make_shared<PromptFactory>(*memory, *rag);
+    const nlohmann::json failed = frozenR1ProductionPlan()["steps"][0]["result"];
+    const std::string prompt = prompts->buildRevisionPrompt(
+        production.goal, facingDump, failed.dump(), nullptr);
+    const auto existingAt = prompt.find("Existing Plan: ");
+    check("revision prompt has existing plan", existingAt != std::string::npos);
+    if (existingAt != std::string::npos) {
+        const std::string shown = prompt.substr(existingAt + std::string("Existing Plan: ").size());
+        const auto lineEnd = shown.find('\n');
+        const std::string shownPlan = shown.substr(0, lineEnd);
+        check("existing plan is the rendered form", shownPlan == facingDump);
+        check("existing plan is not production serialization", shownPlan.find("\"steps\"") == std::string::npos
+                                                                  && shownPlan.find("\"type\":") == std::string::npos);
+    }
+    LLMPlanner planner(memory, rag, prompts, nullptr);
+    const std::string hashed = planner.revisionWrapperSha256(production, failed);
+    const std::string expectedPrompt = prompts->buildRevisionPrompt(
+        production.goal, production.toLlmFacingJson().dump(), failed.dump(), nullptr);
+    check("planner revision prompt uses rendered plan", hashed == Thoth::sha256Hex(expectedPrompt));
+
+    return failures == 0;
+}
+
 static bool testResumeFromTrace() {
     FileHandler fh;
     const std::string tracePath = fh.getAgentWorkspacePath("decision_trace.jsonl");
@@ -20897,6 +21070,14 @@ static bool testLocalNoteSlotDeleteButtonGeometry() {
 #include "mtcp_generation_checks.inc"
 
 int main() {
+    if (const char* planSchema = std::getenv("THOTH_PLAN_SCHEMA_TESTS")) {
+        if (std::string(planSchema) == "1") {
+            const bool ok = testPlanParser() && testPlanLlmFacingRevisionBoundary();
+            std::cout << (ok ? "Plan schema tests passed.\n" : "Plan schema tests failed.\n");
+            return ok ? 0 : 1;
+        }
+    }
+
     if (const char* focused = std::getenv("THOTH_LLM_TIMEOUT_TESTS")) {
         if (std::string(focused) == "1") {
             const bool ok = testLlmTimeoutPolicy() && testLlmSynthesisRetriesDisabled()
@@ -21313,6 +21494,7 @@ int main() {
     if (!testRetrievalDiagnosticsEvent()) failures++;
     if (!testBootstrapIndexing()) failures++;
     if (!testPlanParser()) failures++;
+    if (!testPlanLlmFacingRevisionBoundary()) failures++;
     if (!testResumeFromTrace()) failures++;
     if (!testProjectAnalyzeTool()) failures++;
     if (!testRunTestsTool()) failures++;
