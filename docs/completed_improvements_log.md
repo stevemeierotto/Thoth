@@ -1,6 +1,20 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-29 (cognitive-spine success path)
+Last updated: 2026-09-29 (cognitive-spine failure recovery)
+
+## 2026-09-29 — Production failure → reflection → recovery verified
+
+**Status:** End-to-end verified 2026-09-29 for the default failure recovery path. The check is opt-in (`THOTH_SPINE_FAILURE_CHAIN=1`) because it uses the production External embedder. Generation is a deterministic fake. The frozen RETRIEVAL → LLM fixture, goal, and marker are the same as the success-path check.
+
+**Demonstrated.** A schema-generated plan has `revise_plan_on_failure == false`. The verified path is failed execution → trajectory score below 0.6 → `REFLECTION_REPLAN` → `create_plan` → replacement plan → successful recovery. The verified run reflected once at score 0 and reached `COMPLETED`. The failed attempt and the successful attempt were both kept in history and trajectories (`RETRIEVAL->LLM`, scores 0 and 1). Reflection removes the failed plan from `active_plans` only after that history is stored and the recovery plan is persisted. Successful terminal cleanup then removes the recovery active plan. After completion the session has no resumable active plan.
+
+**Repaired.** Reflection previously left the retired failed plan in `active_plans`. After the recovery plan completed, that leftover row could become the resume target. The repair deletes only that retired plan id. It does not delete history.
+
+**Observed and not reclassified.** `PLAN_CREATED` state remained `IDLE`, and `current_index` remained 0.
+
+**Not verified by this check:** the flag-gated `revise_plan` path, timeout handling, crash/resume, GRAG score quality, EGAR lift, and answer quality.
+
+---
 
 ## 2026-09-29 — Production cognitive-spine success path verified
 

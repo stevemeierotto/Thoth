@@ -79,7 +79,11 @@ Controller events appear inside the versioned envelope. Key mappings:
 
 **Trace replay alone cannot fully reconstruct controller state** — missing full plan JSON on some events, step results, and explicit `current_index` on every entry.
 
-**Authoritative resume:** `Memory` / SQLite stores the serialized `Plan`; `ExecutiveController::resume_from_plan()` restores execution. Trace log supplements debugging only.
+**Authoritative resume:** `Memory` / SQLite stores the serialized `Plan`; `ExecutiveController::resume_from_plan()` restores execution. Trace log supplements debugging only. `getActivePlan(session)` returns the latest `active_plans` row for that session. `plan_id` is the primary key; the session column is not unique.
+
+**Verified default failure recovery (2026-09-29):** a schema-generated plan leaves `revise_plan_on_failure` false. The verified recovery is failed execution, a trajectory score below 0.6, `REFLECTION_REPLAN`, `create_plan`, a replacement plan, then `COMPLETED`. The verified run reflected once at score 0. Both the failed attempt and the successful attempt remained in `past_plans` and `trajectories`. `PLAN_CREATED` state `IDLE` and `current_index` 0 were observed and were not reclassified.
+
+**Verified reflection replacement (2026-09-29):** `active_plans` holds the in-flight plan. When reflection replaces that plan, the failed attempt is already stored in `past_plans` and `trajectories`. The controller then persists the recovery plan and, still holding its lock and before `PLAN_CREATED`, deletes only the retired plan id from `active_plans`. Terminal `PLAN_COMPLETED` then removes the recovery plan id. After that completion the session has no resumable active plan. Before this repair, the retired failed row stayed in `active_plans` and could become the resume target once the recovery row was deleted. History tables were already separate and were not the defect.
 
 ---
 
