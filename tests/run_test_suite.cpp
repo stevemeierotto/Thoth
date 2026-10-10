@@ -14,6 +14,7 @@
 #include "runtime_bootstrap.h"
 #include "executive_controller.h"
 #include "benchmark_context.h"
+#include "corpus_create.h"
 
 #include <atomic>
 #include <chrono>
@@ -264,6 +265,47 @@ static void resetPlanTemplatesForTestRun() {
     }
 }
 
+static bool ingestTestCorpus(BasicAgentPlugin& plugin, const std::string& corpusPath,
+                             int timeoutMs) {
+    for (const char* name : {"grag_overview.md", "executive_controller.md", "indexes.md"}) {
+        try {
+            std::ifstream in(fs::path(corpusPath) / name);
+            if (!in) {
+                std::cerr << "TEST_SUITE: cannot read fixture " << name << "\n";
+                return false;
+            }
+            const std::string content((std::istreambuf_iterator<char>(in)), {});
+            const auto accepted = plugin.createCorpusDocument(
+                name, content, "test_suite_headless");
+            std::string error;
+            if (!Thoth::CorpusCreate::hasRequiredAcceptedFields(accepted, error)) {
+                std::cerr << "TEST_SUITE: ingestion rejected for " << name << ": " << error << "\n";
+                return false;
+            }
+            const std::string id = accepted.at("document").at("id").get<std::string>();
+            bool indexed = false;
+            const bool finished = waitMs(timeoutMs, [&] {
+                const auto corpus = plugin.listCorpusDocuments();
+                for (const auto& document : corpus.at("documents")) {
+                    if (document.value("id", "") != id) continue;
+                    const auto status = document.value("status", "");
+                    indexed = status == "indexed";
+                    return indexed || status == "failed";
+                }
+                return false;
+            });
+            if (!finished || !indexed) {
+                std::cerr << "TEST_SUITE: fixture indexing failed or timed out: " << name << "\n";
+                return false;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "TEST_SUITE: fixture ingestion failed for " << name << ": " << e.what() << "\n";
+            return false;
+        }
+    }
+    return true;
+}
+
 int main(int argc, char** argv) {
     const SuiteTier tier = parseTier(argc, argv);
     const bool devTier = tier == SuiteTier::Dev;
@@ -273,7 +315,8 @@ int main(int argc, char** argv) {
 
     FileHandler fh;
     const std::string corpusPath = fh.getAgentWorkspacePath("rag/test_suite_corpus");
-    const std::string indexPath = (fs::path(corpusPath) / "test_suite.rag_index.bin").string();
+    // Keep pre-session-scope cached chunks from shadowing the owned fixtures by content.
+    const std::string indexPath = (fs::path(corpusPath) / "test_suite_session_owned.rag_index.bin").string();
 
     if (devTier) {
         configureDevTier(indexPath);
@@ -316,7 +359,9 @@ int main(int argc, char** argv) {
     RunFlags flags;
     BasicAgentPlugin plugin;
     plugin.setSessionId("test_suite_headless");
-    plugin.setRagFiles({corpusPath});
+    if (!ingestTestCorpus(plugin, corpusPath, devTier ? 30000 : 120000)) return 2;
+    // Ingestion owns indexing; only mark the command processor initialized here.
+    plugin.setRagFiles({});
 
     Thoth::BenchmarkRun benchmarkRun = Thoth::BenchmarkRun::create(
         plugin.buildTestSuiteBenchmarkInputs(!devTier, corpusPath));
@@ -412,7 +457,7 @@ int main(int argc, char** argv) {
     const json& gragRow = latestGrag.is_object() ? latestGrag : latestGragAny;
     const double alpha = jsonDouble(gragRow, "alpha");
     const double magnitude = jsonDouble(gragRow, "direction_magnitude");
-    const bool goalGrag = gragRow.value("goal_present", false);
+    const bool goalGrag = gragRow.is_object() && gragRow.value("goal_present", false);
     fail(report("TC-03", "grag scoring entry present", gragRow.is_object(),
                 "No grag/rag_hybrid entry in grag_benchmark.jsonl"));
     if (devTier) {
