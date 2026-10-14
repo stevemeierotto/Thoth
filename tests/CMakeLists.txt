@@ -13,6 +13,19 @@ set_tests_properties(test-suite-dev PROPERTIES
 
 # Core unit tests — no wxWidgets; always built when tests/ is in the graph.
 find_package(Threads REQUIRED)
+
+# Opt-in E2E reliability harness. Intentionally not registered with add_test,
+# so default CTest runs do not execute it.
+add_executable(thoth-reliability-harness reliability_harness.cpp)
+target_compile_definitions(thoth-reliability-harness PRIVATE
+    THOTH_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_include_directories(thoth-reliability-harness PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-reliability-harness PRIVATE basic_agent Threads::Threads)
+
 add_executable(thoth-core-tests unit_tests.cpp)
 target_compile_definitions(thoth-core-tests PRIVATE THOTH_HAS_GUI=0)
 target_include_directories(thoth-core-tests PRIVATE

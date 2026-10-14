@@ -1,6 +1,18 @@
 # Completed Improvements Log
 
-Last updated: 2026-10-14 (full-tier headless TEST_SUITE)
+Last updated: 2026-10-14 (live reliability sequence)
+
+## 2026-10-14 — Live reliability sequence verified
+
+October 14, 2026 — Opt-in harness `thoth-reliability-harness` ran RL-01, RL-02, RL-04, and RL-03 once against live llama.cpp. It is not registered with CTest. Supervisor exit 0. Runtime 61 seconds (`2026-10-14T10:25:36-08:00` to `2026-10-14T10:26:37-08:00`). Disposable evidence remains under `/tmp/thoth-e2e-reliability-d4015efe36d129ae575361fe94abc1acd666862c/integrated` and was not committed. DEV `agent_workspace` files and sealed E2/C6 artifacts were not modified.
+
+**Results:** RL-01 controlled failure handling PASS (`PLAN_FAILED` after a refused chat connection and bounded reflection). RL-02 completed-step resume PASS (same plan id, the successful retrieval was not repeated, live synthesis, `PLAN_COMPLETED`). RL-04 completed-session persistence PASS (no new plan or step). RL-03 interrupted retrieval recovery PASS (`recovery_verified`: crash at a committed `RUNNING` retrieval, same plan id, step persisted as `PENDING`, one retrieval after restart, live synthesis, no reflection or replacement plan, `PLAN_COMPLETED`).
+
+**Inference:** Chat `http://172.18.0.3:8080` (`/models/chat.gguf`, llama.cpp `b9994-14d3ba45f`). Embed `http://172.18.0.2:8081` (`/models/nomic-embed-text.gguf`) with `THOTH_EMBED_STRICT=1`. RL-02 synthesis `elapsed_ms` 4588 and RL-03 synthesis `elapsed_ms` 4537, both `provider_ok` and `finish_reason` stop. RL-01 used `http://127.0.0.1:1` and recorded connection refusal.
+
+**Recovery limits:** Resume requeues an orphaned ordinary read-only `RUNNING` retrieval on an unfinished plan. An interrupted LLM, tool, node, or tool-named retrieval fails the plan closed and does not start the loop. The guard does not change live dispatch. The terminal-plan guard for `COMPLETED`, `FAILED`, and `ABORTED` passed the non-live self-check after this integrated run. The live sequence was not rerun after that guard.
+
+**Observability:** RL-04 replaces `rl-02/reliability_resume_result.json` with the idle result; RL-02 completion remains in the resume event log and SQLite. `PLAN_CREATED` is emitted from the pre-resume plan snapshot, so that event can still show `RUNNING`. The RL-03 judge uses `STATE_CHANGED` and the persisted status.
 
 ## 2026-10-14 — Full-tier headless TEST_SUITE passed
 
