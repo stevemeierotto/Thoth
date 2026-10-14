@@ -194,6 +194,90 @@ static bool testConfigRoundTrip() {
     return ok;
 }
 
+static std::string readFileBytes(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
+
+static bool testG1eTrajectoryDefault() {
+    Config created;
+    if (created.wt != -0.05f) {
+        std::cerr << "testG1eTrajectoryDefault: new Config wt is " << created.wt << "\n";
+        return false;
+    }
+
+    const fs::path freshPath = makeTempPath("thoth_g1e_fresh_retrieval.json");
+    const fs::path existingPath = makeTempPath("thoth_g1e_existing_retrieval.json");
+    std::error_code cleanupError;
+    auto cleanup = [&]() {
+        fs::remove(freshPath, cleanupError);
+        fs::remove(existingPath, cleanupError);
+    };
+
+    if (!created.saveRetrievalConfig(freshPath.string())) {
+        std::cerr << "testG1eTrajectoryDefault: failed to save fresh retrieval config\n";
+        cleanup();
+        return false;
+    }
+
+    float savedTrajectory = 0.0f;
+    bool parsed = false;
+    try {
+        std::ifstream freshFile(freshPath);
+        json fresh = json::parse(freshFile);
+        savedTrajectory = fresh.at("retrieval_weights").at("trajectory").get<float>();
+        parsed = true;
+    } catch (const std::exception& ex) {
+        std::cerr << "testG1eTrajectoryDefault: fresh file parse failed: " << ex.what() << "\n";
+    }
+    if (!parsed || std::fabs(savedTrajectory - (-0.05f)) > 1e-6f) {
+        std::cerr << "testG1eTrajectoryDefault: saved trajectory is " << savedTrajectory << "\n";
+        cleanup();
+        return false;
+    }
+
+    const std::string existingBytes =
+        "{\n"
+        "    \"retrieval_weights\": {\n"
+        "        \"query\": 0.4,\n"
+        "        \"direction\": 0.4,\n"
+        "        \"trajectory\": 0.2,\n"
+        "        \"keyword\": 0.3\n"
+        "    }\n"
+        "}\n";
+    {
+        std::ofstream existingFile(existingPath, std::ios::binary);
+        if (!existingFile) {
+            std::cerr << "testG1eTrajectoryDefault: failed to write existing retrieval config\n";
+            cleanup();
+            return false;
+        }
+        existingFile << existingBytes;
+    }
+
+    Config loaded;
+    if (!loaded.loadRetrievalConfig(existingPath.string())) {
+        std::cerr << "testG1eTrajectoryDefault: failed to load existing retrieval config\n";
+        cleanup();
+        return false;
+    }
+    if (std::fabs(loaded.wt - 0.2f) > 1e-6f) {
+        std::cerr << "testG1eTrajectoryDefault: loaded wt is " << loaded.wt << "\n";
+        cleanup();
+        return false;
+    }
+    if (readFileBytes(existingPath) != existingBytes) {
+        std::cerr << "testG1eTrajectoryDefault: load modified the existing file\n";
+        cleanup();
+        return false;
+    }
+
+    cleanup();
+    return true;
+}
+
 class ScopedEnvVar {
 public:
     ScopedEnvVar(const char* key, const char* value) : key_(key) {
@@ -23673,6 +23757,15 @@ int main() {
         }
     }
 
+    if (const char* g1eDefault = std::getenv("THOTH_G1E_WT_DEFAULT_TEST")) {
+        if (std::string(g1eDefault) == "1") {
+            const bool ok = testG1eTrajectoryDefault();
+            std::cout << (ok ? "G1e trajectory default test passed.\n"
+                             : "G1e trajectory default test failed.\n");
+            return ok ? 0 : 1;
+        }
+    }
+
     if (const char* planSchema = std::getenv("THOTH_PLAN_SCHEMA_TESTS")) {
         if (std::string(planSchema) == "1") {
             const bool ok = testPlanParser() && testPlanLlmFacingRevisionBoundary()
@@ -24076,6 +24169,7 @@ int main() {
     if (!testEngineHttpSseRouteAndReady()) failures++;
     if (!testEngineHttpGracefulShutdown()) failures++;
     if (!testConfigRoundTrip()) failures++;
+    if (!testG1eTrajectoryDefault()) failures++;
     if (!testInferenceEndpointResolution()) failures++;
     if (!testInferenceBackendMisconfigDetection()) failures++;
     if (!testEmbeddingProbeJsonShape()) failures++;
