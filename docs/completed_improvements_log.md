@@ -1,6 +1,12 @@
 # Completed Improvements Log
 
-Last updated: 2026-09-30 (production timeout causal chain)
+Last updated: 2026-10-14 (full-tier headless TEST_SUITE)
+
+## 2026-10-14 — Full-tier headless TEST_SUITE passed
+
+October 14, 2026 — Full-tier TC-01–TC-07 passed with live llama.cpp inference, session-owned RAG fixtures, isolated workspace, and effective trajectory weight +0.20.
+
+**Status:** Pass. `./build/debug/tests/run_test_suite --full` exit 0 on `e173498538a9fb462a075d9575073469459cef66`. Workspace `/tmp/thoth-e2e-suite-e173498`. Chat `http://172.18.0.3:8080`. Embed `http://172.18.0.2:8081`. The DEV `agent_workspace/retrieval_config.json` was not copied and was not modified. No C6.4 window was opened. TC-03 recorded `alpha=1.0` and `direction_magnitude=0.6451790928840637`. The plugin created the disposable `retrieval_config.json` from `Config::Config()`, which initializes `wt(0.2f)`.
 
 ## 2026-09-30 — Production tool timeout → terminal failure verified
 
