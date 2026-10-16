@@ -322,9 +322,20 @@ static bool testMtcpRevisionWrapperStable() {
         std::cerr << "mtcp revise_plan changed frozen input timestamps\n";
         return false;
     }
-    if (hash_512.empty() || hash_512 != hash_2048 || hash_512 != Thoth::sha256Hex(
-            prompts->buildRevisionPrompt(plan.goal, plan.to_json().dump(), failed.dump(), nullptr))) {
+    const std::string facingDigest = Thoth::sha256Hex(prompts->buildRevisionPrompt(
+        plan.goal, plan.toLlmFacingJson().dump(), failed.dump(), nullptr));
+    const std::string runtimeDigest = Thoth::sha256Hex(prompts->buildRevisionPrompt(
+        plan.goal, plan.to_json().dump(), failed.dump(), nullptr));
+    if (hash_512.empty() || hash_2048.empty() || hash_512 != hash_2048) {
         std::cerr << "mtcp wrapper hash not stable across ceilings\n";
+        return false;
+    }
+    if (hash_512 != facingDigest) {
+        std::cerr << "mtcp wrapper hash does not match the LLM-facing revision prompt\n";
+        return false;
+    }
+    if (hash_512 == runtimeDigest) {
+        std::cerr << "mtcp wrapper hash matched runtime to_json instead of toLlmFacingJson\n";
         return false;
     }
     return true;

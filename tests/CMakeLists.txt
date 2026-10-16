@@ -26,6 +26,17 @@ target_include_directories(thoth-reliability-harness PRIVATE
 )
 target_link_libraries(thoth-reliability-harness PRIVATE basic_agent Threads::Threads)
 
+# Opt-in graph-recovery process campaign. Not registered with CTest.
+add_executable(thoth-graph-recovery-e2e graph_recovery_e2e.cpp)
+target_compile_definitions(thoth-graph-recovery-e2e PRIVATE
+    THOTH_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_include_directories(thoth-graph-recovery-e2e PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-graph-recovery-e2e PRIVATE basic_agent sqlite3 Threads::Threads)
+
 add_executable(thoth-core-tests unit_tests.cpp)
 target_compile_definitions(thoth-core-tests PRIVATE THOTH_HAS_GUI=0)
 target_include_directories(thoth-core-tests PRIVATE

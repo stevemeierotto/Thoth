@@ -37,6 +37,7 @@
 #include "command_processor.h"
 #include "config.h"
 #include "embedding_engine.h"
+#include "graph_refiner.h"
 #include "plan_reuse_config.h"
 #include "file_handler.h"
 #include "inference_endpoint.h"
@@ -23710,9 +23711,1190 @@ static bool testLocalNoteSlotDeleteButtonGeometry() {
 }
 #endif
 
+namespace Thoth {
+struct ExecutiveControllerP0TestAccess {
+    static void pushSet(Thoth::ExecutiveController& controller,
+                        const std::string& stepId,
+                        const std::string& hash) {
+        Thoth::ExecutiveController::ActiveStepSet set;
+        set.step_id = stepId;
+        set.chunk_hashes.push_back(hash);
+        controller.active_sets_.push_back(std::move(set));
+    }
+
+    static std::size_t setCount(const Thoth::ExecutiveController& controller) {
+        return controller.active_sets_.size();
+    }
+
+    static void armFinishedPlan(Thoth::ExecutiveController& controller,
+                                const std::string& planId,
+                                bool stepSucceeded,
+                                const std::string& trajectoryError) {
+        Plan plan;
+        plan.plan_id = planId;
+        plan.goal = "p0 goal " + planId;
+        plan.status = PlanStatus::ACTIVE;
+        plan.created_at_ms = 1;
+        PlanStep step;
+        step.step_id = planId + "-step";
+        step.description = "finished step";
+        step.type = StepType::LLM;
+        step.status = stepSucceeded ? StepStatus::SUCCESS : StepStatus::FAILED;
+        plan.steps.push_back(step);
+
+        controller.state_ = Thoth::ControllerState::IDLE;
+        controller.current_plan_ = std::move(plan);
+        controller.current_trajectory_ = Thoth::Trajectory();
+        controller.current_trajectory_.trajectory_id = "traj-" + planId;
+        controller.current_trajectory_.goal = "p0 goal " + planId;
+        controller.reflection_count_ = 0;
+        controller.revisions_count_ = 0;
+        if (!trajectoryError.empty()) {
+            Thoth::RecordedStep recorded;
+            recorded.step_id = planId + "-step";
+            recorded.error = trajectoryError;
+            controller.current_trajectory_.steps.push_back(recorded);
+        }
+    }
+
+    static void decide(Thoth::ExecutiveController& controller) {
+        controller.decide_transition();
+    }
+
+    static void reinforce(Thoth::ExecutiveController& controller) {
+        controller.reinforce_plan_graph();
+    }
+
+    static float score(Thoth::ExecutiveController& controller, bool succeeded) {
+        return controller.calculate_trajectory_score(succeeded);
+    }
+
+    static void setRevisions(Thoth::ExecutiveController& controller, int count) {
+        controller.revisions_count_ = count;
+    }
+
+    static void clearSteps(Thoth::ExecutiveController& controller) {
+        controller.current_plan_.steps.clear();
+    }
+
+    static void armRetrievalStep(Thoth::ExecutiveController& controller,
+                                 const std::string& planId,
+                                 const std::string& stepId) {
+        Plan plan;
+        plan.plan_id = planId;
+        plan.goal = "r1 malformed diagnostics";
+        plan.status = PlanStatus::ACTIVE;
+        PlanStep step;
+        step.step_id = stepId;
+        step.description = "retrieve";
+        step.type = StepType::RETRIEVAL;
+        step.status = StepStatus::PENDING;
+        plan.steps.push_back(step);
+        controller.state_ = Thoth::ControllerState::EXECUTING_STEP;
+        controller.current_plan_ = std::move(plan);
+        controller.active_sets_.clear();
+    }
+
+    static void completeStep(Thoth::ExecutiveController& controller,
+                             const Thoth::StepResult& result) {
+        controller.handle_step_completion(result);
+    }
+
+    static void bindOwner(Thoth::ExecutiveController& controller, const std::string& planId) {
+        controller.bind_active_sets_to_plan_unlocked(planId);
+    }
+
+    static void persist(Thoth::ExecutiveController& controller) {
+        controller.persist_current_plan_unlocked();
+    }
+
+    static void adopt(Thoth::ExecutiveController& controller, const Plan& plan) {
+        controller.current_plan_ = plan;
+        controller.adopt_resumed_retrieval_sets_unlocked();
+    }
+
+    static Plan currentPlan(const Thoth::ExecutiveController& controller) {
+        return controller.current_plan_;
+    }
+};
+} // namespace Thoth
+
+class P0LivePlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "p0-live";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        PlanStep step;
+        step.step_id = "p0-live-step";
+        step.description = "synthesize";
+        step.type = StepType::LLM;
+        step.payload = {{"prompt", "test"}};
+        plan.steps.push_back(step);
+        return plan;
+    }
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+class P0TimeoutPlanner : public IPlanner {
+public:
+    int calls = 0;
+    Plan create_plan(const std::string& goal) override {
+        ++calls;
+        Plan plan;
+        plan.plan_id = "p0-timeout";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        PlanStep step;
+        step.step_id = "timeout-step";
+        step.description = "timed step";
+        step.type = StepType::LLM;
+        step.payload = {{"prompt", "test"}};
+        plan.steps.push_back(step);
+        return plan;
+    }
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+class P0CountingPlanner : public IPlanner {
+public:
+    int calls = 0;
+    Plan create_plan(const std::string& goal) override {
+        ++calls;
+        Plan plan;
+        plan.plan_id = "p0-should-not-replan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        return plan;
+    }
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+struct P0EnvFlag {
+    const char* key;
+    bool had = false;
+    std::string previous;
+    P0EnvFlag(const char* name, const char* value) : key(name) {
+        if (const char* current = std::getenv(name)) {
+            had = true;
+            previous = current;
+        }
+        setenv(name, value, 1);
+    }
+    ~P0EnvFlag() {
+        if (had) {
+            setenv(key, previous.c_str(), 1);
+        } else {
+            unsetenv(key);
+        }
+    }
+};
+
+struct P0Harness {
+    fs::path workspace;
+    WorkspaceEnvGuard guard;
+    Config cfg;
+    std::shared_ptr<Memory> memory;
+    std::shared_ptr<RAGPipeline> rag;
+    std::shared_ptr<ToolRegistry> registry;
+    std::unique_ptr<Thoth::ExecutiveController> controller;
+
+    P0Harness(const std::string& name, std::shared_ptr<IPlanner> planner)
+        : workspace(makeTempPath(name + "_ws")),
+          guard(workspace.string()) {
+        fs::create_directories(workspace);
+        cfg.database_path = (workspace / "memory.db").string();
+        memory = std::make_shared<Memory>(cfg);
+        auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+        auto* index = new IndexManager(engine.get());
+        rag = std::make_shared<RAGPipeline>(std::move(engine), index);
+        registry = std::make_shared<ToolRegistry>();
+        controller = std::make_unique<Thoth::ExecutiveController>(planner, registry, rag, memory);
+    }
+
+    ~P0Harness() {
+        controller.reset();
+        std::error_code ignored;
+        fs::remove_all(workspace, ignored);
+    }
+};
+
+static bool p0WaitTerminal(Thoth::ExecutiveController& controller) {
+    for (int spin = 0; spin < 100; ++spin) {
+        const auto state = controller.get_state();
+        if (state == Thoth::ControllerState::COMPLETED ||
+            state == Thoth::ControllerState::FAILED ||
+            state == Thoth::ControllerState::ABORTED) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
+static bool testP0TerminalStatus() {
+    {
+        P0EnvFlag mockLlm("THOTH_MOCK_LLM", "1");
+        P0Harness harness("p0_status_ok", std::make_shared<P0LivePlanner>());
+        harness.controller->execute_goal("p0 successful goal");
+        if (!p0WaitTerminal(*harness.controller)) {
+            std::cerr << "testP0TerminalStatus: success goal did not finish\n";
+            return false;
+        }
+        if (harness.controller->get_state() != Thoth::ControllerState::COMPLETED) {
+            std::cerr << "testP0TerminalStatus: expected controller COMPLETED\n";
+            return false;
+        }
+        const Plan plan = harness.controller->get_current_plan();
+        if (plan.status != PlanStatus::COMPLETED) {
+            std::cerr << "testP0TerminalStatus: expected PlanStatus::COMPLETED, got "
+                      << static_cast<int>(plan.status) << "\n";
+            return false;
+        }
+        auto stored = harness.memory->loadTrajectory("traj-p0-live");
+        if (!stored || std::abs(stored->success_score - 1.0f) > 1e-5f) {
+            std::cerr << "testP0TerminalStatus: stored success_score was not 1\n";
+            return false;
+        }
+        const auto trajectory = nlohmann::json::parse(stored->trajectory_json);
+        if (trajectory.value("final_status", -1) != static_cast<int>(PlanStatus::COMPLETED)) {
+            std::cerr << "testP0TerminalStatus: trajectory final_status was not COMPLETED\n";
+            return false;
+        }
+    }
+
+    {
+        P0EnvFlag mockTimeout("THOTH_MOCK_STEP_TIMEOUT", "1");
+        auto planner = std::make_shared<P0TimeoutPlanner>();
+        P0Harness harness("p0_status_timeout", planner);
+        harness.controller->execute_goal("p0 timeout goal");
+        if (!p0WaitTerminal(*harness.controller)) {
+            std::cerr << "testP0TerminalStatus: timeout goal did not finish\n";
+            return false;
+        }
+        if (harness.controller->get_state() != Thoth::ControllerState::FAILED) {
+            std::cerr << "testP0TerminalStatus: timeout should finish FAILED, not "
+                      << static_cast<int>(harness.controller->get_state()) << "\n";
+            return false;
+        }
+        if (harness.controller->get_current_plan().status != PlanStatus::FAILED) {
+            std::cerr << "testP0TerminalStatus: timeout PlanStatus was not FAILED\n";
+            return false;
+        }
+        if (planner->calls != 1) {
+            std::cerr << "testP0TerminalStatus: timeout replanned (calls=" << planner->calls << ")\n";
+            return false;
+        }
+    }
+
+    {
+        auto planner = std::make_shared<P0CountingPlanner>();
+        P0Harness harness("p0_status_abort", planner);
+        Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(*harness.controller, "p0-abort", true, "");
+        Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "left", "hash-abort-a");
+        harness.controller->abort();
+        if (harness.controller->get_state() != Thoth::ControllerState::ABORTED) {
+            std::cerr << "testP0TerminalStatus: abort did not set controller ABORTED\n";
+            return false;
+        }
+        if (harness.controller->get_current_plan().status != PlanStatus::ABORTED) {
+            std::cerr << "testP0TerminalStatus: abort PlanStatus was not ABORTED\n";
+            return false;
+        }
+        if (Thoth::ExecutiveControllerP0TestAccess::setCount(*harness.controller) != 0) {
+            std::cerr << "testP0TerminalStatus: abort left retrieval sets behind\n";
+            return false;
+        }
+        if (planner->calls != 0) {
+            std::cerr << "testP0TerminalStatus: abort invoked the planner\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool testP0GraphPolarity() {
+    auto successPlanner = std::make_shared<P0CountingPlanner>();
+    P0Harness success("p0_graph_reward", successPlanner);
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(*success.controller, "p0-reward", true, "");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*success.controller, "r1", "hash-reward-from");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*success.controller, "r2", "hash-reward-to");
+    Thoth::ExecutiveControllerP0TestAccess::decide(*success.controller);
+    if (success.controller->get_state() != Thoth::ControllerState::COMPLETED ||
+        success.controller->get_current_plan().status != PlanStatus::COMPLETED) {
+        std::cerr << "testP0GraphPolarity: reward case did not complete\n";
+        return false;
+    }
+    const auto rewarded = success.memory->getEdgesFrom("hash-reward-from");
+    if (rewarded.size() != 1 || rewarded.front().to_id != "hash-reward-to" ||
+        rewarded.front().success_count != 1 || rewarded.front().failure_count != 0 ||
+        rewarded.front().weight <= 0.1f) {
+        std::cerr << "testP0GraphPolarity: successful goal did not reward the edge\n";
+        return false;
+    }
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*success.controller) != 0) {
+        std::cerr << "testP0GraphPolarity: success left retrieval sets behind\n";
+        return false;
+    }
+
+    auto failPlanner = std::make_shared<P0CountingPlanner>();
+    P0Harness failure("p0_graph_penalty", failPlanner);
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(
+        *failure.controller, "p0-penalty", false, "Step execution timed out after 30ms");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*failure.controller, "f1", "hash-fail-from");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*failure.controller, "f2", "hash-fail-to");
+    Thoth::ExecutiveControllerP0TestAccess::decide(*failure.controller);
+    if (failure.controller->get_state() != Thoth::ControllerState::FAILED ||
+        failure.controller->get_current_plan().status != PlanStatus::FAILED) {
+        std::cerr << "testP0GraphPolarity: failure case did not fail closed\n";
+        return false;
+    }
+    if (failPlanner->calls != 0) {
+        std::cerr << "testP0GraphPolarity: timeout failure triggered reflection\n";
+        return false;
+    }
+    const auto penalized = failure.memory->getEdgesFrom("hash-fail-from");
+    if (penalized.size() != 1 || penalized.front().success_count != 0 ||
+        penalized.front().failure_count != 1 || penalized.front().weight >= 0.1f) {
+        std::cerr << "testP0GraphPolarity: failed goal received successful reinforcement\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testP0RetrievalSetIsolation() {
+    auto planner = std::make_shared<P0CountingPlanner>();
+    P0Harness harness("p0_isolation", planner);
+
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(*harness.controller, "p0-one-set", true, "");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "only", "hash-stale");
+    Thoth::ExecutiveControllerP0TestAccess::reinforce(*harness.controller);
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*harness.controller) != 0) {
+        std::cerr << "testP0RetrievalSetIsolation: early reinforce kept a single set\n";
+        return false;
+    }
+    if (!harness.memory->getEdgesFrom("hash-stale").empty()) {
+        std::cerr << "testP0RetrievalSetIsolation: early reinforce wrote an edge\n";
+        return false;
+    }
+
+    P0EnvFlag mockLlm("THOTH_MOCK_LLM", "1");
+    auto livePlanner = std::make_shared<P0LivePlanner>();
+    P0Harness live("p0_isolation_live", livePlanner);
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*live.controller, "old-1", "hash-goal1-a");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*live.controller, "old-2", "hash-goal1-b");
+    live.controller->execute_goal("p0 second goal");
+    if (!p0WaitTerminal(*live.controller) ||
+        live.controller->get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testP0RetrievalSetIsolation: second goal did not complete\n";
+        return false;
+    }
+    if (!live.memory->getEdgesFrom("hash-goal1-a").empty()) {
+        std::cerr << "testP0RetrievalSetIsolation: goal 2 reinforced goal 1 chunk sets\n";
+        return false;
+    }
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*live.controller) != 0) {
+        std::cerr << "testP0RetrievalSetIsolation: completed goal kept retrieval sets\n";
+        return false;
+    }
+
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(*harness.controller, "p0-after-abort", false, "");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "a", "hash-abort-left");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "b", "hash-abort-right");
+    harness.controller->abort();
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*harness.controller) != 0) {
+        std::cerr << "testP0RetrievalSetIsolation: abort kept retrieval sets\n";
+        return false;
+    }
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(
+        *harness.controller, "p0-after-abort-next", false, "Step execution timed out after 5ms");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "next", "hash-next-only");
+    Thoth::ExecutiveControllerP0TestAccess::decide(*harness.controller);
+    if (!harness.memory->getEdgesFrom("hash-abort-left").empty() ||
+        !harness.memory->getEdgesFrom("hash-next-only").empty()) {
+        std::cerr << "testP0RetrievalSetIsolation: later goal linked aborted or single-set hashes\n";
+        return false;
+    }
+    return true;
+}
+
+class R1RetrievalPlanner : public IPlanner {
+public:
+    int retrievalSteps = 1;
+    int calls = 0;
+    bool narrowAfterFirst = false;
+    std::string planId = "r1-plan";
+    Plan create_plan(const std::string& goal) override {
+        ++calls;
+        const int stepsThisCall = (narrowAfterFirst && calls > 1) ? 1 : retrievalSteps;
+        Plan plan;
+        plan.plan_id = planId + "-" + std::to_string(calls);
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        for (int i = 0; i < stepsThisCall; ++i) {
+            PlanStep step;
+            step.step_id = planId + "-ret-" + std::to_string(i);
+            step.description = "retrieve";
+            step.type = StepType::RETRIEVAL;
+            const char* query = (i == 0)
+                ? "alpha zebra quartz unique marker"
+                : "beta walrus marble unique marker";
+            step.payload = {{"query", query}, {"top_k", 1}};
+            plan.steps.push_back(step);
+        }
+        PlanStep llm;
+        llm.step_id = planId + "-llm";
+        llm.description = "synthesize";
+        llm.type = StepType::LLM;
+        llm.payload = {{"prompt", "test"}};
+        plan.steps.push_back(llm);
+        return plan;
+    }
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+static void r1SeedDisjointChunks(P0Harness& harness) {
+    const char* texts[] = {
+        "alpha zebra quartz unique marker",
+        "beta walrus marble unique marker"
+    };
+    const char* files[] = {"alpha.txt", "beta.txt"};
+    const char* symbols[] = {"alpha", "beta"};
+    const std::string session = harness.memory->getActiveSessionId();
+    IndexManager* index = harness.rag->getIndexManager();
+    for (int i = 0; i < 2; ++i) {
+        harness.rag->engine->updateVocabulary(texts[i]);
+    }
+    for (int i = 0; i < 2; ++i) {
+        const fs::path path = fs::absolute(harness.workspace / files[i]).lexically_normal();
+        index->registerAttachmentOwner(path.string(), session);
+        CodeChunk chunk;
+        chunk.fileName = path.string();
+        chunk.symbolName = symbols[i];
+        chunk.code = texts[i];
+        chunk.embedding = harness.rag->engine->embed(texts[i]);
+        index->addChunkToIndex(std::move(chunk));
+    }
+}
+
+static bool r1DiagnosticsCarryChunk(const nlohmann::json& result, const std::string& marker) {
+    if (!result.contains("diagnostics") || !result["diagnostics"].contains("breakdowns") ||
+        !result["diagnostics"]["breakdowns"].is_array()) {
+        return false;
+    }
+    if (!result.contains("grag_routing_mode") || !result.contains("grag_alpha")) {
+        return false;
+    }
+    for (const auto& breakdown : result["diagnostics"]["breakdowns"]) {
+        const std::string code = breakdown.value("code_text", "");
+        if (code.find(marker) != std::string::npos && breakdown.contains("final_score") &&
+            breakdown.contains("file_name") && breakdown.contains("symbol")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int r1EdgeCount(Memory& memory, const std::string& fromHash) {
+    return static_cast<int>(memory.getEdgesFrom(fromHash).size());
+}
+
+static bool testR1RetrievalDiagnosticsReachGraph() {
+    P0EnvFlag mockLlm("THOTH_MOCK_LLM", "1");
+    const std::string alpha = "alpha zebra quartz unique marker";
+    const std::string beta = "beta walrus marble unique marker";
+    const std::string alphaHash = Memory::calculateContentHash(alpha);
+    const std::string betaHash = Memory::calculateContentHash(beta);
+
+    auto twoPlanner = std::make_shared<R1RetrievalPlanner>();
+    twoPlanner->retrievalSteps = 2;
+    twoPlanner->narrowAfterFirst = true;
+    twoPlanner->planId = "r1-two";
+    P0Harness two("r1_two", twoPlanner);
+    r1SeedDisjointChunks(two);
+
+    Thoth::WorkflowEngine workflow(two.registry, two.rag, two.memory, nullptr, nullptr);
+    PlanStep probe;
+    probe.step_id = "r1-probe";
+    probe.type = StepType::RETRIEVAL;
+    probe.description = "retrieve alpha";
+    probe.payload = {{"query", alpha}, {"top_k", 1}};
+    const Thoth::StepResult probed = workflow.executeStep(probe, "r1-probe-plan");
+    if (!probed.success || !r1DiagnosticsCarryChunk(probed.data, "alpha zebra quartz")) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: retrieval result lacked diagnostics\n";
+        return false;
+    }
+    if (!probed.data.contains("data") || !probed.data["data"].contains("chunks") ||
+        probed.data.value("retrieved_chunk_count", 0) < 1) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: retrieval dropped chunk fields\n";
+        return false;
+    }
+
+    two.controller->execute_goal("summarize the retrieved notes");
+    if (!p0WaitTerminal(*two.controller) ||
+        two.controller->get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: two-retrieval goal did not complete\n";
+        return false;
+    }
+    const Plan finished = two.controller->get_current_plan();
+    if (finished.steps.size() < 2 ||
+        !r1DiagnosticsCarryChunk(finished.steps[0].result, "alpha zebra quartz") ||
+        !r1DiagnosticsCarryChunk(finished.steps[1].result, "beta walrus marble")) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: goal steps did not keep diagnostics\n";
+        return false;
+    }
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*two.controller) != 0) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: completed goal kept retrieval sets\n";
+        return false;
+    }
+    const auto rewarded = two.memory->getEdgesFrom(alphaHash);
+    if (rewarded.size() != 1 || rewarded.front().to_id != betaHash ||
+        rewarded.front().success_count != 1 || rewarded.front().failure_count != 0 ||
+        rewarded.front().weight <= 0.1f) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: two retrievals did not reinforce one edge\n";
+        return false;
+    }
+
+    two.controller->execute_goal("summarize one retrieved note");
+    if (!p0WaitTerminal(*two.controller) ||
+        two.controller->get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: later one-retrieval goal did not complete\n";
+        return false;
+    }
+    const auto afterLater = two.memory->getEdgesFrom(alphaHash);
+    if (afterLater.size() != 1 || afterLater.front().success_count != 1 ||
+        r1EdgeCount(*two.memory, betaHash) != 0) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: later goal inherited or rewrote retrieval sets\n";
+        return false;
+    }
+
+    auto alonePlanner = std::make_shared<R1RetrievalPlanner>();
+    alonePlanner->retrievalSteps = 1;
+    alonePlanner->planId = "r1-alone";
+    P0Harness alone("r1_one", alonePlanner);
+    r1SeedDisjointChunks(alone);
+    alone.controller->execute_goal("summarize one retrieved note");
+    if (!p0WaitTerminal(*alone.controller) ||
+        alone.controller->get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: single-retrieval goal did not complete\n";
+        return false;
+    }
+    if (!alone.memory->getEdgesFrom(alphaHash).empty() ||
+        !alone.memory->getEdgesFrom(betaHash).empty()) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: one retrieval wrote a graph edge\n";
+        return false;
+    }
+
+    Thoth::ExecutiveControllerP0TestAccess::armRetrievalStep(*two.controller, "r1-bad", "r1-bad-step");
+    Thoth::StepResult missing;
+    missing.step_id = "r1-bad-step";
+    missing.success = true;
+    missing.data = {{"status", "success"}, {"retrieved_chunk_count", 1}};
+    Thoth::ExecutiveControllerP0TestAccess::completeStep(*two.controller, missing);
+
+    Thoth::ExecutiveControllerP0TestAccess::armRetrievalStep(*two.controller, "r1-empty", "r1-empty-step");
+    Thoth::StepResult emptyCode;
+    emptyCode.step_id = "r1-empty-step";
+    emptyCode.success = true;
+    emptyCode.data = {{"status", "success"},
+                      {"diagnostics",
+                       {{"breakdowns", nlohmann::json::array({
+                            {{"code_text", ""}, {"final_score", 1.0}, {"file_name", "x"}, {"symbol", "y"}}
+                        })}}}};
+    Thoth::ExecutiveControllerP0TestAccess::completeStep(*two.controller, emptyCode);
+
+    Thoth::ExecutiveControllerP0TestAccess::armRetrievalStep(*two.controller, "r1-malformed", "r1-malformed-step");
+    Thoth::StepResult malformed;
+    malformed.step_id = "r1-malformed-step";
+    malformed.success = true;
+    malformed.data = {{"status", "success"}, {"diagnostics", "not-an-object"}};
+    Thoth::ExecutiveControllerP0TestAccess::completeStep(*two.controller, malformed);
+
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*two.controller) != 0 ||
+        two.memory->getEdgesFrom(alphaHash).size() != 1) {
+        std::cerr << "testR1RetrievalDiagnosticsReachGraph: malformed diagnostics fabricated reinforcement\n";
+        return false;
+    }
+    return true;
+}
+
+static bool r2Near(float actual, float expected) {
+    return std::fabs(actual - expected) <= 1e-4f;
+}
+
+static bool testR2AbsoluteEdgeCounters() {
+    auto planner = std::make_shared<P0CountingPlanner>();
+    P0Harness harness("r2_counts", planner);
+    Thoth::GraphRefiner refiner(harness.memory);
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    Memory::Edge created;
+    created.from_id = "r2-from";
+    created.to_id = "r2-to";
+    created.weight = 0.1f;
+    created.success_count = 0;
+    created.failure_count = 0;
+    created.last_used_ms = now;
+    refiner.refineFromTrajectory({created}, 1.0f);
+    auto stored = harness.memory->getEdgesFrom("r2-from");
+    if (stored.size() != 1 || stored.front().success_count != 1 || stored.front().failure_count != 0 ||
+        !r2Near(stored.front().weight, 0.28f)) {
+        std::cerr << "testR2AbsoluteEdgeCounters: new success was not stored once\n";
+        return false;
+    }
+    const float rewardedWeight = stored.front().weight;
+    harness.memory->processMemoryAging();
+    stored = harness.memory->getEdgesFrom("r2-from");
+    if (stored.size() != 1 || stored.front().success_count != 1 || stored.front().failure_count != 0 ||
+        !r2Near(stored.front().weight, rewardedWeight * 0.995f)) {
+        std::cerr << "testR2AbsoluteEdgeCounters: aging changed counters or skipped weight decay\n";
+        return false;
+    }
+    refiner.refineFromTrajectory(stored, 1.0f);
+    stored = harness.memory->getEdgesFrom("r2-from");
+    if (stored.size() != 1 || stored.front().success_count != 2 || stored.front().failure_count != 0) {
+        std::cerr << "testR2AbsoluteEdgeCounters: second success did not store exactly two\n";
+        return false;
+    }
+
+    Memory::Edge failed;
+    failed.from_id = "r2-fail-from";
+    failed.to_id = "r2-fail-to";
+    failed.weight = 0.1f;
+    failed.success_count = 0;
+    failed.failure_count = 0;
+    failed.last_used_ms = now;
+    refiner.refineFromTrajectory({failed}, 0.0f);
+    auto penalized = harness.memory->getEdgesFrom("r2-fail-from");
+    if (penalized.size() != 1 || penalized.front().success_count != 0 ||
+        penalized.front().failure_count != 1 || !r2Near(penalized.front().weight, 0.08f)) {
+        std::cerr << "testR2AbsoluteEdgeCounters: failure was not stored once\n";
+        return false;
+    }
+    const float penalizedWeight = penalized.front().weight;
+    harness.memory->processMemoryAging();
+    penalized = harness.memory->getEdgesFrom("r2-fail-from");
+    stored = harness.memory->getEdgesFrom("r2-from");
+    if (penalized.size() != 1 || penalized.front().failure_count != 1 || penalized.front().success_count != 0 ||
+        !r2Near(penalized.front().weight, penalizedWeight * 0.995f) ||
+        stored.size() != 1 || stored.front().success_count != 2) {
+        std::cerr << "testR2AbsoluteEdgeCounters: aging recounted a failure or a prior success\n";
+        return false;
+    }
+
+    Memory::Edge historical;
+    historical.from_id = "r2-hist-from";
+    historical.to_id = "r2-hist-to";
+    historical.weight = 0.4f;
+    historical.success_count = 4;
+    historical.failure_count = 1;
+    historical.last_used_ms = now;
+    harness.memory->addEdge(historical);
+    harness.memory->addEdge(historical);
+    auto history = harness.memory->getEdgesFrom("r2-hist-from");
+    if (history.size() != 1 || history.front().success_count != 4 || history.front().failure_count != 1 ||
+        !r2Near(history.front().weight, 0.4f)) {
+        std::cerr << "testR2AbsoluteEdgeCounters: absolute upsert multiplied historical counts\n";
+        return false;
+    }
+    refiner.refineFromTrajectory(history, 1.0f);
+    history = harness.memory->getEdgesFrom("r2-hist-from");
+    if (history.size() != 1 || history.front().success_count != 5 || history.front().failure_count != 1) {
+        std::cerr << "testR2AbsoluteEdgeCounters: existing-edge refine did not increment by one\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testP0TrajectoryScoreUnchanged() {
+    auto planner = std::make_shared<P0CountingPlanner>();
+    P0Harness harness("p0_score", planner);
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(*harness.controller, "p0-score", true, "");
+
+    Thoth::ExecutiveControllerP0TestAccess::clearSteps(*harness.controller);
+    if (Thoth::ExecutiveControllerP0TestAccess::score(*harness.controller, true) != 0.0f) {
+        std::cerr << "testP0TrajectoryScoreUnchanged: empty plan should score 0\n";
+        return false;
+    }
+
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(*harness.controller, "p0-score", true, "");
+    if (std::abs(Thoth::ExecutiveControllerP0TestAccess::score(*harness.controller, true) - 1.0f) > 1e-5f) {
+        std::cerr << "testP0TrajectoryScoreUnchanged: mechanical success should score 1\n";
+        return false;
+    }
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(
+        *harness.controller, "p0-score", true, "tool reported an error");
+    const float penalized = Thoth::ExecutiveControllerP0TestAccess::score(*harness.controller, true);
+    if (std::abs(penalized - 0.9f) > 1e-5f) {
+        std::cerr << "testP0TrajectoryScoreUnchanged: one recorded error should score 0.9, got "
+                  << penalized << "\n";
+        return false;
+    }
+    Thoth::ExecutiveControllerP0TestAccess::setRevisions(*harness.controller, 1);
+    const float revised = Thoth::ExecutiveControllerP0TestAccess::score(*harness.controller, true);
+    if (std::abs(revised - 1.0f) > 1e-5f) {
+        std::cerr << "testP0TrajectoryScoreUnchanged: success plus revision should clamp to 1, got "
+                  << revised << "\n";
+        return false;
+    }
+    const float failed = Thoth::ExecutiveControllerP0TestAccess::score(*harness.controller, false);
+    if (failed != 0.0f) {
+        std::cerr << "testP0TrajectoryScoreUnchanged: mechanical failure should score 0, got "
+                  << failed << "\n";
+        return false;
+    }
+
+    if (Thoth::PlanReuse::kMinSuccessScore != 0.6f ||
+        Thoth::PlanReuse::kSuccessBoostThreshold != 0.8f ||
+        Thoth::PlanReuse::kMinSimilarityFloor != 0.55f ||
+        Thoth::PlannerTrajectory::kMinSimilarityFloor != 0.55f ||
+        Thoth::PlannerInjection::kMinStrategySimilarity != 0.40f ||
+        Thoth::Reflection::kScoreThreshold != 0.6f) {
+        std::cerr << "testP0TrajectoryScoreUnchanged: retrieval or promotion floors changed\n";
+        return false;
+    }
+    return true;
+}
+
+class GraphRecoveryPlanner : public IPlanner {
+public:
+    int calls = 0;
+    Plan create_plan(const std::string& goal) override {
+        ++calls;
+        Plan plan;
+        plan.plan_id = "replacement-" + std::to_string(calls);
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        PlanStep step;
+        step.step_id = "replacement-step";
+        step.description = "synthesize";
+        step.type = StepType::LLM;
+        step.status = StepStatus::PENDING;
+        step.payload = {{"prompt", "test"}};
+        plan.steps.push_back(step);
+        return plan;
+    }
+    Plan revise_plan(const Plan& plan, const nlohmann::json&) override { return plan; }
+};
+
+static Plan finishedRetrievalPlan(const std::string& planId, bool reinforced) {
+    Plan plan;
+    plan.plan_id = planId;
+    plan.goal = "graph recovery " + planId;
+    plan.status = PlanStatus::ACTIVE;
+    plan.created_at_ms = 1;
+    plan.graph_reinforced = reinforced;
+    plan.history_aging_done = reinforced;
+    plan.retrieval_sets_present = true;
+    RetrievalSetRecord from;
+    from.step_id = "set-from";
+    from.chunk_hashes.push_back(planId + "-from");
+    RetrievalSetRecord to;
+    to.step_id = "set-to";
+    to.chunk_hashes.push_back(planId + "-to");
+    plan.retrieval_sets.push_back(from);
+    plan.retrieval_sets.push_back(to);
+    PlanStep step;
+    step.step_id = planId + "-step";
+    step.description = "finished";
+    step.type = StepType::LLM;
+    step.status = StepStatus::SUCCESS;
+    plan.steps.push_back(step);
+    return plan;
+}
+
+static bool testGraphRecoveryOwnershipAndRevision() {
+    auto planner = std::make_shared<P0CountingPlanner>();
+    P0Harness harness("graph_owner", planner);
+    harness.controller->set_session_id("graph-owner");
+
+    Plan owned = finishedRetrievalPlan("owned", false);
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "kept", "owned-from");
+    Thoth::ExecutiveControllerP0TestAccess::bindOwner(*harness.controller, "owned");
+    Thoth::ExecutiveControllerP0TestAccess::adopt(*harness.controller, owned);
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*harness.controller) != 1) {
+        std::cerr << "testGraphRecoveryOwnershipAndRevision: same-plan resume dropped sets\n";
+        return false;
+    }
+
+    Plan consumed = finishedRetrievalPlan("consumed-owner", true);
+    Thoth::ExecutiveControllerP0TestAccess::adopt(*harness.controller, consumed);
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*harness.controller) != 0) {
+        std::cerr << "testGraphRecoveryOwnershipAndRevision: another plan kept the previous sets\n";
+        return false;
+    }
+
+    Plan other = finishedRetrievalPlan("other", false);
+    Thoth::ExecutiveControllerP0TestAccess::adopt(*harness.controller, other);
+    if (Thoth::ExecutiveControllerP0TestAccess::setCount(*harness.controller) != 2) {
+        std::cerr << "testGraphRecoveryOwnershipAndRevision: unreinforced finished plan did not restore sets\n";
+        return false;
+    }
+
+    Plan revised = finishedRetrievalPlan("revised", false);
+    revised.steps[0].status = StepStatus::PENDING;
+    Thoth::ExecutiveControllerP0TestAccess::adopt(*harness.controller, revised);
+    Thoth::ExecutiveControllerP0TestAccess::bindOwner(*harness.controller, "revised");
+    Thoth::ExecutiveControllerP0TestAccess::persist(*harness.controller);
+    auto stored = harness.memory->getActivePlan("graph-owner");
+    if (!stored) {
+        std::cerr << "testGraphRecoveryOwnershipAndRevision: revised plan was not stored\n";
+        return false;
+    }
+    Plan roundTrip = Plan::from_json(nlohmann::json::parse(stored->steps_json));
+    roundTrip.steps[0].description = "revised description";
+    Thoth::ExecutiveControllerP0TestAccess::adopt(*harness.controller, roundTrip);
+    Thoth::ExecutiveControllerP0TestAccess::persist(*harness.controller);
+    stored = harness.memory->getActivePlan("graph-owner");
+    Plan afterRevision = Plan::from_json(nlohmann::json::parse(stored->steps_json));
+    if (!afterRevision.retrieval_sets_present || afterRevision.retrieval_sets.size() != 2 ||
+        afterRevision.steps[0].description != "revised description") {
+        std::cerr << "testGraphRecoveryOwnershipAndRevision: revision dropped retrieval sets\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testGraphRecoveryResumeAndDuplicate() {
+    auto planner = std::make_shared<GraphRecoveryPlanner>();
+    P0Harness harness("graph_resume", planner);
+    harness.controller->set_session_id("graph-resume");
+    const Plan openPlan = finishedRetrievalPlan("open-finished", false);
+    harness.controller->resume_from_plan(openPlan);
+    if (!p0WaitTerminal(*harness.controller) ||
+        harness.controller->get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testGraphRecoveryResumeAndDuplicate: unreinforced finished plan did not complete\n";
+        return false;
+    }
+    const auto rewarded = harness.memory->getEdgesFrom("open-finished-from");
+    if (rewarded.size() != 1 || rewarded.front().success_count != 1 ||
+        rewarded.front().failure_count != 0) {
+        std::cerr << "testGraphRecoveryResumeAndDuplicate: finished plan was not reinforced once\n";
+        return false;
+    }
+
+    Memory::Edge seeded;
+    seeded.from_id = "dup-from";
+    seeded.to_id = "dup-to";
+    seeded.weight = 0.5f;
+    seeded.success_count = 1;
+    seeded.failure_count = 0;
+    harness.memory->addEdge(seeded);
+    Plan consumed = finishedRetrievalPlan("consumed", true);
+    consumed.retrieval_sets[0].chunk_hashes = {"dup-from"};
+    consumed.retrieval_sets[1].chunk_hashes = {"dup-to"};
+    harness.controller->resume_from_plan(consumed);
+    if (!p0WaitTerminal(*harness.controller)) {
+        std::cerr << "testGraphRecoveryResumeAndDuplicate: consumed plan did not finish\n";
+        return false;
+    }
+    const auto duplicate = harness.memory->getEdgesFrom("dup-from");
+    if (duplicate.size() != 1 || duplicate.front().success_count != 1 ||
+        std::abs(duplicate.front().weight - 0.5f) > 1e-5f) {
+        std::cerr << "testGraphRecoveryResumeAndDuplicate: consumed plan reinforced again\n";
+        return false;
+    }
+
+    Plan legacy = finishedRetrievalPlan("legacy", false);
+    legacy.graph_reinforced = false;
+    legacy.history_aging_done = false;
+    legacy.retrieval_sets_present = false;
+    legacy.retrieval_sets.clear();
+    legacy.steps[0].type = StepType::RETRIEVAL;
+    legacy.steps[0].status = StepStatus::SUCCESS;
+    legacy.steps[0].result = {
+        {"diagnostics", {
+            {"breakdowns", nlohmann::json::array({
+                {{"final_score", 1.0}, {"code_text", "legacy-from-text"}, {"file_name", "a"}, {"symbol", "a"}},
+                {{"final_score", 1.0}, {"code_text", "legacy-to-text"}, {"file_name", "b"}, {"symbol", "b"}}
+            })}
+        }}
+    };
+    harness.controller->resume_from_plan(legacy);
+    if (!p0WaitTerminal(*harness.controller)) {
+        std::cerr << "testGraphRecoveryResumeAndDuplicate: legacy plan did not finish\n";
+        return false;
+    }
+    const std::string legacyHash = Memory::calculateContentHash("legacy-from-text");
+    if (!harness.memory->getEdgesFrom(legacyHash).empty()) {
+        std::cerr << "testGraphRecoveryResumeAndDuplicate: legacy finished plan reconstructed sets\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testGraphRecoveryReflectionAndFailures() {
+    auto planner = std::make_shared<GraphRecoveryPlanner>();
+    P0Harness harness("graph_reflect", planner);
+    harness.controller->set_session_id("graph-reflect");
+    {
+        P0EnvFlag inject("THOTH_INJECT_GRAPH_COMMIT_FAIL", "1");
+        Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(
+            *harness.controller, "rollback", true, "");
+        Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "a", "rollback-from");
+        Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "b", "rollback-to");
+        Thoth::ExecutiveControllerP0TestAccess::decide(*harness.controller);
+    }
+    if (harness.controller->get_state() == Thoth::ControllerState::COMPLETED ||
+        !harness.memory->getEdgesFrom("rollback-from").empty() ||
+        Thoth::ExecutiveControllerP0TestAccess::setCount(*harness.controller) != 2) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: failed graph commit was not rolled back\n";
+        return false;
+    }
+    Thoth::ExecutiveControllerP0TestAccess::decide(*harness.controller);
+    if (harness.controller->get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: retry after rollback did not complete\n";
+        return false;
+    }
+    const auto retried = harness.memory->getEdgesFrom("rollback-from");
+    if (retried.size() != 1 || retried.front().success_count != 1) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: retry did not reinforce once\n";
+        return false;
+    }
+
+    {
+        P0EnvFlag inject("THOTH_INJECT_AGING_COMMIT_FAIL", "1");
+        Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(
+            *harness.controller, "age-fail", true, "");
+        Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "a", "age-from");
+        Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "b", "age-to");
+        Thoth::ExecutiveControllerP0TestAccess::decide(*harness.controller);
+    }
+    const auto unaged = harness.memory->getEdgesFrom("age-from");
+    const float rewarded = 0.1f + 0.2f * (1.0f - 0.1f);
+    if (unaged.size() != 1 || unaged.front().success_count != 1 ||
+        std::abs(unaged.front().weight - rewarded) > 1e-4f) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: aging failure changed the committed edge\n";
+        return false;
+    }
+    Thoth::ExecutiveControllerP0TestAccess::decide(*harness.controller);
+    const auto aged = harness.memory->getEdgesFrom("age-from");
+    if (harness.controller->get_state() != Thoth::ControllerState::COMPLETED ||
+        aged.size() != 1 || aged.front().success_count != 1 ||
+        std::abs(aged.front().weight - rewarded * 0.995f) > 1e-4f) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: aging retry was not exactly once\n";
+        return false;
+    }
+
+    P0EnvFlag mockLlm("THOTH_MOCK_LLM", "1");
+    Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(
+        *harness.controller, "reflect", false, "");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "a", "reflect-from");
+    Thoth::ExecutiveControllerP0TestAccess::pushSet(*harness.controller, "b", "reflect-to");
+    {
+        P0EnvFlag inject("THOTH_INJECT_AGING_COMMIT_FAIL", "1");
+        Thoth::ExecutiveControllerP0TestAccess::decide(*harness.controller);
+    }
+    if (planner->calls != 0) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: reflection planned before aging committed\n";
+        return false;
+    }
+    auto pending = harness.memory->getActivePlan("graph-reflect");
+    if (!pending) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: reflection plan was not durable\n";
+        return false;
+    }
+    Plan pendingPlan = Plan::from_json(nlohmann::json::parse(pending->steps_json));
+    if (!pendingPlan.reflection_pending || pendingPlan.reflection_count != 1 ||
+        pendingPlan.status != PlanStatus::ACTIVE || !pendingPlan.graph_reinforced) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: reflection marker was not stored\n";
+        return false;
+    }
+    auto resumedPlanner = std::make_shared<GraphRecoveryPlanner>();
+    Thoth::ExecutiveController resumed(resumedPlanner, harness.registry, harness.rag, harness.memory);
+    resumed.set_session_id("graph-reflect");
+    resumed.resume_from_plan(pendingPlan);
+    if (!p0WaitTerminal(resumed) || resumed.get_state() != Thoth::ControllerState::COMPLETED) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: resumed reflection did not complete\n";
+        return false;
+    }
+    const auto penalized = harness.memory->getEdgesFrom("reflect-from");
+    if (resumedPlanner->calls != 1 || penalized.size() != 1 ||
+        penalized.front().failure_count != 1 || penalized.front().success_count != 0) {
+        std::cerr << "testGraphRecoveryReflectionAndFailures: reflection reinforced more than once\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testGraphRecoveryTransactionOwnership() {
+    auto planner = std::make_shared<P0CountingPlanner>();
+    P0Harness harness("graph_txn", planner);
+    auto* repo = harness.memory->getSQLiteRepo();
+    if (!repo || !repo->beginTransaction()) {
+        std::cerr << "testGraphRecoveryTransactionOwnership: begin failed\n";
+        return false;
+    }
+    Memory::Edge edge;
+    edge.from_id = "owner-from";
+    edge.to_id = "owner-to";
+    edge.weight = 0.4f;
+    edge.success_count = 3;
+    edge.failure_count = 1;
+    if (!repo->addEdge(edge)) {
+        repo->rollback();
+        std::cerr << "testGraphRecoveryTransactionOwnership: owner write failed\n";
+        return false;
+    }
+    if (repo->beginTransaction()) {
+        repo->rollback();
+        std::cerr << "testGraphRecoveryTransactionOwnership: nested begin was accepted\n";
+        return false;
+    }
+    std::atomic<bool> otherBegan{true};
+    std::atomic<bool> otherWrote{true};
+    std::thread intruder([&]() {
+        otherBegan = repo->beginTransaction();
+        Memory::Edge foreign;
+        foreign.from_id = "foreign-from";
+        foreign.to_id = "foreign-to";
+        foreign.weight = 0.2f;
+        otherWrote = repo->addEdge(foreign);
+    });
+    intruder.join();
+    if (otherBegan || otherWrote) {
+        repo->rollback();
+        std::cerr << "testGraphRecoveryTransactionOwnership: another thread joined the transaction\n";
+        return false;
+    }
+    if (!repo->commit()) {
+        std::cerr << "testGraphRecoveryTransactionOwnership: owner commit failed\n";
+        return false;
+    }
+    const auto kept = harness.memory->getEdgesFrom("owner-from");
+    if (kept.size() != 1 || kept.front().success_count != 3 ||
+        !harness.memory->getEdgesFrom("foreign-from").empty()) {
+        std::cerr << "testGraphRecoveryTransactionOwnership: commit did not preserve only the owner write\n";
+        return false;
+    }
+    return true;
+}
+
+static bool testGraphRecoveryFreshAgingResume() {
+    const fs::path workspace = makeTempPath("graph_fresh_aging_ws");
+    fs::create_directories(workspace);
+    WorkspaceEnvGuard guard(workspace.string());
+    Config cfg;
+    const std::string session = "fresh-aging";
+    const float committedWeight = 0.28f;
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    {
+        auto memory = std::make_shared<Memory>(cfg);
+        Memory::Edge edge;
+        edge.from_id = "fresh-from";
+        edge.to_id = "fresh-to";
+        edge.weight = committedWeight;
+        edge.success_count = 1;
+        edge.failure_count = 0;
+        edge.last_used_ms = now;
+        memory->addEdge(edge);
+
+        Plan plan = finishedRetrievalPlan("fresh-aging", true);
+        plan.status = PlanStatus::COMPLETED;
+        plan.history_aging_done = false;
+        plan.retrieval_sets.clear();
+        plan.retrieval_sets_present = true;
+        Thoth::MemoryRepository::ActivePlanRecord rec;
+        rec.plan_id = plan.plan_id;
+        rec.session_id = session;
+        rec.goal = plan.goal;
+        rec.steps_json = plan.to_json().dump();
+        rec.controller_state = "COMPLETED";
+        rec.created_at_ms = 1;
+        rec.updated_at_ms = 1;
+        if (!memory->storeActivePlan(rec)) {
+            std::cerr << "testGraphRecoveryFreshAgingResume: failed to store the interrupted plan\n";
+            return false;
+        }
+    }
+
+    {
+        auto memory = std::make_shared<Memory>(cfg);
+        auto loaded = memory->getActivePlan(session);
+        if (!loaded) {
+            std::cerr << "testGraphRecoveryFreshAgingResume: fresh memory did not load the plan\n";
+            return false;
+        }
+        Plan plan = Plan::from_json(nlohmann::json::parse(loaded->steps_json));
+        if (!plan.graph_reinforced || plan.history_aging_done) {
+            std::cerr << "testGraphRecoveryFreshAgingResume: persisted aging marker was wrong\n";
+            return false;
+        }
+        auto planner = std::make_shared<P0CountingPlanner>();
+        auto registry = std::make_shared<ToolRegistry>();
+        Thoth::ExecutiveController resumed(planner, registry, nullptr, memory);
+        resumed.set_session_id(session);
+        resumed.resume_from_plan(plan);
+        const auto aged = memory->getEdgesFrom("fresh-from");
+        if (aged.size() != 1 || aged.front().success_count != 1 ||
+            std::abs(aged.front().weight - committedWeight * 0.995f) > 1e-4f) {
+            std::cerr << "testGraphRecoveryFreshAgingResume: fresh resume did not age exactly once\n";
+            return false;
+        }
+        if (memory->getActivePlan(session)) {
+            std::cerr << "testGraphRecoveryFreshAgingResume: aged terminal plan stayed active\n";
+            return false;
+        }
+    }
+
+    {
+        auto memory = std::make_shared<Memory>(cfg);
+        const auto again = memory->getEdgesFrom("fresh-from");
+        if (again.size() != 1 || again.front().success_count != 1 ||
+            std::abs(again.front().weight - committedWeight * 0.995f) > 1e-4f ||
+            memory->getActivePlan(session)) {
+            std::cerr << "testGraphRecoveryFreshAgingResume: reopening the database aged the edge again\n";
+            return false;
+        }
+    }
+
+    std::error_code ignored;
+    fs::remove_all(workspace, ignored);
+    return true;
+}
+
+static bool testGraphRecovery() {
+    return testGraphRecoveryOwnershipAndRevision() &&
+           testGraphRecoveryResumeAndDuplicate() &&
+           testGraphRecoveryFreshAgingResume() &&
+           testGraphRecoveryReflectionAndFailures() &&
+           testGraphRecoveryTransactionOwnership();
+}
+
 #include "mtcp_generation_checks.inc"
 
 int main() {
+    if (const char* p0Status = std::getenv("THOTH_P0_STATUS")) {
+        if (std::string(p0Status) == "1") {
+            int p0Failures = 0;
+            if (!testP0TerminalStatus()) p0Failures++;
+            if (!testP0GraphPolarity()) p0Failures++;
+            if (!testP0RetrievalSetIsolation()) p0Failures++;
+            if (!testP0TrajectoryScoreUnchanged()) p0Failures++;
+            std::cout << (p0Failures == 0 ? "P0 status tests passed.\n"
+                                          : "P0 status tests failed.\n");
+            return p0Failures == 0 ? 0 : 1;
+        }
+    }
+
+    if (const char* postP0 = std::getenv("THOTH_POST_P0_REPAIRS")) {
+        if (std::string(postP0) == "1") {
+            int repairFailures = 0;
+            if (!testR1RetrievalDiagnosticsReachGraph()) repairFailures++;
+            if (!testR2AbsoluteEdgeCounters()) repairFailures++;
+            if (!testGraphRecovery()) repairFailures++;
+            if (!testReflectionLoop()) repairFailures++;
+            if (!testMtcpRevisionWrapperStable()) repairFailures++;
+            std::cout << (repairFailures == 0 ? "Post-P0 repair tests passed.\n"
+                                              : "Post-P0 repair tests failed.\n");
+            return repairFailures == 0 ? 0 : 1;
+        }
+    }
+
     if (const char* egarLoop = std::getenv("THOTH_EGAR_LOOP_CLOSURE")) {
         if (std::string(egarLoop) == "1") {
             const bool ok = testProductionEgarLoopClosure();
@@ -24199,6 +25381,13 @@ int main() {
     if (!testRunTestsTool()) failures++;
     if (!testCodeModifyTool()) failures++;
     if (!testAllowShellExecGate()) failures++;
+    if (!testP0TerminalStatus()) failures++;
+    if (!testP0GraphPolarity()) failures++;
+    if (!testP0RetrievalSetIsolation()) failures++;
+    if (!testP0TrajectoryScoreUnchanged()) failures++;
+    if (!testR1RetrievalDiagnosticsReachGraph()) failures++;
+    if (!testR2AbsoluteEdgeCounters()) failures++;
+    if (!testGraphRecovery()) failures++;
     if (!testPastPlanRetrieval()) failures++;
     if (!testMemoryPruning()) failures++;
     if (!testMemoryPruningIntegration()) failures++;
