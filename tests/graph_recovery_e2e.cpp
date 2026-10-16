@@ -10,6 +10,7 @@
 #include "config.h"
 #include "embedding_engine.h"
 #include "executive_controller.h"
+#include "generation_call.h"
 #include "chunkers/code_chunk.h"
 #include "index_manager.h"
 #include "iplanner.h"
@@ -228,6 +229,7 @@ public:
     bool llmOnly = false;
     bool penalizedRevision = false;
     bool separateReflection = false;
+    bool reviseThenReflect = false;
     fs::path logPath;
     std::atomic<int> creates{0};
     std::atomic<int> revises{0};
@@ -290,8 +292,28 @@ public:
             plan.steps = {first, second, synth};
             return plan;
         }
+        if (reviseThenReflect && Thoth::GenerationCallScope::current().reflection) {
+            const bool phrase = goal.find(
+                " (Reflection: previous attempt had low success score ") != std::string::npos;
+            note(phrase ? "reflection-phrase" : "reflection-phrase-absent");
+            plan.plan_id = planId + "-replacement";
+            auto first = retrieval(plan.plan_id + "-alpha", kAlpha);
+            auto second = retrieval(plan.plan_id + "-beta", kBeta);
+            second.depends_on = {first.step_id};
+            auto synth = llm(plan.plan_id + "-llm");
+            synth.depends_on = {second.step_id};
+            plan.steps = {first, second, synth};
+            return plan;
+        }
         if (llmOnly) {
             plan.steps = {llm(planId + "-llm")};
+            return plan;
+        }
+        if (reviseThenReflect) {
+            auto first = retrieval(planId + "-alpha", kAlpha);
+            auto fail = failingNode(planId + "-fail", true);
+            fail.depends_on = {first.step_id};
+            plan.steps = {first, fail};
             return plan;
         }
         if (penalizedRevision || separateReflection) {
@@ -332,6 +354,15 @@ public:
         revised.steps.clear();
         for (const auto& step : existing.steps) {
             if (step.status == StepStatus::SUCCESS) revised.steps.push_back(step);
+        }
+        if (reviseThenReflect) {
+            auto second = retrieval(planId + "-beta", kBeta);
+            if (!revised.steps.empty()) second.depends_on = {revised.steps.back().step_id};
+            auto fail = failingNode(planId + "-fail-2", false);
+            fail.depends_on = {second.step_id};
+            revised.steps.push_back(second);
+            revised.steps.push_back(fail);
+            return revised;
         }
         if (penalizedRevision && revises.load() == 1) {
             auto second = retrieval(planId + "-beta", kBeta);
@@ -415,6 +446,9 @@ int runChild(const std::string& caseName, const fs::path& workspace) {
     } else if (caseName == "gr-5") {
         setenv("THOTH_HALT_AFTER_AGING_COMMIT", "1", 1);
         setenv("THOTH_GRAPH_HALT_DIR", workspace.c_str(), 1);
+    } else if (caseName == "gr-integrated") {
+        setenv("THOTH_HALT_AFTER_AGING_COMMIT", "1", 1);
+        setenv("THOTH_GRAPH_HALT_DIR", workspace.c_str(), 1);
     } else if (caseName == "gr-6" || caseName == "gr-7" || caseName == "gr-8") {
         setenv("THOTH_HALT_AFTER_TRAJECTORY_COMMIT", "1", 1);
         setenv("THOTH_GRAPH_HALT_DIR", workspace.c_str(), 1);
@@ -431,6 +465,7 @@ int runChild(const std::string& caseName, const fs::path& workspace) {
     planner->failAfterTwo = caseName == "gr-4";
     planner->penalizedRevision = caseName == "gr-7" || caseName == "gr-11" || caseName == "gr-12";
     planner->separateReflection = caseName == "gr-9";
+    planner->reviseThenReflect = caseName == "gr-integrated";
     Config config;
     config.enable_retrieval_prefetch = false;
     config.max_parallel_retrieval = 1;
@@ -445,7 +480,8 @@ int runChild(const std::string& caseName, const fs::path& workspace) {
     Thoth::ExecutiveController controller(planner, tools, rag, memory);
     controller.set_config(&config);
     controller.set_session_id(kSession);
-    controller.set_max_reflections(caseName == "gr-4" || caseName == "gr-9" ? 1 : 0);
+    controller.set_max_reflections(
+        caseName == "gr-4" || caseName == "gr-9" || caseName == "gr-integrated" ? 1 : 0);
     if (caseName == "gr-2" || caseName == "gr-13") {
         if (auto* repo = memory->getSQLiteRepo()) {
             const fs::path marker = workspace / "graph_halt.json";
@@ -471,7 +507,7 @@ int runChild(const std::string& caseName, const fs::path& workspace) {
     const bool halt = caseName == "gr-2" || caseName == "gr-3" || caseName == "gr-4" ||
                       caseName == "gr-5" || caseName == "gr-6" || caseName == "gr-7" ||
                       caseName == "gr-8" || caseName == "gr-11" || caseName == "gr-12" ||
-                      caseName == "gr-13";
+                      caseName == "gr-13" || caseName == "gr-integrated";
     if (halt) {
         for (;;) ::pause();
     }
@@ -498,6 +534,7 @@ int resumeChild(const std::string& caseName, const fs::path& workspace) {
     planner->llmOnly = caseName == "gr-4";
     planner->penalizedRevision = caseName == "gr-7" || caseName == "gr-11" || caseName == "gr-12";
     planner->separateReflection = caseName == "gr-9";
+    planner->reviseThenReflect = caseName == "gr-integrated";
     Config config;
     config.enable_retrieval_prefetch = false;
     config.max_parallel_retrieval = 1;
@@ -517,7 +554,8 @@ int resumeChild(const std::string& caseName, const fs::path& workspace) {
     Thoth::ExecutiveController controller(planner, tools, rag, memory);
     controller.set_config(&config);
     controller.set_session_id(kSession);
-    controller.set_max_reflections(caseName == "gr-4" || caseName == "gr-9" ? 1 : 0);
+    controller.set_max_reflections(
+        caseName == "gr-4" || caseName == "gr-9" || caseName == "gr-integrated" ? 1 : 0);
     std::vector<std::string> startedSteps;
     std::mutex startedMu;
     controller.set_event_callback([&](const ControllerEvent& event) {
@@ -904,7 +942,8 @@ CaseReport runKilled(const std::string& caseName, const fs::path& workspace, con
     nlohmann::json beforeBody = viewJson(before);
     if (caseName == "gr-2" || caseName == "gr-3" || caseName == "gr-4" || caseName == "gr-5" ||
         caseName == "gr-6" || caseName == "gr-7" || caseName == "gr-8" ||
-        caseName == "gr-11" || caseName == "gr-12" || caseName == "gr-13") {
+        caseName == "gr-11" || caseName == "gr-12" || caseName == "gr-13" ||
+        caseName == "gr-integrated") {
         beforeBody["history"] = readHistory(workspace / "memory.db");
         beforeBody["working_snapshot"] = readWorkingSnapshot(workspace / "memory.db");
         beforeBody["episode_step_count"] = countEpisodeSteps(workspace / "memory.db");
@@ -1048,6 +1087,63 @@ CaseReport runKilled(const std::string& caseName, const fs::path& workspace, con
             }
             return true;
         }
+        if (caseName == "gr-integrated") {
+            const auto history = report.evidence["before_kill"].value("history", nlohmann::json::object());
+            const auto trajectories = history.value("trajectories", nlohmann::json::array());
+            const auto past = history.value("past_plans", nlohmann::json::array());
+            const auto cognate = history.value("cognate_plans", nlohmann::json::array());
+            const std::string planId = "gr-integrated-plan";
+            const float agedPenalty = kPenalty * kDecay;
+            bool keptRetrieval = false;
+            int errors = 0;
+            if (!trajectories.empty()) {
+                for (const auto& step : trajectories[0].value("steps", nlohmann::json::array())) {
+                    if (!step.value("error", "").empty()) ++errors;
+                    if (step.value("step_id", "") == planId + "-alpha" && step.value("error", "").empty()) {
+                        keptRetrieval = true;
+                    }
+                }
+            }
+            int initialSteps = -1;
+            bool initialHasBeta = true;
+            try {
+                const auto loaded = Thoth::SQLiteMemoryRepository((workspace / "memory.db").string())
+                                        .loadTrajectory("traj-" + planId);
+                if (loaded) {
+                    const auto body = nlohmann::json::parse(loaded->trajectory_json);
+                    const auto initial = body.value("plan_initial", nlohmann::json::object())
+                                             .value("steps", nlohmann::json::array());
+                    initialSteps = static_cast<int>(initial.size());
+                    initialHasBeta = false;
+                    for (const auto& step : initial) {
+                        if (step.value("step_id", "").find("beta") != std::string::npos) initialHasBeta = true;
+                    }
+                }
+            } catch (...) {
+            }
+            const bool oneAttempt =
+                before.active && before.plan_id == planId && before.reflection_pending &&
+                before.reflection_count == 1 && before.graph_reinforced && before.history_aging_done &&
+                before.status == static_cast<int>(PlanStatus::ACTIVE) &&
+                before.past_plans == 1 && before.trajectories == 1 && before.edge_rows == 1 &&
+                before.edge_to == beta && before.success_count == 0 && before.failure_count == 1 &&
+                near(before.weight, agedPenalty) &&
+                trajectories.size() == 1 &&
+                trajectories[0].value("trajectory_id", "") == "traj-" + planId &&
+                near(trajectories[0].value("success_score", -1.f), 0.0f) &&
+                past.size() == 1 && past[0].value("plan_id", "") == planId &&
+                near(past[0].value("success_score", -1.f), 0.0f) &&
+                cognate.size() == 1 && cognate[0].value("plan_id", "") == planId &&
+                near(cognate[0].value("success_score", -1.f), 0.0f) &&
+                keptRetrieval && errors >= 1 && initialSteps == 2 && !initialHasBeta &&
+                report.evidence.value("planner_creates_before_kill", 0) == 1 &&
+                report.evidence.value("planner_revises_before_kill", 0) == 1;
+            if (!oneAttempt) {
+                why = "failed attempt was not one aged penalty with pending reflection";
+                return false;
+            }
+            return true;
+        }
         if (!before.active || !before.graph_reinforced || !before.history_aging_done ||
             !edgeRewardedOnce(before, beta, kReward * kDecay)) {
             why = "aging commit was not a single decay with the active plan still present";
@@ -1146,6 +1242,62 @@ CaseReport runKilled(const std::string& caseName, const fs::path& workspace, con
         if (recovered.failure_count != 1 || recovered.success_count != 0 || !near(recovered.weight, twice) ||
             createsAfter - createsBefore != 1 || revisesAfter != 0) {
             report.detail = "reflection resume repeated the penalty or called the planner early";
+            return report;
+        }
+    } else if (caseName == "gr-integrated") {
+        nlohmann::json afterHistory = nlohmann::json::object();
+        try {
+            afterHistory = nlohmann::json::parse(readFile(workspace / "after_recovery_inspect.json"))
+                               .value("history", nlohmann::json::object());
+        } catch (...) {
+        }
+        report.evidence["history_after_recovery"] = afterHistory;
+        const std::string failedId = "gr-integrated-plan";
+        const std::string replacementId = failedId + "-replacement";
+        const float agedPenalty = kPenalty * kDecay;
+        const float afterReward = agedPenalty + 0.2f * (1.0f - agedPenalty);
+        const float afterRewardAged = afterReward * kDecay;
+        report.evidence["derived_weight_before_restart"] = agedPenalty;
+        report.evidence["derived_weight_after_restart"] = afterRewardAged;
+        auto scoreFor = [](const nlohmann::json& rows, const char* key, const std::string& id) {
+            for (const auto& row : rows) {
+                if (row.value(key, "") == id) return row.value("success_score", -1.f);
+            }
+            return -1.f;
+        };
+        const auto trajectories = afterHistory.value("trajectories", nlohmann::json::array());
+        const auto past = afterHistory.value("past_plans", nlohmann::json::array());
+        const auto cognate = afterHistory.value("cognate_plans", nlohmann::json::array());
+        nlohmann::json resumeResult = nlohmann::json::object();
+        try {
+            resumeResult = nlohmann::json::parse(readFile(workspace / "resume_result.json"));
+        } catch (...) {
+        }
+        const auto started = resumeResult.value("step_starts", nlohmann::json::array());
+        const nlohmann::json expectedStarts = {replacementId + "-alpha", replacementId + "-beta",
+                                               replacementId + "-llm"};
+        const bool stepsAreReplacement = started == expectedStarts;
+        bool replayedOriginal = false;
+        for (const auto& stepId : started) {
+            if (stepId == failedId + "-alpha") replayedOriginal = true;
+        }
+        const bool matched =
+            !recovered.active && recovered.failure_count == 1 && recovered.success_count == 1 &&
+            recovered.edge_rows == 1 && recovered.edge_to == beta && near(recovered.weight, afterRewardAged) &&
+            trajectories.size() == 2 && past.size() == 2 && cognate.size() == 2 &&
+            near(scoreFor(trajectories, "trajectory_id", "traj-" + failedId), 0.0f) &&
+            near(scoreFor(trajectories, "trajectory_id", "traj-" + replacementId), 1.0f) &&
+            near(scoreFor(past, "plan_id", failedId), 0.0f) &&
+            near(scoreFor(past, "plan_id", replacementId), 1.0f) &&
+            near(scoreFor(cognate, "plan_id", failedId), 0.0f) &&
+            near(scoreFor(cognate, "plan_id", replacementId), 1.0f) &&
+            near(scoreFor(cognate, "plan_id", replacementId),
+                 scoreFor(trajectories, "trajectory_id", "traj-" + replacementId)) &&
+            createsAfter - createsBefore == 1 && revisesAfter == 1 &&
+            resumeResult.value("plan_id", "") == replacementId &&
+            stepsAreReplacement && !replayedOriginal;
+        if (!matched) {
+            report.detail = "replacement did not keep distinct history, one aged reward, and new step ids";
             return report;
         }
     } else if (caseName == "gr-11" || caseName == "gr-12") {
@@ -1550,6 +1702,8 @@ int main(int argc, char** argv) {
             {"gr-9", ""},
             {"gr-10", ""}
         };
+    } else if (!args.empty() && args[0] == "gr-integrated") {
+        items = {{"gr-integrated", "after_aging_commit"}};
     } else if (!args.empty() && args[0] == "gr-confirm") {
         items = {
             {"gr-2", "after_first_retrieval_set"},
@@ -1607,7 +1761,10 @@ int main(int argc, char** argv) {
                              .count();
     summary["passed"] = all;
     summary["runtime_ms"] = totalMs;
-    writeAtomic(root / "campaign_report.json", summary.dump(2));
+    const char* reportName = (!args.empty() && args[0] == "gr-integrated")
+                                 ? "integrated_lifecycle_report.json"
+                                 : "campaign_report.json";
+    writeAtomic(root / reportName, summary.dump(2));
     std::cout << "campaign " << (all ? "PASS" : "FAIL") << " root=" << root
               << " runtime_ms=" << totalMs << "\n";
     return all ? 0 : 1;
