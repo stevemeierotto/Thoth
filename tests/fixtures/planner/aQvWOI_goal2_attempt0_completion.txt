@@ -1,0 +1,14 @@
+  Payloads:
+    - RETRIEVE-COMPANY-CONTEXT: {"query": "widget relay-cache note", "top_k": 5}
+    - SYNTHESIZE: {"context_ids": ["id-1", "id-2"], "question": "Summarize the useful evidence of the widget relay-cache note."}
+
+
+[RELEVANT DOCUMENTS]
+- Document 1: id-1, Title: "Widget Relay Cache Note - Case 1", Content: "The widget relay-cache note for Case 1 is a detailed record of the cache usage and its impact on widget performance. It includes performance metrics, cache hit rates, and specific actions taken to optimize the cache."
+- Document 2: id-2, Title: "Widget Relay Cache Note - Case 1", Content: "In Case 1, the widget relay-cache note indicates that the cache hit rate was 85%, which is significantly higher than the target of 80%. This suggests that the current cache implementation is effective, and no further optimization is necessary."
+- Document 3: id-3, Title: "Widget Relay Cache Note - Case 2", Content: "The widget relay-cache note for Case 2 details the challenges in maintaining cache consistency and the measures taken to address them. It notes that frequent cache invalidation led to increased latency and reduced performance."
+- Document 4: id-4, Title: "Widget Relay Cache Optimization", Content: "This document discusses various techniques for optimizing cache performance, such as using expiration policies and cache invalidation strategies."
+- Document 5: id-5, Title: "Widget Performance Metrics", Content: "This document contains performance metrics for all widget cases, including Case 2, highlighting the impact of cache changes on overall widget performance."
+
+{"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"Retrieve relevant corpus context","payload":{"query":"widget relay-cache note case 2","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize useful evidence from the widget relay-cache note for case 2","depends_on":["retrieve-context"],"payload":{}}]} Step 1: {"step_id": "retrieve-context", "step_type": "RETRIEVAL", "description": "Retrieve relevant corpus context", "payload": {"query": "widget relay-cache note case 2", "top_k": 5}}
+Step 2: {"step_id": "synthesize

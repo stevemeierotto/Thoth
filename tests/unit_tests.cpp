@@ -2920,9 +2920,10 @@ static bool retryCarriesReason(const std::string& raw, const std::string& expect
     if (assessment.reason == "JSON parse failed") {
         return false;
     }
-    const std::string retry = Thoth::buildPlannerRetryPrompt("BASE", assessment.reason, raw);
-    const std::string marker = "\n\nERROR: " + assessment.reason + ". Respond with JSON only.";
-    return retry.find(marker) != std::string::npos && retry.find(raw) != std::string::npos;
+    const Thoth::PlannerFailureClass failure = Thoth::classifyPlannerFailure(true, "stop", assessment.reason, false);
+    const std::string retry = Thoth::buildPlannerRetryPrompt("BASE", assessment.reason, raw, failure);
+    return retry.find("\n\nERROR: " + assessment.reason) != std::string::npos
+        && retry.find(raw) == std::string::npos;
 }
 
 static bool testPlanParserReasonsReachRetry() {
@@ -2970,9 +2971,377 @@ static bool testPlanParserReasonsReachRetry() {
     check("tool plan is not a parser failure", tool_assessment.reason.rfind("Malformed JSON:", 0) != 0
                                                    && tool_assessment.reason.find("step_type") == std::string::npos
                                                    && tool_assessment.reason.find("plan' array") == std::string::npos);
-    const std::string tool_retry = Thoth::buildPlannerRetryPrompt("BASE", tool_assessment.reason, tool_plan);
+    const std::string tool_retry = Thoth::buildPlannerRetryPrompt(
+        "BASE", tool_assessment.reason, tool_plan, Thoth::PlannerFailureClass::Schema);
     check("validation reason reaches retry", tool_retry.find(tool_assessment.reason) != std::string::npos);
+    check("schema retry omits the rejected plan", tool_retry.find(tool_plan) == std::string::npos);
 
+    return failures == 0;
+}
+
+static bool testPlannerExtractionRepair() {
+    int failures = 0;
+    int checks = 0;
+    auto check = [&](const std::string& name, bool ok) {
+        ++checks;
+        if (!ok) {
+            std::cerr << "testPlannerExtractionRepair: FAILED - " << name << "\n";
+            failures++;
+        }
+    };
+
+    const fs::path workspace = makeTempPath("planner_extraction_repair_workspace");
+    fs::create_directories(workspace);
+    WorkspaceEnvGuard workspaceGuard(workspace.string());
+    const fs::path generationLog = makeTempPath("planner_extraction_repair_generation.jsonl");
+    setenv("THOTH_GENERATION_CALLS_LOG", generationLog.string().c_str(), 1);
+    Thoth::RobustnessMockResponses::reset();
+
+    FileHandler fh;
+    const fs::path fixturePath = fs::path(fh.getProjectRoot()) / "tests" / "fixtures" / "planner"
+        / "aQvWOI_goal2_attempt0_completion.txt";
+    std::ifstream fixtureIn(fixturePath, std::ios::binary);
+    std::stringstream fixtureBuffer;
+    fixtureBuffer << fixtureIn.rdbuf();
+    const std::string fixture = fixtureBuffer.str();
+    const std::string fixtureHash = Thoth::sha256Hex(fixture);
+    check("goal2 fixture hash",
+          fixtureIn && fixtureHash == "5e6e29ece2a3331440428fe9ca485d98de20f695916ad2b75284c59226e02f1f");
+
+    std::string fixtureReason;
+    auto fixturePlan = Thoth::PlanParser::parse(fixture, "plan-1792350245298-2", &fixtureReason);
+    check("goal2 fixture parses", fixturePlan.has_value() && fixtureReason.empty());
+    if (fixturePlan.has_value()) {
+        check("goal2 step shape",
+              fixturePlan->steps.size() == 2
+                  && fixturePlan->steps[0].type == StepType::RETRIEVAL
+                  && fixturePlan->steps[0].step_id == "retrieve-context"
+                  && fixturePlan->steps[0].description == "Retrieve relevant corpus context"
+                  && fixturePlan->steps[0].payload.value("query", "") == "widget relay-cache note case 2"
+                  && fixturePlan->steps[0].payload.value("top_k", 0) == 5
+                  && fixturePlan->steps[1].type == StepType::LLM
+                  && fixturePlan->steps[1].step_id == "synthesize"
+                  && fixturePlan->steps[1].description
+                         == "Summarize useful evidence from the widget relay-cache note for case 2"
+                  && fixturePlan->steps[1].depends_on.size() == 1
+                  && fixturePlan->steps[1].depends_on[0] == "retrieve-context");
+        Plan mutableFixture = *fixturePlan;
+        const auto validation = Thoth::PlanValidator::validateAndRepair(mutableFixture, false);
+        check("goal2 fixture validates", validation.valid && !validation.depends_on_repaired);
+    } else {
+        check("goal2 step shape", false);
+        check("goal2 fixture validates", false);
+    }
+
+    const std::string missingDescriptionThenValid =
+        "note {\"plan\":[{\"step_type\":\"RETRIEVAL\"}]} "
+        "{\"plan\":[{\"step_id\":\"retrieve-context\",\"step_type\":\"RETRIEVAL\","
+        "\"description\":\"Retrieve relevant corpus context\",\"payload\":{\"query\":\"later\",\"top_k\":5}},"
+        "{\"step_id\":\"synthesize\",\"step_type\":\"LLM\",\"description\":\"Summarize findings\","
+        "\"depends_on\":[\"retrieve-context\"],\"payload\":{}}]}";
+    std::string missingReason;
+    const auto missingPlan = Thoth::PlanParser::parse(missingDescriptionThenValid, "missing", &missingReason);
+    check("invalid leftmost plan is not skipped",
+          !missingPlan.has_value() && missingReason == "Step missing or invalid 'description'.");
+
+    const std::string twoPlans =
+        "{\"plan\":[{\"step_id\":\"retrieve-context\",\"step_type\":\"RETRIEVAL\","
+        "\"description\":\"Retrieve relevant corpus context\",\"payload\":{\"query\":\"alpha\",\"top_k\":5}},"
+        "{\"step_id\":\"synthesize\",\"step_type\":\"LLM\",\"description\":\"Summarize findings\","
+        "\"depends_on\":[\"retrieve-context\"],\"payload\":{}}]} "
+        "{\"plan\":[{\"step_id\":\"retrieve-context\",\"step_type\":\"RETRIEVAL\","
+        "\"description\":\"Retrieve relevant corpus context\",\"payload\":{\"query\":\"beta\",\"top_k\":5}},"
+        "{\"step_id\":\"synthesize\",\"step_type\":\"LLM\",\"description\":\"Summarize findings\","
+        "\"depends_on\":[\"retrieve-context\"],\"payload\":{}}]}";
+    const auto firstPlan = Thoth::PlanParser::parse(twoPlans, "two");
+    check("leftmost plan wins",
+          firstPlan.has_value() && firstPlan->steps.size() == 2
+              && firstPlan->steps[0].payload.value("query", "") == "alpha");
+
+    const std::string truncatedTail =
+        "{\"plan\":[{\"step_id\":\"retrieve-context\",\"step_type\":\"RETRIEVAL\","
+        "\"description\":\"Retrieve relevant corpus context\",\"payload\":{\"query\":\"kept\",\"top_k\":5}},"
+        "{\"step_id\":\"synthesize\",\"step_type\":\"LLM\",\"description\":\"Summarize findings\","
+        "\"depends_on\":[\"retrieve-context\"],\"payload\":{}}]} trailing {\"step_id\":";
+    const auto keptPlan = Thoth::PlanParser::parse(truncatedTail, "tail");
+    check("truncated tail is ignored",
+          keptPlan.has_value() && keptPlan->steps[0].payload.value("query", "") == "kept");
+
+    const std::string lengthRetry = Thoth::buildPlannerRetryPrompt(
+        "BASE", "Malformed JSON: cutoff", fixture, Thoth::PlannerFailureClass::Length);
+    check("length retry keeps the validation error",
+          lengthRetry.find("Malformed JSON: cutoff") != std::string::npos
+              && lengthRetry.find("Respond with JSON only.") != std::string::npos);
+    check("length retry omits the completion",
+          lengthRetry.find("Previous response omitted because it hit the completion token limit.")
+                  != std::string::npos
+              && lengthRetry.find("Previous Response:\n") == std::string::npos
+              && lengthRetry.find(fixture) == std::string::npos);
+
+    const std::string stopRetry = Thoth::buildPlannerRetryPrompt(
+        "BASE", "Malformed JSON: stopped", "{\"plan\":[,]}", Thoth::PlannerFailureClass::Parse);
+    check("parse retry asks for a fresh plan and omits the broken completion",
+          stopRetry.find("Return one fresh, complete JSON plan.") != std::string::npos
+              && stopRetry.find("{\"plan\":[,]} ") == std::string::npos
+              && stopRetry.find("plan\":[,]") == std::string::npos
+              && stopRetry.find("Previous Response:\n") == std::string::npos
+              && stopRetry.find("omitted because it hit the completion token limit") == std::string::npos);
+
+    Plan legacy = Plan::from_json(frozenR1ProductionPlan());
+    check("legacy plan origin is empty", legacy.plan_origin.empty());
+    check("legacy serialization omits plan_origin",
+          legacy.to_json().dump().find("plan_origin") == std::string::npos);
+    check("model-facing json omits plan_origin", [&]() {
+        legacy.plan_origin = "fallback";
+        const std::string facing = legacy.toLlmFacingJson().dump();
+        return facing.find("plan_origin") == std::string::npos && facing.find("\"plan\"") != std::string::npos;
+    }());
+
+    Plan modelPlan;
+    modelPlan.plan_id = "origin-model";
+    modelPlan.goal = "origin goal";
+    modelPlan.plan_origin = "model";
+    Plan loadedModel = Plan::from_json(modelPlan.to_json());
+    check("model origin round trip", loadedModel.plan_origin == "model" && loadedModel.plan_id == "origin-model");
+
+    Plan fallbackPlan = modelPlan;
+    fallbackPlan.plan_origin = "fallback";
+    Plan loadedFallback = Plan::from_json(fallbackPlan.to_json());
+    check("fallback origin round trip", loadedFallback.plan_origin == "fallback");
+
+    Config cfg;
+    cfg.database_path = makeTempPath("planner_extraction_repair.db").string();
+    auto memory = std::make_shared<Memory>(cfg);
+    auto embedder = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto index = new IndexManager(embedder.get());
+    auto rag = std::make_shared<RAGPipeline>(std::move(embedder), index);
+    auto prompts = std::make_shared<PromptFactory>(*memory, *rag);
+    LLMPlanner nullPlanner(memory, rag, prompts, nullptr);
+    Plan retained = fallbackPlan;
+    retained.goal = "Find the widget relay-cache note";
+    const Plan keptWithoutLlm = nullPlanner.revise_plan(retained, nlohmann::json::object());
+    check("missing llm keeps the prior origin", keptWithoutLlm.plan_origin == "fallback");
+
+    const std::string revisedJson =
+        R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"Retrieve relevant corpus context","payload":{"query":"revised-query","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize findings","depends_on":["retrieve-context"],"payload":{}}]})";
+    Thoth::RobustnessMockResponses::push(revisedJson);
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    LLMPlanner livePlanner(memory, rag, prompts, &llm);
+    const Plan revised = livePlanner.revise_plan(retained, nlohmann::json::object());
+    check("accepted revision is model origin",
+          revised.plan_origin == "model" && revised.steps.size() == 2
+              && revised.steps[0].payload.value("query", "") == "revised-query");
+
+    Thoth::RobustnessMockResponses::push("{\"plan\":[,]}");
+    Thoth::RobustnessMockResponses::push("{\"plan\":[,]}");
+    const Plan stillFallback = livePlanner.revise_plan(retained, nlohmann::json::object());
+    check("rejected revision keeps fallback origin",
+          stillFallback.plan_origin == "fallback" && stillFallback.plan_id == retained.plan_id);
+    Thoth::RobustnessMockResponses::reset();
+
+    std::cout << "testPlannerExtractionRepair: " << checks << " checks, " << failures << " failures\n";
+    return failures == 0;
+}
+
+static bool testPlannerReliabilityEvidence() {
+    int failures = 0;
+    int checks = 0;
+    auto check = [&](const std::string& name, bool ok) {
+        ++checks;
+        if (!ok) {
+            std::cerr << "testPlannerReliabilityEvidence: FAILED - " << name << "\n";
+            failures++;
+        }
+    };
+
+    const fs::path workspace = makeTempPath("planner_reliability_workspace");
+    fs::create_directories(workspace);
+    WorkspaceEnvGuard workspaceGuard(workspace.string());
+    const fs::path generationLog = makeTempPath("planner_reliability_generation.jsonl");
+    setenv("THOTH_GENERATION_CALLS_LOG", generationLog.string().c_str(), 1);
+    Thoth::RobustnessMockResponses::reset();
+
+    const std::string valid =
+        R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"Retrieve relevant corpus context","payload":{"query":"widget relay-cache","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize findings","depends_on":["retrieve-context"],"payload":{}}]})";
+    const std::string missingDescription =
+        R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","payload":{"query":"widget relay-cache","top_k":5}},{"step_id":"synthesize","step_type":"LLM","depends_on":["retrieve-context"],"payload":{}}]})";
+    const std::string blankDescription =
+        R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"  ","payload":{"query":"widget relay-cache","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize findings","depends_on":["retrieve-context"],"payload":{}}]})";
+    const std::string emptyQuery =
+        R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"Retrieve relevant corpus context","payload":{"query":" ","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize findings","depends_on":["retrieve-context"],"payload":{}}]})";
+
+    std::string blankReason;
+    const auto blank = Thoth::PlanParser::parse(blankDescription, "blank", &blankReason);
+    check("blank description rejected", !blank.has_value() && blankReason == "Step missing or invalid 'description'.");
+    const auto missing = Thoth::assessGeneratedPlan(missingDescription, "missing-desc", "goal", false);
+    check("missing description rejected",
+          !missing.plan.has_value() && missing.reason == "Step missing or invalid 'description'.");
+    const auto accepted = Thoth::assessGeneratedPlan(valid, "accepted", "goal", false);
+    check("structured plan accepted",
+          accepted.plan.has_value() && accepted.reason == "ok" && accepted.plan->steps.size() == 2);
+    const auto emptyQueryAssessment = Thoth::assessGeneratedPlan(emptyQuery, "empty-query", "goal", false);
+    check("empty retrieval query rejected",
+          !emptyQueryAssessment.plan.has_value()
+              && emptyQueryAssessment.reason == "RETRIEVAL step requires a nonempty query");
+
+    Config cfg;
+    cfg.database_path = makeTempPath("planner_reliability.db").string();
+    auto memory = std::make_shared<Memory>(cfg);
+    auto embedder = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+    auto index = new IndexManager(embedder.get());
+    auto rag = std::make_shared<RAGPipeline>(std::move(embedder), index);
+    auto prompts = std::make_shared<PromptFactory>(*memory, *rag);
+    const std::string planPrompt = prompts->buildPlanPrompt("Find the note", "", "", nullptr);
+    check("prompt requires a plan array", planPrompt.find("root plan array") != std::string::npos);
+    check("prompt requires a nonempty description",
+          planPrompt.find("nonempty string description") != std::string::npos);
+    check("prompt requires a retrieval query", planPrompt.find("nonempty string query") != std::string::npos);
+    check("prompt forbids tool steps", planPrompt.find("Do not emit TOOL steps.") != std::string::npos);
+
+    check("length class",
+          Thoth::classifyPlannerFailure(true, "length", "Malformed JSON: cutoff", false)
+              == Thoth::PlannerFailureClass::Length);
+    check("parse class",
+          Thoth::classifyPlannerFailure(true, "stop", "Malformed JSON: bad", false) == Thoth::PlannerFailureClass::Parse);
+    check("schema class",
+          Thoth::classifyPlannerFailure(true, "stop", "Step missing or invalid 'description'.", false)
+              == Thoth::PlannerFailureClass::Schema);
+    check("provider class",
+          Thoth::classifyPlannerFailure(false, "stop", "connection reset", false)
+              == Thoth::PlannerFailureClass::Provider);
+    const std::string schemaRetry = Thoth::buildPlannerRetryPrompt(
+        "BASE", "Step missing or invalid 'description'.", missingDescription, Thoth::PlannerFailureClass::Schema);
+    check("schema retry names the requirement and omits the plan",
+          schemaRetry.find("Step missing or invalid 'description'.") != std::string::npos
+              && schemaRetry.find("nonempty description") != std::string::npos
+              && schemaRetry.find(missingDescription) == std::string::npos);
+    const std::string providerRetry = Thoth::buildPlannerRetryPrompt(
+        "BASE", "connection reset by peer", "connection reset by peer", Thoth::PlannerFailureClass::Provider);
+    check("provider retry is not a schema failure",
+          providerRetry.find("This is not a schema error.") != std::string::npos
+              && providerRetry.find("Provider detail: connection reset by peer") != std::string::npos
+              && providerRetry.find("nonempty description") == std::string::npos);
+
+    LLMInterface llm(LLMBackend::Ollama, &cfg);
+    LLMPlanner planner(memory, rag, prompts, &llm);
+
+    auto readLog = [&]() {
+        std::vector<nlohmann::json> rows;
+        std::ifstream in(generationLog);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty()) {
+                rows.push_back(nlohmann::json::parse(line));
+            }
+        }
+        return rows;
+    };
+    auto clearLog = [&]() {
+        std::ofstream out(generationLog, std::ios::trunc);
+        (void)out;
+    };
+
+    Thoth::RobustnessMockResponses::push(valid);
+    const Plan firstTry = planner.create_plan("Find the note. Case success");
+    auto successRows = readLog();
+    check("first-attempt success is one record", successRows.size() == 1 && firstTry.plan_origin == "model");
+    if (successRows.size() == 1) {
+        const auto& row = successRows[0];
+        check("success evidence",
+              row.value("attempt_disposition", "") == "accepted"
+                  && row.value("failure_class", "") == "none"
+                  && row.value("validation_ok", false)
+                  && row.value("fallback_used", true) == false
+                  && row.value("plan_origin", "") == "model"
+                  && row.value("completion_sha256", "") == Thoth::sha256Hex(valid)
+                  && row.value("retrieval_query", "") == "widget relay-cache"
+                  && row.contains("step_ids") && row["step_ids"].size() == 2
+                  && !row.contains("text") && !row.contains("completion") && !row.contains("prompt"));
+        std::cout << "planner evidence example: " << row.dump() << "\n";
+    } else {
+        check("success evidence", false);
+    }
+
+    clearLog();
+    Thoth::RobustnessMockResponses::push(missingDescription);
+    Thoth::RobustnessMockResponses::push(valid, "stop");
+    const Plan retried = planner.create_plan("Find the note. Case schema");
+    auto schemaRows = readLog();
+    check("schema then success is model", retried.plan_origin == "model" && schemaRows.size() == 2);
+    if (schemaRows.size() == 2) {
+        check("failed first attempt is a retry, not a fallback success",
+              schemaRows[0].value("attempt", -1) == 0
+                  && schemaRows[0].value("attempt_disposition", "") == "retry"
+                  && schemaRows[0].value("failure_class", "") == "schema"
+                  && schemaRows[0].value("validation_ok", true) == false
+                  && schemaRows[0].value("fallback_used", true) == false
+                  && !schemaRows[0].contains("plan_origin"));
+        check("successful retry record",
+              schemaRows[1].value("attempt_disposition", "") == "accepted"
+                  && schemaRows[1].value("plan_origin", "") == "model"
+                  && schemaRows[1].value("failure_class", "") == "none");
+    } else {
+        check("failed first attempt is a retry, not a fallback success", false);
+        check("successful retry record", false);
+    }
+
+    clearLog();
+    Thoth::RobustnessMockResponses::push("not json", "length");
+    Thoth::RobustnessMockResponses::push(valid);
+    const Plan lengthPlan = planner.create_plan("Find the note. Case length");
+    auto lengthRows = readLog();
+    check("length retry then model plan",
+          lengthPlan.plan_origin == "model" && lengthRows.size() == 2
+              && lengthRows[0].value("failure_class", "") == "length"
+              && lengthRows[0].value("finish_reason", "") == "length"
+              && lengthRows[0].value("attempt_disposition", "") == "retry");
+
+    clearLog();
+    Thoth::RobustnessMockResponses::push("{\"plan\":[,]}");
+    Thoth::RobustnessMockResponses::push("{\"plan\":[,]}");
+    const Plan fellBack = planner.create_plan("Find the note. Case fallback");
+    auto fallbackRows = readLog();
+    check("exhausted parse retries become fallback",
+          fellBack.plan_origin == "fallback" && fallbackRows.size() == 2
+              && fallbackRows[0].value("failure_class", "") == "parse"
+              && fallbackRows[0].value("attempt_disposition", "") == "retry"
+              && fallbackRows[0].value("fallback_used", true) == false
+              && fallbackRows[1].value("attempt_disposition", "") == "fallback"
+              && fallbackRows[1].value("plan_origin", "") == "fallback"
+              && fallbackRows[1].value("fallback_used", false)
+              && fallbackRows[1].value("retrieval_query", "") == "Find the note. Case fallback");
+
+    clearLog();
+    Thoth::RobustnessMockResponses::pushFailure("connection reset by peer");
+    Thoth::RobustnessMockResponses::push(valid);
+    const Plan providerPlan = planner.create_plan("Find the note. Case provider");
+    auto providerRows = readLog();
+    check("provider failure is classified and can still retry",
+          providerPlan.plan_origin == "model" && providerRows.size() == 2
+              && providerRows[0].value("failure_class", "") == "provider"
+              && providerRows[0].value("provider_ok", true) == false
+              && providerRows[0].value("provider_error", "").find("connection reset") != std::string::npos
+              && providerRows[0].value("attempt_disposition", "") == "retry");
+
+    const Thoth::LibraryProvenance library = Thoth::loadedLibraryProvenance();
+    check("loaded library path", library.path.find("libbasic_agent.so") != std::string::npos);
+    std::string libraryBytes;
+    {
+        std::ifstream libraryFile(library.path, std::ios::binary);
+        std::ostringstream buffer;
+        buffer << libraryFile.rdbuf();
+        libraryBytes = buffer.str();
+    }
+    check("loaded library hash matches the file",
+          !library.sha256.empty() && library.sha256 != "unavailable"
+              && library.sha256 == Thoth::sha256Hex(libraryBytes));
+    const bool buildIdOk = library.build_id == "unavailable"
+        || (library.build_id.size() >= 16
+            && library.build_id.find_first_not_of("0123456789abcdef") == std::string::npos);
+    check("build id is measured or unavailable", buildIdOk);
+
+    Thoth::RobustnessMockResponses::reset();
+    std::cout << "testPlannerReliabilityEvidence: " << checks << " checks, " << failures << " failures\n";
     return failures == 0;
 }
 
@@ -24951,7 +25320,8 @@ int main() {
     if (const char* planSchema = std::getenv("THOTH_PLAN_SCHEMA_TESTS")) {
         if (std::string(planSchema) == "1") {
             const bool ok = testPlanParser() && testPlanLlmFacingRevisionBoundary()
-                            && testPlanParserReasonsReachRetry();
+                            && testPlanParserReasonsReachRetry() && testPlannerExtractionRepair()
+                            && testPlannerReliabilityEvidence();
             std::cout << (ok ? "Plan schema tests passed.\n" : "Plan schema tests failed.\n");
             return ok ? 0 : 1;
         }
@@ -25376,6 +25746,8 @@ int main() {
     if (!testPlanParser()) failures++;
     if (!testPlanLlmFacingRevisionBoundary()) failures++;
     if (!testPlanParserReasonsReachRetry()) failures++;
+    if (!testPlannerExtractionRepair()) failures++;
+    if (!testPlannerReliabilityEvidence()) failures++;
     if (!testResumeFromTrace()) failures++;
     if (!testProjectAnalyzeTool()) failures++;
     if (!testRunTestsTool()) failures++;

@@ -37,6 +37,22 @@ target_include_directories(thoth-graph-recovery-e2e PRIVATE
 )
 target_link_libraries(thoth-graph-recovery-e2e PRIVATE basic_agent sqlite3 Threads::Threads)
 
+# Opt-in EGAR experience-path fixture. Not an experiment arm and not registered with CTest.
+add_executable(thoth-egar-experience-e2e egar_experience_e2e.cpp)
+target_include_directories(thoth-egar-experience-e2e PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-egar-experience-e2e PRIVATE basic_agent sqlite3 Threads::Threads)
+
+# Opt-in live EGAR lifecycle fixture. Not an experiment arm and not registered with CTest.
+add_executable(thoth-egar-live-lifecycle egar_live_lifecycle.cpp)
+target_include_directories(thoth-egar-live-lifecycle PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-egar-live-lifecycle PRIVATE basic_agent sqlite3 Threads::Threads)
+
 add_executable(thoth-core-tests unit_tests.cpp)
 target_compile_definitions(thoth-core-tests PRIVATE THOTH_HAS_GUI=0)
 target_include_directories(thoth-core-tests PRIVATE
@@ -50,6 +66,38 @@ set_tests_properties(thoth-core-tests PROPERTIES
     LABELS "pr;unit"
     TIMEOUT 1800
 )
+
+# EGAR-LX Package 1. Each case is a new process so the containment flag starts off.
+add_executable(thoth-containment-tests containment_tests.cpp)
+target_include_directories(thoth-containment-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-containment-tests PRIVATE basic_agent Threads::Threads)
+set(THOTH_CONTAINMENT_CASES
+    chat_web_scrape
+    chat_code_modify
+    workflow_tool_retry
+    retrieval_payload_tool
+    retrieval_payload_tool_name
+    retrieval_step_tool
+    retrieval_empty_and_nonstr
+    ordinary_retrieval
+    resumed_tool_step
+    confirm_status
+    no_confirmation
+    confirmed_true
+    disabled_behavior
+    step_failed_metadata
+)
+foreach(case IN LISTS THOTH_CONTAINMENT_CASES)
+    add_test(NAME containment-${case} COMMAND thoth-containment-tests ${case})
+    set_tests_properties(containment-${case} PROPERTIES
+        LABELS "pr;unit;containment"
+        TIMEOUT 120
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+endforeach()
 
 if(THOTH_BUILD_GUI)
     add_executable(thoth-gui-tests
