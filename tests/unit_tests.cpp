@@ -19,6 +19,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <thread>
+#include <sqlite3.h>
 
 #if THOTH_HAS_GUI
 #include "AgentInterface.h"
@@ -29,6 +30,7 @@
 #include <wx/panel.h>
 #include <wx/sizer.h>
 #endif
+#include "experience_provenance.h"
 #include "llm_timeout_policy.h"
 #include "plan_validator.h"
 #include "cognitive_status_display.h"
@@ -8286,6 +8288,7 @@ static bool testStrategyPromotion() {
         rec.goal = "test goal";
         rec.trajectory_json = traj_json.dump();
         rec.success_score = 1.0f;
+        rec.plan_origin = "model";
         rec.embedding = {0.1f, 0.2f, 0.3f};
         rec.created_at = 1000 + i;
         memory->saveTrajectory(rec);
@@ -8340,6 +8343,7 @@ static bool testRecordedStepTypeRoundTripAndPromotion() {
         incomplete.goal = "old goal";
         incomplete.trajectory_json = nlohmann::json{{"steps", legacySteps}}.dump();
         incomplete.success_score = 1.0f;
+        incomplete.plan_origin = "model";
         incomplete.created_at = 1 + i;
         memory->saveTrajectory(incomplete);
     }
@@ -8359,6 +8363,7 @@ static bool testRecordedStepTypeRoundTripAndPromotion() {
         rec.goal = "typed goal";
         rec.trajectory_json = nlohmann::json{{"steps", steps}}.dump();
         rec.success_score = 1.0f;
+        rec.plan_origin = "model";
         rec.created_at = 10 + i;
         memory->saveTrajectory(rec);
     }
@@ -8483,6 +8488,7 @@ static bool testPlannerEvidenceSessionId() {
         strat.description = "Test Strategy";
         strat.step_pattern_json = "[\"RETRIEVAL\", \"LLM\"]";
         strat.success_rate = 0.95f;
+        strat.experience_origin = "model";
         strat.created_at = 1000;
         memory->saveStrategy(strat);
 
@@ -24138,6 +24144,18 @@ struct ExecutiveControllerP0TestAccess {
         return controller.calculate_trajectory_score(succeeded);
     }
 
+    static nlohmann::json storeWithOrigin(Thoth::ExecutiveController& controller,
+                                          const std::string& origin,
+                                          float success) {
+        controller.current_plan_.plan_origin = origin;
+        return controller.store_plan_history(success);
+    }
+
+    static std::string reuseContext(const Thoth::ExecutiveController& controller,
+                                    const std::vector<Memory::PastPlanRecord>& plans) {
+        return controller.build_plan_reuse_context(plans);
+    }
+
     static void setRevisions(Thoth::ExecutiveController& controller, int count) {
         controller.revisions_count_ = count;
     }
@@ -24777,6 +24795,457 @@ static bool testR2AbsoluteEdgeCounters() {
     return true;
 }
 
+static bool testExperienceProvenance() {
+    int failures = 0;
+    int checks = 0;
+    auto check = [&](const std::string& name, bool ok) {
+        ++checks;
+        if (!ok) {
+            std::cerr << "testExperienceProvenance: FAILED - " << name << "\n";
+            ++failures;
+        }
+    };
+
+    const std::string steps = R"({"steps":[{"type":1,"tool":"none"},{"type":2,"tool":"none"}]})";
+    auto saveTraj = [&](Memory& memory, const std::string& id, const std::string& origin, float score) {
+        Memory::CognateTrajectoryRecord rec;
+        rec.trajectory_id = id;
+        rec.goal = id;
+        rec.trajectory_json = steps;
+        rec.success_score = score;
+        rec.plan_origin = origin;
+        rec.embedding = {1.0f, 0.0f, 0.0f};
+        rec.created_at = 1000;
+        return memory.saveTrajectory(rec);
+    };
+
+    {
+        Config cfg;
+        cfg.database_path = makeTempPath("provenance_roundtrip.db").string();
+        auto memory = std::make_shared<Memory>(cfg);
+        check("save model trajectory", saveTraj(*memory, "traj-model", "model", 1.0f));
+        check("save fallback trajectory", saveTraj(*memory, "traj-fallback", "fallback", 1.0f));
+        check("save blank origin", saveTraj(*memory, "traj-blank", "", 0.4f));
+        const auto model = memory->loadTrajectory("traj-model");
+        const auto fallback = memory->loadTrajectory("traj-fallback");
+        const auto blank = memory->loadTrajectory("traj-blank");
+        check("model origin round-trip",
+              model && model->plan_origin == "model" && model->success_score == 1.0f);
+        check("fallback origin round-trip",
+              fallback && fallback->plan_origin == "fallback" && fallback->success_score == 1.0f);
+        check("blank origin becomes unknown", blank && blank->plan_origin == "unknown");
+
+        Memory::PastPlanRecord modelPlan;
+        modelPlan.plan_id = "plan-model";
+        modelPlan.goal = "model goal";
+        modelPlan.outline = R"({"plan_id":"plan-model","plan_origin":"model","steps":[]})";
+        modelPlan.success_score = 1.0f;
+        modelPlan.goal_embedding = {1.0f, 0.0f, 0.0f};
+        modelPlan.plan_origin = "model";
+        Memory::PastPlanRecord fallbackPlan = modelPlan;
+        fallbackPlan.plan_id = "plan-fallback";
+        fallbackPlan.outline = R"({"plan_id":"plan-fallback","plan_origin":"fallback","steps":[]})";
+        fallbackPlan.plan_origin = "fallback";
+        check("save past plans", memory->storePastPlan(modelPlan) && memory->storePastPlan(fallbackPlan));
+        std::string seenModel;
+        std::string seenFallback;
+        for (const auto& plan : memory->getAllPastPlans()) {
+            if (plan.plan_id == "plan-model") {
+                seenModel = plan.plan_origin;
+            }
+            if (plan.plan_id == "plan-fallback") {
+                seenFallback = plan.plan_origin;
+            }
+        }
+        check("past-plan provenance round-trip", seenModel == "model" && seenFallback == "fallback");
+        fs::remove(cfg.database_path);
+    }
+
+    {
+        const fs::path legacyPath = makeTempPath("provenance_legacy.db");
+        sqlite3* db = nullptr;
+        check("open legacy database", sqlite3_open(legacyPath.string().c_str(), &db) == SQLITE_OK && db);
+        const char* schema =
+            "CREATE TABLE past_plans (plan_id TEXT PRIMARY KEY, goal TEXT NOT NULL, outline TEXT NOT NULL,"
+            " success_score REAL NOT NULL, duration_ms INTEGER NOT NULL, failure_count INTEGER NOT NULL,"
+            " goal_embedding BLOB NOT NULL, embedding_version INTEGER NOT NULL);"
+            "CREATE TABLE trajectories (trajectory_id TEXT PRIMARY KEY, goal TEXT NOT NULL,"
+            " trajectory_json TEXT NOT NULL, success_score REAL NOT NULL, embedding BLOB,"
+            " created_at INTEGER NOT NULL, usage_count INTEGER DEFAULT 0, tier INTEGER DEFAULT 0);"
+            "CREATE TABLE strategies (strategy_id TEXT PRIMARY KEY, description TEXT NOT NULL,"
+            " step_pattern_json TEXT NOT NULL, success_rate REAL NOT NULL, created_at INTEGER NOT NULL);";
+        char* err = nullptr;
+        check("create legacy tables", sqlite3_exec(db, schema, nullptr, nullptr, &err) == SQLITE_OK);
+        sqlite3_free(err);
+        const float one = 1.0f;
+        auto insertPlan = [&](const char* id, const char* outline) {
+            sqlite3_stmt* stmt = nullptr;
+            const char* sql = "INSERT INTO past_plans VALUES (?, 'legacy', ?, 1.0, 1, 0, ?, 2);";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+                return false;
+            }
+            sqlite3_bind_text(stmt, 1, id, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, outline, -1, SQLITE_STATIC);
+            sqlite3_bind_blob(stmt, 3, &one, sizeof(one), SQLITE_STATIC);
+            const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+            sqlite3_finalize(stmt);
+            return ok;
+        };
+        auto insertTraj = [&](const char* id, const char* body) {
+            sqlite3_stmt* stmt = nullptr;
+            const char* sql = "INSERT INTO trajectories VALUES (?, 'legacy', ?, 1.0, ?, 1, 0, 0);";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+                return false;
+            }
+            sqlite3_bind_text(stmt, 1, id, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, body, -1, SQLITE_STATIC);
+            sqlite3_bind_blob(stmt, 3, &one, sizeof(one), SQLITE_STATIC);
+            const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+            sqlite3_finalize(stmt);
+            return ok;
+        };
+        check("insert explicit legacy plan",
+              insertPlan("legacy-model", R"({"plan_origin":"model"})"));
+        check("insert unclassified legacy plan", insertPlan("legacy-none", R"({"plan_id":"legacy-none"})"));
+        check("insert explicit legacy trajectory",
+              insertTraj("legacy-traj-fallback", R"({"plan_initial":{"plan_origin":"fallback"}})"));
+        check("insert unclassified legacy trajectory",
+              insertTraj("legacy-traj-none", R"({"plan_initial":{"plan_id":"none"}})"));
+        check("insert legacy strategy",
+              sqlite3_exec(db,
+                           "INSERT INTO strategies VALUES ('strat-legacy','old','[]',1.0,1);",
+                           nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(db);
+
+        Config cfg;
+        cfg.database_path = legacyPath.string();
+        auto memory = std::make_shared<Memory>(cfg);
+        std::string modelOrigin;
+        std::string noneOrigin;
+        for (const auto& plan : memory->getAllPastPlans()) {
+            if (plan.plan_id == "legacy-model") modelOrigin = plan.plan_origin;
+            if (plan.plan_id == "legacy-none") noneOrigin = plan.plan_origin;
+        }
+        const auto fallback = memory->loadTrajectory("legacy-traj-fallback");
+        const auto none = memory->loadTrajectory("legacy-traj-none");
+        const auto strategy = memory->loadStrategy("strat-legacy");
+        check("legacy explicit plan origin is kept", modelOrigin == "model");
+        check("legacy plan without origin is unknown", noneOrigin == "unknown");
+        check("legacy explicit trajectory origin is kept", fallback && fallback->plan_origin == "fallback");
+        check("legacy trajectory without origin is unknown", none && none->plan_origin == "unknown");
+        check("legacy strategy stays unknown", strategy && strategy->experience_origin == "unknown");
+        fs::remove(legacyPath);
+    }
+
+    auto promote = [&](const std::string& name, const std::vector<std::pair<std::string, float>>& rows,
+                       int expectCount) {
+        Config cfg;
+        cfg.database_path = makeTempPath(name).string();
+        auto memory = std::make_shared<Memory>(cfg);
+        int index = 0;
+        for (const auto& row : rows) {
+            Memory::CognateTrajectoryRecord rec;
+            rec.trajectory_id = name + "-" + std::to_string(index++);
+            rec.goal = name;
+            rec.trajectory_json = steps;
+            rec.success_score = row.second;
+            rec.plan_origin = row.first;
+            rec.embedding = {1.0f, 0.0f, 0.0f};
+            rec.created_at = index;
+            memory->saveTrajectory(rec);
+        }
+        Thoth::StrategyEngine engine(memory);
+        engine.processTrajectories();
+        const auto strategies = memory->getAllStrategies();
+        fs::remove(cfg.database_path);
+        return static_cast<int>(strategies.size()) == expectCount
+            && (expectCount == 0 || (strategies[0].experience_origin == "model"
+                                     && strategies[0].success_rate >= 0.8f));
+    };
+    check("fallback score 1 does not promote",
+          promote("fallback_only.db", {{"fallback", 1.0f}, {"fallback", 1.0f}, {"fallback", 1.0f}}, 0));
+    check("three model trajectories promote",
+          promote("model_only.db", {{"model", 1.0f}, {"model", 1.0f}, {"model", 1.0f}}, 1));
+    check("mixed origins ignore ineligible rows",
+          promote("mixed.db",
+                  {{"model", 1.0f}, {"model", 1.0f}, {"model", 1.0f}, {"fallback", 0.0f}, {"unknown", 0.0f}},
+                  1));
+    check("two model rows do not promote",
+          promote("too_few.db", {{"model", 1.0f}, {"model", 1.0f}, {"fallback", 1.0f}}, 0));
+
+    {
+        Config cfg;
+        cfg.database_path = makeTempPath("provenance_existing_strategy.db").string();
+        auto memory = std::make_shared<Memory>(cfg);
+        for (int i = 0; i < 3; ++i) {
+            saveTraj(*memory, "keep-" + std::to_string(i), "model", 1.0f);
+        }
+        Thoth::StrategyEngine engine(memory);
+        engine.processTrajectories();
+        auto strategies = memory->getAllStrategies();
+        check("promotion created one strategy", strategies.size() == 1);
+        if (strategies.size() == 1) {
+            Memory::CognateStrategyRecord legacy = strategies[0];
+            legacy.experience_origin = "unknown";
+            legacy.description = "legacy unclassified";
+            memory->saveStrategy(legacy);
+            engine.processTrajectories();
+            const auto kept = memory->loadStrategy(legacy.strategy_id);
+            check("unclassified strategy is not rewritten",
+                  kept && kept->experience_origin == "unknown" && kept->description == "legacy unclassified");
+        }
+        fs::remove(cfg.database_path);
+    }
+
+    {
+        Config cfg;
+        cfg.database_path = makeTempPath("provenance_rank.db").string();
+        auto memory = std::make_shared<Memory>(cfg);
+        auto storePlan = [&](const std::string& id, const std::string& origin, const std::vector<float>& embedding) {
+            Memory::PastPlanRecord plan;
+            plan.plan_id = id;
+            plan.goal = id;
+            plan.outline = std::string("{\"plan_origin\":\"") + origin + "\"}";
+            plan.success_score = 1.0f;
+            plan.goal_embedding = embedding;
+            plan.plan_origin = origin;
+            return memory->storePastPlan(plan);
+        };
+        check("rank fixtures",
+              storePlan("high-fallback", "fallback", {1.0f, 0.0f, 0.0f})
+                  && storePlan("high-unknown", "unknown", {1.0f, 0.0f, 0.0f})
+                  && storePlan("lower-model", "model", {0.8f, 0.6f, 0.0f}));
+        const auto ranked = memory->retrieveSimilarPlans({1.0f, 0.0f, 0.0f}, 1);
+        check("eligible plan remains below an ineligible top rank",
+              ranked.size() == 1 && ranked[0].plan_id == "lower-model");
+        auto planner = std::make_shared<P0CountingPlanner>();
+        P0Harness harness("provenance_context", planner);
+        const std::string reuse = Thoth::ExecutiveControllerP0TestAccess::reuseContext(
+            *harness.controller, ranked);
+        check("reuse context contains only the eligible plan",
+              reuse.find("lower-model") != std::string::npos
+                  && reuse.find("high-fallback") == std::string::npos
+                  && reuse.find("high-unknown") == std::string::npos);
+        fs::remove(cfg.database_path);
+    }
+
+    {
+        const fs::path workspace = makeTempPath("provenance_planner_ws");
+        fs::create_directories(workspace);
+        WorkspaceEnvGuard guard(workspace.string());
+        Config cfg;
+        cfg.database_path = makeTempPath("provenance_planner.db").string();
+        auto memory = std::make_shared<Memory>(cfg);
+        auto embedder = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf);
+        auto index = new IndexManager(embedder.get());
+        auto rag = std::make_shared<RAGPipeline>(std::move(embedder), index);
+        auto prompts = std::make_shared<PromptFactory>(*memory, *rag);
+        const std::string goal = "widget relay-cache note provenance";
+        const std::string strategyText = goal + " [\"RETRIEVAL\", \"LLM\"]";
+        rag->engine->updateVocabulary(goal);
+        rag->engine->updateVocabulary(strategyText);
+        const auto goalEmbedding = rag->engine->embed(goal);
+        auto lower = goalEmbedding;
+        if (lower.size() >= 2) {
+            lower[0] += 0.2f;
+            lower[1] += 0.2f;
+        }
+        const float lowerCosine = goalEmbedding.empty()
+            ? 0.0f
+            : GragScorer::cosine_similarity(goalEmbedding, lower);
+        check("perturbed trajectory stays eligible by similarity", lowerCosine >= 0.55f && lowerCosine < 1.0f);
+
+        Memory::CognateTrajectoryRecord high;
+        high.trajectory_id = "traj-fallback-high";
+        high.goal = "FALLBACK_TRAJECTORY_MARKER";
+        high.trajectory_json = steps;
+        high.success_score = 1.0f;
+        high.plan_origin = "fallback";
+        high.embedding = goalEmbedding;
+        high.created_at = 1;
+        Memory::CognateTrajectoryRecord eligible = high;
+        eligible.trajectory_id = "traj-model-lower";
+        eligible.goal = "MODEL_TRAJECTORY_MARKER";
+        eligible.plan_origin = "model";
+        eligible.embedding = lower;
+        eligible.created_at = 2;
+        Memory::CognateTrajectoryRecord unknown = high;
+        unknown.trajectory_id = "traj-unknown-high";
+        unknown.goal = "UNKNOWN_TRAJECTORY_MARKER";
+        unknown.plan_origin = "unknown";
+        check("planner trajectory fixtures",
+              memory->saveTrajectory(high) && memory->saveTrajectory(eligible) && memory->saveTrajectory(unknown));
+
+        Memory::CognateStrategyRecord blocked;
+        blocked.strategy_id = "strat-unknown-block";
+        blocked.description = goal;
+        blocked.step_pattern_json = "[\"RETRIEVAL\", \"LLM\"]";
+        blocked.success_rate = 1.0f;
+        blocked.experience_origin = "unknown";
+        blocked.created_at = 1;
+        Memory::CognateStrategyRecord allowed = blocked;
+        allowed.strategy_id = "strat-eligible-model";
+        allowed.experience_origin = "model";
+        check("planner strategy fixtures", memory->saveStrategy(blocked) && memory->saveStrategy(allowed));
+
+        Memory::PastPlanRecord fallbackPlan;
+        fallbackPlan.plan_id = "plan-fallback-high";
+        fallbackPlan.goal = "fallback goal";
+        fallbackPlan.outline = R"({"plan_origin":"fallback"})";
+        fallbackPlan.success_score = 1.0f;
+        fallbackPlan.goal_embedding = goalEmbedding;
+        fallbackPlan.plan_origin = "fallback";
+        Memory::PastPlanRecord modelPlan = fallbackPlan;
+        modelPlan.plan_id = "plan-model-lower";
+        modelPlan.outline = R"({"plan_origin":"model"})";
+        modelPlan.goal_embedding = lower;
+        modelPlan.plan_origin = "model";
+        check("planner past-plan fixtures",
+              memory->storePastPlan(fallbackPlan) && memory->storePastPlan(modelPlan));
+        const auto injectedPlans = memory->retrieveSimilarPlans(goalEmbedding, 1);
+        const std::string reuse = prompts->buildRevisionPrompt(goal, "{}", "{}", nullptr);
+        check("revision prompt does not inject experience",
+              reuse.find("PAST EXPERIENCE") == std::string::npos
+                  && reuse.find("RELEVANT PAST APPROACHES") == std::string::npos
+                  && reuse.find("STRATEGY") == std::string::npos);
+
+        LLMInterface llm(LLMBackend::Ollama, &cfg);
+        auto planner = std::make_shared<LLMPlanner>(memory, rag, prompts, &llm);
+        auto registry = std::make_shared<ToolRegistry>();
+        Thoth::ExecutiveController controller(planner, registry, rag, memory);
+        const std::string reuseContext = Thoth::ExecutiveControllerP0TestAccess::reuseContext(
+            controller, injectedPlans);
+        check("conditioned reuse excludes fallback",
+              reuseContext.find("plan-model-lower") != std::string::npos
+                  && reuseContext.find("plan-fallback-high") == std::string::npos);
+
+        Thoth::RobustnessMockResponses::reset();
+        Thoth::RobustnessMockResponses::push(
+            R"({"plan":[{"step_id":"retrieve-context","step_type":"RETRIEVAL","description":"Retrieve relevant corpus context","payload":{"query":"widget relay-cache","top_k":5}},{"step_id":"synthesize","step_type":"LLM","description":"Summarize findings","depends_on":["retrieve-context"],"payload":{}}]})");
+        const std::string sessionId = "session-provenance-9b";
+        StructuredLogger::instance().setContext("req-provenance-9b", sessionId);
+        const Plan planned = planner->create_plan(goal + reuseContext);
+        StructuredLogger::instance().clearContext();
+        check("conditioned planning still accepts a model plan", planned.plan_origin == "model");
+
+        std::vector<fs::path> logCandidates;
+        logCandidates.push_back(workspace / "app_log.jsonl");
+        logCandidates.push_back(fs::current_path() / "agent_workspace" / "app_log.jsonl");
+        std::error_code walkError;
+        for (const auto& entry : fs::directory_iterator(fs::temp_directory_path(), walkError)) {
+            const fs::path candidate = entry.path() / "app_log.jsonl";
+            std::error_code fileError;
+            if (fs::is_regular_file(candidate, fileError) && !fileError) {
+                logCandidates.push_back(candidate);
+            }
+        }
+        bool sawModelTrajectory = false;
+        bool sawFallbackTrajectory = false;
+        bool sawUnknownTrajectory = false;
+        bool sawModelStrategy = false;
+        bool sawUnknownStrategy = false;
+        bool sawReuse = false;
+        for (const auto& logPath : logCandidates) {
+            std::ifstream log(logPath);
+            std::string line;
+            while (std::getline(log, line)) {
+            if (line.find(sessionId) == std::string::npos) {
+                continue;
+            }
+            if (line.find("traj-model-lower") != std::string::npos) sawModelTrajectory = true;
+            if (line.find("traj-fallback-high") != std::string::npos) sawFallbackTrajectory = true;
+            if (line.find("traj-unknown-high") != std::string::npos) sawUnknownTrajectory = true;
+            if (line.find("strat-eligible-model") != std::string::npos) sawModelStrategy = true;
+            if (line.find("strat-unknown-block") != std::string::npos) sawUnknownStrategy = true;
+            if (line.find("PLANNER_CONTEXT_ASSEMBLY") != std::string::npos
+                && line.find("\"plan_reuse_in_goal\":true") != std::string::npos) {
+                sawReuse = true;
+            }
+            }
+        }
+        check("lower eligible trajectory is injected", sawModelTrajectory && sawReuse);
+        check("fallback and unknown trajectories are not injected",
+              !sawFallbackTrajectory && !sawUnknownTrajectory);
+        check("only the model strategy is injected", sawModelStrategy && !sawUnknownStrategy);
+        Thoth::RobustnessMockResponses::reset();
+        fs::remove(cfg.database_path);
+    }
+
+    {
+        auto planner = std::make_shared<P0CountingPlanner>();
+        P0Harness harness("provenance_acquire", planner);
+        Thoth::ExecutiveControllerP0TestAccess::armFinishedPlan(*harness.controller, "acquired-fallback", true, "");
+        const float scored = Thoth::ExecutiveControllerP0TestAccess::score(*harness.controller, true);
+        const auto meta = Thoth::ExecutiveControllerP0TestAccess::storeWithOrigin(
+            *harness.controller, "fallback", scored);
+        const auto stored = harness.memory->loadTrajectory("traj-acquired-fallback");
+        const auto plans = harness.memory->getAllPastPlans();
+        bool planKept = false;
+        for (const auto& plan : plans) {
+            if (plan.plan_id == "acquired-fallback" && plan.plan_origin == "fallback"
+                && plan.success_score == 1.0f && plan.outline.find("\"plan_origin\":\"fallback\"") != std::string::npos) {
+                planKept = true;
+            }
+        }
+        check("acquisition stores fallback success without treating it as failure",
+              scored == 1.0f && stored && stored->plan_origin == "fallback" && stored->success_score == 1.0f
+                  && planKept && meta.value("learning_eligible", true) == false
+                  && meta.value("plan_origin", "") == "fallback");
+        check("no strategy from one fallback acquisition", harness.memory->getAllStrategies().empty());
+    }
+
+    {
+        Config storeA;
+        storeA.database_path = makeTempPath("provenance_store_a.db").string();
+        Config storeB;
+        storeB.database_path = makeTempPath("provenance_store_b.db").string();
+        auto memoryA = std::make_shared<Memory>(storeA);
+        auto memoryB = std::make_shared<Memory>(storeB);
+        check("store A write", saveTraj(*memoryA, "store-a-only", "model", 1.0f));
+        check("store B does not see store A", !memoryB->loadTrajectory("store-a-only"));
+        fs::remove(storeA.database_path);
+        fs::remove(storeB.database_path);
+    }
+
+    const fs::path metricsPath = makeTempPath("provenance_metrics.jsonl");
+    setenv("THOTH_COGNITIVE_METRICS_LOG", metricsPath.string().c_str(), 1);
+    for (const char* origin : {"model", "fallback", "unknown"}) {
+        Thoth::GoalCognitiveMetricsRecord record;
+        record.plan_id = std::string("metrics-") + origin;
+        record.goal = origin;
+        record.outcome = std::string(origin) == "model" ? "completed" : "failed";
+        record.trajectory_score = std::string(origin) == "fallback" ? 1.0f : 0.0f;
+        record.plan_origin = origin;
+        record.learning_eligible = Thoth::learningEligibleOrigin(origin);
+        Thoth::CognitiveMetricsLogger::instance().logGoalMetrics(record);
+    }
+    unsetenv("THOTH_COGNITIVE_METRICS_LOG");
+    std::ifstream metrics(metricsPath);
+    std::string metricsLine;
+    bool sawModel = false;
+    bool sawFallback = false;
+    bool sawUnknown = false;
+    while (std::getline(metrics, metricsLine)) {
+        const auto row = nlohmann::json::parse(metricsLine);
+        if (row.value("plan_origin", "") == "model" && row.value("learning_eligible", false)
+            && row.value("outcome", "") == "completed") {
+            sawModel = true;
+        }
+        if (row.value("plan_origin", "") == "fallback" && row.value("learning_eligible", true) == false
+            && row.value("trajectory_score", 0.0) == 1.0 && row.value("outcome", "") == "failed") {
+            sawFallback = true;
+        }
+        if (row.value("plan_origin", "") == "unknown" && row.value("learning_eligible", true) == false) {
+            sawUnknown = true;
+        }
+    }
+    check("evaluation records keep every origin", sawModel && sawFallback && sawUnknown);
+    fs::remove(metricsPath);
+
+    std::cout << "testExperienceProvenance: " << checks << " checks, " << failures << " failures\n";
+    return failures == 0;
+}
+
 static bool testP0TrajectoryScoreUnchanged() {
     auto planner = std::make_shared<P0CountingPlanner>();
     P0Harness harness("p0_score", planner);
@@ -25321,8 +25790,22 @@ int main() {
         if (std::string(planSchema) == "1") {
             const bool ok = testPlanParser() && testPlanLlmFacingRevisionBoundary()
                             && testPlanParserReasonsReachRetry() && testPlannerExtractionRepair()
-                            && testPlannerReliabilityEvidence();
+                            && testPlannerReliabilityEvidence()
+                            && testExperienceProvenance();
             std::cout << (ok ? "Plan schema tests passed.\n" : "Plan schema tests failed.\n");
+            return ok ? 0 : 1;
+        }
+    }
+
+    if (const char* strategyTests = std::getenv("THOTH_STRATEGY_TESTS")) {
+        if (std::string(strategyTests) == "1") {
+            const bool ok = testStrategyPromotion()
+                            && testRecordedStepTypeRoundTripAndPromotion()
+                            && testStrategyInjection()
+                            && testPlannerEvidenceSessionId()
+                            && testP0TrajectoryScoreUnchanged();
+            std::cout << (ok ? "Strategy provenance tests passed.\n"
+                             : "Strategy provenance tests failed.\n");
             return ok ? 0 : 1;
         }
     }
@@ -25748,6 +26231,7 @@ int main() {
     if (!testPlanParserReasonsReachRetry()) failures++;
     if (!testPlannerExtractionRepair()) failures++;
     if (!testPlannerReliabilityEvidence()) failures++;
+    if (!testExperienceProvenance()) failures++;
     if (!testResumeFromTrace()) failures++;
     if (!testProjectAnalyzeTool()) failures++;
     if (!testRunTestsTool()) failures++;

@@ -37,6 +37,62 @@ target_include_directories(thoth-graph-recovery-e2e PRIVATE
 )
 target_link_libraries(thoth-graph-recovery-e2e PRIVATE basic_agent sqlite3 Threads::Threads)
 
+# Phase 10C-1 C6 metrics recovery. Isolated stores only.
+add_executable(thoth-c6-metrics-recovery-tests c6_metrics_recovery_tests.cpp)
+target_include_directories(thoth-c6-metrics-recovery-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-c6-metrics-recovery-tests PRIVATE basic_agent Threads::Threads)
+add_test(NAME thoth-c6-metrics-recovery-tests COMMAND thoth-c6-metrics-recovery-tests)
+set_tests_properties(thoth-c6-metrics-recovery-tests PROPERTIES
+    LABELS "cognitive"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+# Phase 10C-2 episode checkpoint recovery. Isolated stores only.
+add_executable(thoth-episode-recovery-tests episode_recovery_tests.cpp)
+target_include_directories(thoth-episode-recovery-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-episode-recovery-tests PRIVATE basic_agent sqlite3 Threads::Threads)
+add_test(NAME thoth-episode-recovery-tests COMMAND thoth-episode-recovery-tests)
+set_tests_properties(thoth-episode-recovery-tests PROPERTIES
+    LABELS "cognitive"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+# Phase 10C-3 reflection recovery. Isolated stores only.
+add_executable(thoth-reflection-recovery-tests reflection_recovery_tests.cpp)
+target_include_directories(thoth-reflection-recovery-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-reflection-recovery-tests PRIVATE basic_agent Threads::Threads)
+add_test(NAME thoth-reflection-recovery-tests COMMAND thoth-reflection-recovery-tests)
+set_tests_properties(thoth-reflection-recovery-tests PROPERTIES
+    LABELS "cognitive"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+# Phase 10F-2 durable cognitive metrics outbox. Isolated stores only.
+add_executable(thoth-cognitive-metrics-outbox-tests cognitive_metrics_outbox_tests.cpp)
+target_include_directories(thoth-cognitive-metrics-outbox-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-cognitive-metrics-outbox-tests PRIVATE basic_agent sqlite3 Threads::Threads)
+add_test(NAME thoth-cognitive-metrics-outbox-tests COMMAND thoth-cognitive-metrics-outbox-tests)
+set_tests_properties(thoth-cognitive-metrics-outbox-tests PROPERTIES
+    LABELS "cognitive"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 # Opt-in EGAR experience-path fixture. Not an experiment arm and not registered with CTest.
 add_executable(thoth-egar-experience-e2e egar_experience_e2e.cpp)
 target_include_directories(thoth-egar-experience-e2e PRIVATE
@@ -60,7 +116,7 @@ target_include_directories(thoth-core-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/include
     ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
 )
-target_link_libraries(thoth-core-tests PRIVATE basic_agent alp_migration Threads::Threads)
+target_link_libraries(thoth-core-tests PRIVATE basic_agent alp_migration sqlite3 Threads::Threads)
 add_test(NAME thoth-core-tests COMMAND thoth-core-tests)
 set_tests_properties(thoth-core-tests PROPERTIES
     LABELS "pr;unit"
