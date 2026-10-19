@@ -1,6 +1,74 @@
 # Completed Improvements Log
 
-Last updated: 2026-10-14 (live reliability sequence)
+Last updated: 2026-10-19 (Phase 9B, Phase 10, and this completed-work log committed)
+
+## 2026-10-19 — Phase 10 recovery checkpoint committed
+
+**Status:** Engineering verification approved and committed. This is not an official EGAR A/B and not a C6.4 window. No 28-day window was opened.
+
+**Commits:** engine `f2c1ceaf4ee50df12ff68b007a04163842f54916` (2026-10-19) on `fix/g1e-trajectory-default`. Parent `51f2dbc07d6690f5d31c8aeac07f06a30b6dd0fb` (2026-10-19) on `env/isolation-infra`, pointing at that engine commit. The tested library was SHA-256 `bcf1b4df78b2fd1ab594e45626bf047b6538a7f2a847e8fdd04b2011b4e7d7a6`. The development database remained `2026-10-12 11:14:35` and `logs/cognitive_metrics.jsonl` remained `2026-10-18 13:59:44`.
+
+**What changed.** The engine commit also contains the Phase 9B provenance work described below. Phase 10 makes recovery durable. C6 window identity and counters are restored from the plan checkpoint. A resumed goal is `metrics_partial` with reason `checkpoint_gap`; incomplete counters stay under `available_counters` and are not written as exact totals. A legacy plan with no checkpoint omits unavailable values. Episode checkpoint and episode row commit together. Identical observations are not duplicated, and conflicting observations are kept. Resume backfills only steps that were already `SUCCESS` or `FAILED`. Reflection preserves the working trajectory and the recorded trajectory score through graph commit, history aging, and restart. Resume uses the recorded score when it is present and recalculates only when it is absent. Terminal cognitive metrics are inserted in `cognitive_metrics_outbox` in the same transaction as history aging when the plan is terminal and reflection is not pending. Fail-closed and abort use their own durable insert. Flush appends the stored payload to the JSONL log after an exclusive `flock` on `<log>.lock`, matching an exact parsed `metrics_id`. A truncated tail is preserved as a prefix. Restart flushes pending rows and does not invent a line for a legacy terminal plan that has no outbox row.
+
+**Verification.** On 2026-10-19, after the file lock was in the tested library and before the commits: C6, episode, reflection, and cognitive-metrics outbox suites passed, including locked concurrent writers, crash-after-append recovery, and two databases sharing one log. The graph campaign passed in default, `gr-repair`, `gr-checkpoint`, and `gr-integrated` modes, covering GR-1 through GR-14 and the integrated case. A separate-process check killed a model-origin goal under disposable `window-a` after a durable checkpoint and resumed it under disposable `window-b`. The one metrics line kept window A, `metrics_partial`, reason `checkpoint_gap`, and omitted canonical totals. A second process reading a database written by the first retrieved and injected only model-origin plans and trajectories, promoted only the model pattern, and left the fallback strategy stored and ineligible. The commits did not change that library hash.
+
+**Limitations.** `flock` was tested on the local filesystem. `logGoalMetrics` remains a direct append used by a unit test against a temporary log; the engine terminal path uses the outbox when memory is present. Calling the delivery scan and the append as two separate logger operations can still duplicate a line. Abort still writes its episode and deletes the active plan as two steps. Strategy-prompt selection inside a live `LLMPlanner::create_plan` call was inspected and was not executed in the cross-process eligibility run. Six identical benchmark episode rows in the development database were left in place. No official window is open.
+
+## 2026-10-18 — Phase 9C live EGAR provenance verification (uncommitted)
+
+**Status:** Live lifecycle PASS. Not a commit. Phase 9B source and tests were present in the working tree and were not staged. This is development verification, not the official EGAR A/B and not a C6.4 window.
+
+**Evidence:** `/tmp/thoth-v1-live-KeWYDk`. Harness exit 0. Wall clock 200.6 seconds. `controlled_graph=PASS`, `live_nodes=PASS`, `live_edges=NOT_TESTED`. Prior evidence directories `aQvWOI`, `gNtMyi`, `MyhbGj`, and `jW5Dgh` were left in place.
+
+**Demonstrated.** Five planner goals were model-origin, each on the first attempt with `finish_reason=stop`, requested max tokens 512, and trajectory score 1.0. Store A stored four model past plans and four model trajectories. After the third eligible trajectory, `strat-e9eb2142` (`RETRIEVAL->LLM`) was promoted with `experience_origin=model`, then updated to four occurrences at success rate 1.0. Store A goal 4 injected that strategy, model trajectory `traj-plan-1792361477831-1`, and model past plan `plan-1792361477831-1`. Store B held only its own model plan and trajectory and did not receive Store A experience. The controlled two-retrieval graph subcase wrote edge `6a25aacaadf8be90` → `e5d88a8be66b0559` at weight 0.2786 with success count 1. The graph plan’s empty origin was stored as `unknown` and `learning_eligible=false`; graph reinforcement did not consult origin. `live_report.json` library SHA-256 `599586f5e27ad944c4ec6367bbfe3134e05aa48868047d919c3e2e2c0d5cd1dd` and build ID `9c0fe2fff75a6992d932ba4ee70cd7369e4f5396` match an independent hash of the loaded `libbasic_agent.so`.
+
+**Not shown live.** No fallback-origin plan occurred, so fallback exclusion was not exercised. Trajectory score 1.0 is execution completion, not answer correctness. One run is not a statistical comparison with `/tmp/thoth-v1-live-jW5Dgh`.
+
+**Later checkpoint.** The Phase 9B source this run exercised was committed on 2026-10-19 as engine `f2c1ceaf4ee50df12ff68b007a04163842f54916`, together with Phase 10. This 9C entry remains a live-verification record. It was not given its own commit. The library hash above is the pre-checkpoint build, not `f2c1cea`.
+
+## 2026-10-18 — Phase 9B EGAR experience provenance and learning integrity (uncommitted)
+
+**Status:** Implemented and deterministically tested on 2026-10-18 while still uncommitted. Committed on 2026-10-19 inside engine `f2c1ceaf4ee50df12ff68b007a04163842f54916`, with the Phase 9B unit coverage in parent `51f2dbc07d6690f5d31c8aeac07f06a30b6dd0fb`. The original verification below was not re-run as part of the 2026-10-19 commit.
+
+**What changed.** Queryable `plan_origin` on past plans and trajectories, and `experience_origin` on strategies, with backward-compatible `ALTER TABLE` and default `unknown`. Explicit JSON origins `model` and `fallback` are copied when the column is first added. Other legacy rows stay `unknown`. Only `model` is eligible for strategy promotion and learned planning injection. Fallback and unknown records remain stored and keep their execution scores. Promotion thresholds stay at three trajectories and mean 0.8, counted on eligible rows only. An existing unclassified strategy is not relabeled or replaced. Retrieval skips ineligible rows before the limit of one. Graph weight formulas were not changed.
+
+**Verification.** `THOTH_PLAN_SCHEMA_TESTS=1` on `build/debug/tests/thoth-core-tests`: parser repair 18 checks, reliability evidence 25 checks, `testExperienceProvenance` 44 checks, all zero failures. `THOTH_STRATEGY_TESTS=1` passed promotion, recorded-step promotion, strategy injection, session injection, and trajectory scoring. `thoth-egar-experience-e2e` exited 0 (`egar-experience PASS`, Store A strategy `strat-9e682601`). No live inference in this phase.
+
+## 2026-10-18 — EGAR-LX investigation records committed
+
+**Commit:** parent `c5e9aadd9feee0724f486f1d427f28ba19224a20` (2026-10-18). Submodule pointer unchanged at `0cb11a0bba4654a80ea67b6db954f89a5c52d599`.
+
+**What changed.** Planning documents only: `docs/EGAR_LINUX_DIAGNOSTIC_AB_PROTOCOL.md`, `docs/EGAR_LX_EXPERIENCE_PATHWAY_INVESTIGATION.md`, `docs/EGAR_LX_FAMILY_DIVERSITY_FEASIBILITY_REPORT.md`, `docs/EGAR_LX_SAMPLE_SIZE_PLANNING_REPORT.md`, `docs/THOTH_ARCHITECTURE_INTEGRITY_REMEDIATION_PLAN.md`, and `docs/THOTH_POST_P0_VERIFICATION_INVESTIGATION.md`.
+
+**Verification.** Documentation commit. EGAR-LX v0.1 is a draft. No baseline was frozen and no experiment was authorized or run by this commit.
+
+## 2026-10-18 — Planner repair, attempt provenance, and containment committed
+
+**Commits:** parent `1fe3bcfee44b62a3eede070c9449caa95a5beb4c` (2026-10-18), pointing at submodule `0cb11a0bba4654a80ea67b6db954f89a5c52d599`. That submodule commit follows `dc5ec2f64552b0f21ae6749d4c3ab73bc62d76b9` (2026-10-18).
+
+**Engine `dc5ec2f`.** Fixed-evidence containment fails closed for tool dispatch and workflow tool markers while the flag is on. It does not freeze an experiment.
+
+**Engine `0cb11a0`.** Phase 3 accepts an embedded plan object, omits the body of a length-capped retry, and records `plan_origin` on the plan. Phase 9A states the required plan schema, separates length, parse, schema, and provider retries, and logs attempt metadata with a completion hash. Successful completion text is not stored in that log.
+
+**Parent `1fe3bcf`.** Submodule pointer plus `tests/egar_live_lifecycle.cpp`, `tests/egar_experience_e2e.cpp`, `tests/containment_tests.cpp`, planner regression coverage in `tests/unit_tests.cpp`, and fixture `tests/fixtures/planner/aQvWOI_goal2_attempt0_completion.txt`.
+
+**Verification.** After this checkpoint, `THOTH_PLAN_SCHEMA_TESTS=1 ./build/debug/tests/thoth-core-tests` passed (`testPlannerExtractionRepair` 18 checks, `testPlannerReliabilityEvidence` 25 checks). The earlier live directory `/tmp/thoth-v1-live-jW5Dgh` predates this committed library hash: four Store A plans were model-origin and the Store B plan was fallback. That run is not a verification of the committed Phase 9A evidence fields. Containment tests were committed with the parent change and were not re-run for this log entry.
+
+## 2026-10-16 — Integrated V1 lifecycle recovery across restart
+
+**Commit:** parent `5fecce9134e319da803e3ffc43d658a511dbda4e` (2026-10-16). Submodule pointer unchanged at `759bf062e579709c9cd40f9f149aac3aca227db3`.
+
+**What changed.** `tests/graph_recovery_e2e.cpp` gained the integrated lifecycle check across process restart. The harness remains outside CTest and does not start inference servers.
+
+**Verification.** Recorded as a committed test. This log update did not re-run the harness.
+
+## 2026-10-16 — Graph and experience recovery across restarts
+
+**Commits:** engine `759bf062e579709c9cd40f9f149aac3aca227db3` (2026-10-16), parent `09ec88885420b7ea517c809303dba3975b0917ed` (2026-10-16) pointing at that engine commit.
+
+**What changed.** The engine preserves graph reinforcement and experience history across restart: plan and trajectory persistence, graph refiner updates, and memory repository recovery. The parent adds `tests/graph_recovery_e2e.cpp` (disposable GR-1..GR-5 campaign, not CTest), related unit coverage, and a small MTCP generation-check adjustment.
+
+**Verification.** Recorded as a committed repair and harness. This log update did not re-run GR-1..GR-5.
 
 ## 2026-10-14 — Live reliability sequence verified
 
