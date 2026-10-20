@@ -540,8 +540,40 @@ void MainFrame::RefreshRagPanel() {
                     slot->SetToolTip(wxString::FromUTF8(Thoth::RemoteRagHonesty::kHostOnlyTooltip));
                 }
             } else {
-                slot->SetLabel(fn.GetFullName());
-                slot->UnsetToolTip();
+                const Thoth::LocalNoteEngineInfo* engineInfo = nullptr;
+                if (m_activeSessionIndex >= 0
+                    && m_activeSessionIndex < static_cast<int>(m_sessions.size())) {
+                    const auto& session =
+                        m_sessions[static_cast<std::size_t>(m_activeSessionIndex)];
+                    const auto it = session.localNoteEngine.find(path);
+                    if (it != session.localNoteEngine.end()) {
+                        engineInfo = &it->second;
+                    }
+                }
+                if (engineInfo
+                    && Thoth::LocalNoteEngineSync::localNoteEngineSlotShowsAttachedStatus(
+                           *engineInfo)) {
+                    std::string label = Thoth::RemoteRagHonesty::formatLocalNoteEngineSlotLabel(
+                            base,
+                            engineInfo->document_id,
+                            engineInfo->chunk_count,
+                            engineInfo->indexing,
+                            engineInfo->failed,
+                            alp_gui);
+                    if (alp_gui && !engineInfo->reconcile_verified && !path.empty()) {
+                        label += " · cache not verified";
+                    }
+                    slot->SetLabel(wxString::FromUTF8(label));
+                    slot->SetToolTip(wxString::FromUTF8(
+                        Thoth::RemoteRagHonesty::formatLocalNoteEngineTooltip(
+                            engineInfo->document_id,
+                            engineInfo->chunk_count,
+                            engineInfo->indexing,
+                            engineInfo->failed)));
+                } else {
+                    slot->SetLabel(fn.GetFullName());
+                    slot->UnsetToolTip();
+                }
             }
             Thoth::LocalNoteSlotLayout::showLocalNoteDeleteButton(btn);
         }

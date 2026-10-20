@@ -143,9 +143,17 @@ inline std::string actionPickerLabel(const std::string& action) {
     return action;
 }
 
-/** True after Send to Engine accept (POST), not dry_run reconcile cache alone. */
+/**
+ * True after Send to Engine accept (POST), not dry_run reconcile cache alone.
+ * Legacy accepts have no revision_id. A completed legacy ingest still counts
+ * when the document id was stored and indexing recorded a chunk count.
+ * Reconcile-only rows stay hidden: they set reconcile_verified without a POST.
+ */
 inline bool localNoteEngineSlotShowsAttachedStatus(const LocalNoteEngineInfo& info) {
-    return info.indexing || info.failed || !info.revision_id.empty();
+    if (info.indexing || info.failed || !info.revision_id.empty()) {
+        return true;
+    }
+    return !info.reconcile_verified && !info.document_id.empty() && info.chunk_count >= 0;
 }
 
 inline int countAttachedLocalNotes(const ChatSession& session) {

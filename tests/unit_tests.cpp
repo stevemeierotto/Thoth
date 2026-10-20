@@ -11050,6 +11050,79 @@ static bool testLocalNoteSlotHidesCorpusUntilSent() {
     return true;
 }
 
+static bool testLocalNoteLegacyChunkCountAttachedStatus() {
+    using namespace Thoth;
+    using namespace Thoth::LocalNoteEngineSync;
+    using namespace Thoth::RemoteRagHonesty;
+
+    LocalNoteEngineInfo legacy_done{
+        "doc-legacy", "EGAR.md", "", "hash-legacy", 41, false, false, false};
+    if (!localNoteEngineSlotShowsAttachedStatus(legacy_done)) {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: "
+                     "completed legacy ingest must show attached status\n";
+        return false;
+    }
+    const std::string legacy_label = formatLocalNoteEngineSlotLabel(
+        "EGAR.md",
+        legacy_done.document_id,
+        legacy_done.chunk_count,
+        legacy_done.indexing,
+        legacy_done.failed,
+        false);
+    if (legacy_label != "EGAR.md · id=doc-legacy · 41 chunks") {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: label '"
+                  << legacy_label << "'\n";
+        return false;
+    }
+
+    LocalNoteEngineInfo pending_legacy{
+        "doc-legacy", "EGAR.md", "", "hash-legacy", -1, false, false, false};
+    if (localNoteEngineSlotShowsAttachedStatus(pending_legacy)) {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: "
+                     "legacy accept without a chunk count must stay unlabeled\n";
+        return false;
+    }
+
+    LocalNoteEngineInfo reconcile_only{
+        "doc-abc", "EGAR.md", "", "hash-1", 95, false, false, true};
+    if (localNoteEngineSlotShowsAttachedStatus(reconcile_only)) {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: "
+                     "reconcile-only row must stay unlabeled\n";
+        return false;
+    }
+
+    LocalNoteEngineInfo alp_accepted{
+        "doc-alp", "EGAR.md", "rev-1", "hash-alp", 95, false, false, true};
+    if (!localNoteEngineSlotShowsAttachedStatus(alp_accepted)) {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: "
+                     "ALP accept must stay attached\n";
+        return false;
+    }
+    const std::string alp_label = formatLocalNoteEngineSlotLabel(
+        "EGAR.md",
+        alp_accepted.document_id,
+        alp_accepted.chunk_count,
+        alp_accepted.indexing,
+        alp_accepted.failed,
+        false);
+    if (alp_label != "EGAR.md · id=doc-alp · 95 chunks") {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: ALP label '"
+                  << alp_label << "'\n";
+        return false;
+    }
+
+    ChatSession session;
+    session.ragFilePaths = {"/host/legacy.md", "/host/reconcile.md"};
+    session.localNoteEngine["/host/legacy.md"] = legacy_done;
+    session.localNoteEngine["/host/reconcile.md"] = reconcile_only;
+    if (countAttachedLocalNotes(session) != 1) {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: "
+                     "only the completed legacy slot counts as attached\n";
+        return false;
+    }
+    return true;
+}
+
 static bool testLocalNoteEngineCorpusSync() {
     using namespace Thoth;
     using namespace Thoth::LocalNoteEngineSync;
@@ -25706,6 +25779,18 @@ static bool testGraphRecovery() {
 #include "mtcp_generation_checks.inc"
 
 int main() {
+    if (const char* chunkLabels = std::getenv("THOTH_LOCAL_NOTE_CHUNK_TESTS")) {
+        if (std::string(chunkLabels) == "1") {
+            int chunkFailures = 0;
+            if (!testLocalNoteSlotHidesCorpusUntilSent()) chunkFailures++;
+            if (!testLocalNoteLegacyChunkCountAttachedStatus()) chunkFailures++;
+            std::cout << (chunkFailures == 0
+                              ? "Local Note chunk-count tests passed.\n"
+                              : "Local Note chunk-count tests failed.\n");
+            return chunkFailures == 0 ? 0 : 1;
+        }
+    }
+
     if (const char* p0Status = std::getenv("THOTH_P0_STATUS")) {
         if (std::string(p0Status) == "1") {
             int p0Failures = 0;
@@ -26363,6 +26448,7 @@ int main() {
     if (!testGuiR1RemoteIngestHostOnlyPresentation()) failures++;
     if (!testLocalNoteEngineCorpusSync()) failures++;
     if (!testLocalNoteSlotHidesCorpusUntilSent()) failures++;
+    if (!testLocalNoteLegacyChunkCountAttachedStatus()) failures++;
     if (!testLocalNoteSendSelectionFilter()) failures++;
     if (!testGuiPhase2BackendCapabilitiesAndPresentation()) failures++;
     if (!testGuiPhase3CognitiveDiagnosticsAuthority()) failures++;
