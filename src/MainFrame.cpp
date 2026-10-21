@@ -530,6 +530,7 @@ void MainFrame::RefreshRagPanel() {
                     slot->SetLabel(wxString::FromUTF8(label));
                     slot->SetToolTip(wxString::FromUTF8(
                         Thoth::RemoteRagHonesty::formatLocalNoteEngineTooltip(
+                            base,
                             engineInfo->document_id,
                             engineInfo->chunk_count,
                             engineInfo->indexing,
@@ -566,6 +567,7 @@ void MainFrame::RefreshRagPanel() {
                     slot->SetLabel(wxString::FromUTF8(label));
                     slot->SetToolTip(wxString::FromUTF8(
                         Thoth::RemoteRagHonesty::formatLocalNoteEngineTooltip(
+                            base,
                             engineInfo->document_id,
                             engineInfo->chunk_count,
                             engineInfo->indexing,

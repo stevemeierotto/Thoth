@@ -111,6 +111,23 @@ inline std::string formatLocalNoteEngineTooltip(const std::string& document_id,
     return tip;
 }
 
+/**
+ * Same status as the four-argument tooltip, with the host filename first so
+ * ellipsis on the slot label cannot hide the name.
+ */
+inline std::string formatLocalNoteEngineTooltip(const std::string& basename,
+                                                const std::string& document_id,
+                                                int chunk_count,
+                                                bool indexing,
+                                                bool failed) {
+    const std::string status = formatLocalNoteEngineTooltip(
+        document_id, chunk_count, indexing, failed);
+    if (basename.empty()) {
+        return status;
+    }
+    return basename + " — " + status;
+}
+
 /** Optional status footnote (seed path) — appendable; not required on every add. */
 inline constexpr const char* kSeedWorkspaceHint =
     "Seed engine corpus: ./docker/seed-workspace.sh";

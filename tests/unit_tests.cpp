@@ -11074,6 +11074,19 @@ static bool testLocalNoteLegacyChunkCountAttachedStatus() {
                   << legacy_label << "'\n";
         return false;
     }
+    const std::string legacy_tip = formatLocalNoteEngineTooltip(
+        "EGAR.md",
+        legacy_done.document_id,
+        legacy_done.chunk_count,
+        legacy_done.indexing,
+        legacy_done.failed);
+    if (legacy_tip.find("EGAR.md") == std::string::npos
+        || legacy_tip.find("id=doc-legacy") == std::string::npos
+        || legacy_tip.find("41 chunks") == std::string::npos) {
+        std::cerr << "testLocalNoteLegacyChunkCountAttachedStatus: tooltip '"
+                  << legacy_tip << "'\n";
+        return false;
+    }
 
     LocalNoteEngineInfo pending_legacy{
         "doc-legacy", "EGAR.md", "", "hash-legacy", -1, false, false, false};
@@ -12145,6 +12158,114 @@ static bool testSessionScopedReplaceOnResend() {
 
     fs::remove(target);
     fs::remove(rag_dir / "note_1.md");
+    return true;
+}
+
+/** Import copies into rag/ and local mode indexes that copy before Send. */
+static bool testLegacySendReusesImportedSandboxCopy() {
+    Config cfg;
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &cfg);
+    IndexManager idx(engine.get());
+
+    FileHandler fh;
+    const fs::path rag_dir =
+        fs::path(fh.getAgentWorkspacePath()) / "rag" / "import_send_reuse_test";
+    std::error_code ec;
+    fs::remove_all(rag_dir, ec);
+    fs::create_directories(rag_dir);
+
+    const std::string session_a = "sess-import-a";
+    const std::vector<std::pair<std::string, std::string>> notes = {
+        {"EGAR.md",
+         "# EGAR\nExperience-guided action refinement for the import-send reuse test.\n"},
+        {"COGNATE_V2.md",
+         "# Cognate\nSecond imported note for the import-send reuse test.\n"},
+        {"README.md",
+         "# Readme\nThird imported note for the import-send reuse test.\n"},
+        {"architectural_facts.md",
+         "# Facts\nFourth imported note for the import-send reuse test.\n"},
+    };
+
+    auto write_note = [&](const std::string& name, const std::string& body) {
+        const fs::path path = rag_dir / name;
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << body;
+        return path;
+    };
+
+    std::vector<std::string> first_ids;
+    for (const auto& note : notes) {
+        const fs::path path = write_note(note.first, note.second);
+        idx.indexFile(path.string());
+        const auto created = idx.createCorpusDocument(
+            rag_dir.string(), note.first, note.second, session_a);
+        const fs::path stem = fs::path(note.first).stem();
+        const fs::path ext = fs::path(note.first).extension();
+        const fs::path suffixed = rag_dir / (stem.string() + "_1" + ext.string());
+        if (!created.ok || created.document_name != note.first || fs::exists(suffixed)) {
+            std::cerr << "testLegacySendReusesImportedSandboxCopy: first send of "
+                      << note.first << " stored '" << created.document_name
+                      << "' error '" << created.error << "'\n";
+            fs::remove_all(rag_dir, ec);
+            return false;
+        }
+        std::ifstream back(path, std::ios::binary);
+        std::ostringstream got;
+        got << back.rdbuf();
+        if (got.str() != note.second) {
+            std::cerr << "testLegacySendReusesImportedSandboxCopy: rewrote "
+                      << note.first << "\n";
+            fs::remove_all(rag_dir, ec);
+            return false;
+        }
+        first_ids.push_back(created.document_id);
+    }
+
+    const auto resent = idx.createCorpusDocument(
+        rag_dir.string(), notes[0].first, notes[0].second, session_a);
+    if (!resent.ok || resent.document_name != notes[0].first
+        || resent.document_id != first_ids[0]
+        || fs::exists(rag_dir / "EGAR_1.md")) {
+        std::cerr << "testLegacySendReusesImportedSandboxCopy: same-session resend failed\n";
+        fs::remove_all(rag_dir, ec);
+        return false;
+    }
+
+    const auto other = idx.createCorpusDocument(
+        rag_dir.string(), "EGAR.md", notes[0].second, "sess-import-b");
+    if (!other.ok || other.document_name != "EGAR_1.md" || !fs::exists(rag_dir / "EGAR_1.md")) {
+        std::cerr << "testLegacySendReusesImportedSandboxCopy: other session must suffix\n";
+        fs::remove_all(rag_dir, ec);
+        return false;
+    }
+    if (other.document_id == first_ids[0]) {
+        std::cerr << "testLegacySendReusesImportedSandboxCopy: other session reused the id\n";
+        fs::remove_all(rag_dir, ec);
+        return false;
+    }
+
+    const std::string seed_body =
+        "# Seed\nUnowned bytes that must not be replaced by a different send.\n";
+    const std::string replacement =
+        "# Replacement\nDifferent bytes for an unowned canonical file.\n";
+    write_note("seed_note.md", seed_body);
+    const auto conflict = idx.createCorpusDocument(
+        rag_dir.string(), "seed_note.md", replacement, session_a);
+    if (!conflict.ok || conflict.document_name != "seed_note_1.md") {
+        std::cerr << "testLegacySendReusesImportedSandboxCopy: different bytes must suffix\n";
+        fs::remove_all(rag_dir, ec);
+        return false;
+    }
+    std::ifstream seed_back(rag_dir / "seed_note.md", std::ios::binary);
+    std::ostringstream seed_got;
+    seed_got << seed_back.rdbuf();
+    if (seed_got.str() != seed_body) {
+        std::cerr << "testLegacySendReusesImportedSandboxCopy: unowned seed was overwritten\n";
+        fs::remove_all(rag_dir, ec);
+        return false;
+    }
+
+    fs::remove_all(rag_dir, ec);
     return true;
 }
 
@@ -25791,6 +25912,22 @@ int main() {
         }
     }
 
+    if (const char* ingestReuse = std::getenv("THOTH_LOCAL_NOTE_INGEST_TESTS")) {
+        if (std::string(ingestReuse) == "1") {
+            int ingestFailures = 0;
+            if (!testLegacySendReusesImportedSandboxCopy()) ingestFailures++;
+            if (!testSessionScopedReplaceOnResend()) ingestFailures++;
+            if (!testSessionReclaimDefaultOwnedOnResend()) ingestFailures++;
+            if (!testLocalNoteLegacyChunkCountAttachedStatus()) ingestFailures++;
+            if (!testLocalNoteSlotHidesCorpusUntilSent()) ingestFailures++;
+            if (!testGuiR1RemoteIngestHostOnlyPresentation()) ingestFailures++;
+            std::cout << (ingestFailures == 0
+                              ? "Local Note ingest tests passed.\n"
+                              : "Local Note ingest tests failed.\n");
+            return ingestFailures == 0 ? 0 : 1;
+        }
+    }
+
     if (const char* p0Status = std::getenv("THOTH_P0_STATUS")) {
         if (std::string(p0Status) == "1") {
             int p0Failures = 0;
@@ -26467,6 +26604,7 @@ int main() {
     if (!testR2IndexManagerIndexingHonesty()) failures++;
     if (!testIndexManagerWholeFileFallbackAfterShortParagraphs()) failures++;
     if (!testSessionScopedReplaceOnResend()) failures++;
+    if (!testLegacySendReusesImportedSandboxCopy()) failures++;
     if (!testAlpFeatureFlagsDefaultOff()) failures++;
     if (!testAlpDocumentRegistryEmptyLoadSave()) failures++;
     if (!testAlpNamespacesCreatedOnInit()) failures++;
