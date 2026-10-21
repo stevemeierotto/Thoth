@@ -133,6 +133,19 @@ Thoth::EventStreamSnapshot RemoteAgentBackend::eventStreamSnapshot() const {
     return copy;
 }
 
+Thoth::OperationResult RemoteAgentBackend::submitCm1UserFeedback(
+    const Thoth::Cm1FeedbackSubmission&) {
+    return Thoth::makeFailure(
+        "cm1_feedback",
+        "Answer feedback is available on the local engine.",
+        "remote engine has no CM-1 feedback route");
+}
+
+std::optional<Thoth::Cm1UserFeedback> RemoteAgentBackend::latestCm1UserFeedback(
+    const std::string&) const {
+    return std::nullopt;
+}
+
 void RemoteAgentBackend::sleepInterruptibleMs(int64_t delay_ms) {
     constexpr int64_t kSliceMs = 100;
     int64_t remaining = delay_ms;

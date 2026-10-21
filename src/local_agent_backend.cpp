@@ -368,6 +368,25 @@ Thoth::EventStreamSnapshot LocalAgentBackend::eventStreamSnapshot() const {
     return Thoth::localEventStreamSnapshot(now_ms);
 }
 
+Thoth::OperationResult LocalAgentBackend::submitCm1UserFeedback(
+    const Thoth::Cm1FeedbackSubmission& submission) {
+    if (!plugin_) {
+        return Thoth::makeFailure("cm1_feedback", "Feedback could not be stored.",
+                                  "plugin not initialized");
+    }
+    const auto draft = plugin_->submitCm1UserFeedback(submission);
+    if (draft.disposition == Thoth::Cm1RecordDisposition::Rejected) {
+        return Thoth::makeFailure("cm1_feedback", draft.message);
+    }
+    return Thoth::makeSuccess("cm1_feedback", draft.message);
+}
+
+std::optional<Thoth::Cm1UserFeedback> LocalAgentBackend::latestCm1UserFeedback(
+    const std::string& answer_id) const {
+    if (!plugin_) return std::nullopt;
+    return plugin_->latestCm1UserFeedback(answer_id);
+}
+
 nlohmann::json LocalAgentBackend::listCorpusDocuments() const {
     try {
         if (!plugin_) {

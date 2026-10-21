@@ -123,6 +123,31 @@ set_tests_properties(thoth-core-tests PROPERTIES
     TIMEOUT 1800
 )
 
+add_executable(thoth-cm1-tests cm1_telemetry_tests.cpp)
+target_include_directories(thoth-cm1-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-cm1-tests PRIVATE basic_agent sqlite3 Threads::Threads)
+add_test(NAME thoth-cm1-tests COMMAND thoth-cm1-tests)
+set_tests_properties(thoth-cm1-tests PROPERTIES
+    LABELS "pr;unit;cm1"
+    TIMEOUT 120
+)
+
+add_executable(thoth-cm1-twin-equivalence cm1_twin_equivalence.cpp)
+target_include_directories(thoth-cm1-twin-equivalence PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-cm1-twin-equivalence PRIVATE basic_agent sqlite3 Threads::Threads)
+# Opt-in verification harness. Not an official EGAR experiment gate.
+add_test(NAME thoth-cm1-twin-equivalence COMMAND thoth-cm1-twin-equivalence)
+set_tests_properties(thoth-cm1-twin-equivalence PROPERTIES
+    LABELS "cm1;verification"
+    TIMEOUT 180
+)
+
 # EGAR-LX Package 1. Each case is a new process so the containment flag starts off.
 add_executable(thoth-containment-tests containment_tests.cpp)
 target_include_directories(thoth-containment-tests PRIVATE

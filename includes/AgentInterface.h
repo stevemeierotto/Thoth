@@ -14,6 +14,7 @@
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 
+#include "cm1_telemetry.h"
 #include "backend_capabilities.h"
 #include "controller_event.h"
 #include "engine_connection_state.h"
@@ -108,6 +109,9 @@ public:
     nlohmann::json getEpisodes() const;
     nlohmann::json getExperiments() const;
     nlohmann::json getGraphStats() const;
+    Thoth::OperationResult submitCm1UserFeedback(const Thoth::Cm1FeedbackSubmission& submission);
+    std::optional<Thoth::Cm1UserFeedback> latestCm1UserFeedback(
+        const std::string& answer_id) const;
 
     bool saveExperiment(const nlohmann::json& experimentJson);
 

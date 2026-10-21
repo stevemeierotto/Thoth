@@ -78,6 +78,10 @@ public:
     Thoth::BackendCapabilities capabilities() const override;
 
     Thoth::EventStreamSnapshot eventStreamSnapshot() const override;
+    Thoth::OperationResult submitCm1UserFeedback(
+        const Thoth::Cm1FeedbackSubmission& submission) override;
+    std::optional<Thoth::Cm1UserFeedback> latestCm1UserFeedback(
+        const std::string& answer_id) const override;
 
     /** Exposed for tests — normalized base URL after construction. */
     const std::string& baseUrl() const { return base_url_; }

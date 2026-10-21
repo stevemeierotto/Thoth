@@ -1074,8 +1074,9 @@ MainFrame::MainFrame()
         std::string stepId = ev.step_id;
         std::string eventSessionId = ev.session_id;
         std::string controllerState = ev.controller_state_name;
+        std::string planId = ev.plan_id;
 
-        wxTheApp->CallAfter([this, type, metadata, stepId, eventSessionId, controllerState]() {
+        wxTheApp->CallAfter([this, type, metadata, stepId, eventSessionId, controllerState, planId]() {
             // Safety: Check if this window still exists
             if (!wxPendingDelete.Member(this) && wxWindow::FindWindowById(GetId())) {
                 bool isActiveSession = (eventSessionId.empty() || eventSessionId == this->m_sessionId);
@@ -1185,7 +1186,21 @@ MainFrame::MainFrame()
                 } else if (type == EventType::STEP_COMPLETED) {
                     if (isActiveSession) {
                         if (this->m_stateStrip) this->m_stateStrip->UpdateStepStatus(stepId, StepStatus::SUCCESS);
-                        if (this->m_planPanel) this->m_planPanel->UpdateStepStatus(stepId, "Success");
+                        if (this->m_planPanel) {
+                            this->m_planPanel->UpdateStepStatus(stepId, "Success");
+                            if (metadata.contains("result") && metadata["result"].is_object()) {
+                                const auto& result = metadata["result"];
+                                const std::string generationId = result.value("generation_id", "");
+                                std::string answerText;
+                                if (result.contains("data") && result["data"].is_object()) {
+                                    answerText = result["data"].value("response", "");
+                                }
+                                if (!generationId.empty() && !answerText.empty()) {
+                                    this->m_planPanel->OfferSynthesisAnswer(
+                                        planId, stepId, generationId, answerText);
+                                }
+                            }
+                        }
                     }
                 } else if (type == EventType::STEP_FAILED) {
                     if (isActiveSession) {
@@ -1484,6 +1499,13 @@ MainFrame::MainFrame()
     m_observabilityNotebook = new wxNotebook(this, wxID_ANY);
     m_cognitivePanel = new CognitiveStatusPanel(m_observabilityNotebook);
     m_planPanel = new PlanExecutionPanel(m_observabilityNotebook);
+    m_planPanel->SetFeedbackHandlers(
+        [this](const Thoth::Cm1FeedbackSubmission& submission) {
+            return agent->submitCm1UserFeedback(submission);
+        },
+        [this](const std::string& answerId) {
+            return agent->latestCm1UserFeedback(answerId);
+        });
     m_gragPanel = new GragDiagnosticsPanel(m_observabilityNotebook);
     m_strategyPanel = new StrategyPanel(m_observabilityNotebook);
     m_observabilityNotebook->AddPage(m_cognitivePanel, "Cognitive State");

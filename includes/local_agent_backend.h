@@ -72,6 +72,10 @@ public:
     }
 
     Thoth::EventStreamSnapshot eventStreamSnapshot() const override;
+    Thoth::OperationResult submitCm1UserFeedback(
+        const Thoth::Cm1FeedbackSubmission& submission) override;
+    std::optional<Thoth::Cm1UserFeedback> latestCm1UserFeedback(
+        const std::string& answer_id) const override;
 
 private:
     std::unique_ptr<BasicAgentPlugin> plugin_;

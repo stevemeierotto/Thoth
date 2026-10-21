@@ -518,6 +518,21 @@ nlohmann::json AgentInterface::getGraphStats() const {
     return backend->getGraphStats();
 }
 
+Thoth::OperationResult AgentInterface::submitCm1UserFeedback(
+    const Thoth::Cm1FeedbackSubmission& submission) {
+    if (!backend) {
+        return Thoth::makeFailure("cm1_feedback", "Feedback could not be stored.",
+                                  "backend not initialized");
+    }
+    return backend->submitCm1UserFeedback(submission);
+}
+
+std::optional<Thoth::Cm1UserFeedback> AgentInterface::latestCm1UserFeedback(
+    const std::string& answer_id) const {
+    if (!backend) return std::nullopt;
+    return backend->latestCm1UserFeedback(answer_id);
+}
+
 wxString AgentInterface::GetBenchmarkBinaryPath(const wxString& binaryName) {
     // 1. Get the directory of the currently running executable
     wxString exePath = wxStandardPaths::Get().GetExecutablePath();

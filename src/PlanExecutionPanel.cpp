@@ -1,4 +1,5 @@
 #include "PlanExecutionPanel.h"
+#include "Cm1FeedbackDialog.h"
 #include "plan_execution_display.h"
 #include <wx/sizer.h>
 #include <wx/statline.h>
@@ -19,6 +20,11 @@ void PlanExecutionPanel::InitializeUI() {
     m_stateLabel = new wxStaticText(this, wxID_ANY, "State: Idle");
     mainSizer->Add(m_stateLabel, 0, wxLEFT | wxRIGHT | wxBOTTOM, 5);
 
+    m_feedbackButton = new wxButton(this, wxID_ANY, "Feedback");
+    m_feedbackButton->Hide();
+    m_feedbackButton->Bind(wxEVT_BUTTON, &PlanExecutionPanel::OnFeedback, this);
+    mainSizer->Add(m_feedbackButton, 0, wxLEFT | wxRIGHT | wxBOTTOM, 5);
+
     mainSizer->Add(new wxStaticLine(this), 0, wxEXPAND | wxALL, 5);
 
     m_stepList = new wxDataViewListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
@@ -32,6 +38,7 @@ void PlanExecutionPanel::InitializeUI() {
 }
 
 void PlanExecutionPanel::ResetPlan(const nlohmann::json& planJson) {
+    ClearSynthesisOffer();
     m_stepList->DeleteAllItems();
     if (planJson.contains("goal")) {
         m_goalLabel->SetLabel("Goal: " + wxString::FromUTF8(planJson["goal"].get<std::string>()));
@@ -67,7 +74,65 @@ void PlanExecutionPanel::SetExecutionState(const std::string& state) {
     m_stateLabel->SetLabel("State: " + state);
 }
 
+void PlanExecutionPanel::SetFeedbackHandlers(
+    std::function<Thoth::OperationResult(const Thoth::Cm1FeedbackSubmission&)> submit,
+    std::function<std::optional<Thoth::Cm1UserFeedback>(const std::string&)> latest) {
+    m_submitFeedback = std::move(submit);
+    m_latestFeedback = std::move(latest);
+}
+
+void PlanExecutionPanel::ClearSynthesisOffer() {
+    m_planId.clear();
+    m_stepId.clear();
+    m_generationId.clear();
+    m_answerText.clear();
+    if (m_feedbackButton) {
+        m_feedbackButton->Hide();
+    }
+}
+
+void PlanExecutionPanel::OfferSynthesisAnswer(const std::string& plan_id,
+                                              const std::string& step_id,
+                                              const std::string& generation_id,
+                                              const std::string& answer_text) {
+    if (plan_id.empty() || step_id.empty() || generation_id.empty() || answer_text.empty()) {
+        return;
+    }
+    m_planId = plan_id;
+    m_stepId = step_id;
+    m_generationId = generation_id;
+    m_answerText = answer_text;
+    if (m_feedbackButton) {
+        m_feedbackButton->SetLabel("Feedback");
+        m_feedbackButton->Show();
+        Layout();
+    }
+}
+
+void PlanExecutionPanel::OnFeedback(wxCommandEvent&) {
+    if (!m_submitFeedback || m_answerText.empty()) {
+        return;
+    }
+    const std::string answer_id = Thoth::makeCm1AnswerId(m_planId, m_stepId, m_generationId);
+    std::optional<Thoth::Cm1UserFeedback> existing;
+    if (m_latestFeedback) {
+        existing = m_latestFeedback(answer_id);
+    }
+    const auto submitted = ShowCm1FeedbackDialog(
+        this, m_answerText, existing ? &*existing : nullptr);
+    if (!submitted) {
+        return;
+    }
+    Thoth::Cm1FeedbackSubmission request = *submitted;
+    request.answer_id = answer_id;
+    request.answer_text = m_answerText;
+    const Thoth::OperationResult result = m_submitFeedback(request);
+    const int style = result.success ? (wxOK | wxICON_INFORMATION) : (wxOK | wxICON_WARNING);
+    wxMessageBox(wxString::FromUTF8(result.user_message), "Answer feedback", style, this);
+}
+
 void PlanExecutionPanel::ClearForSessionSwitch() {
+    ClearSynthesisOffer();
     if (m_stepList) {
         m_stepList->DeleteAllItems();
     }

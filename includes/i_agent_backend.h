@@ -10,6 +10,7 @@
 #include "backend_capabilities.h"
 #include "controller_event.h"
 #include "engine_connection_state.h"
+#include "cm1_telemetry.h"
 #include "operation_result.h"
 #include "memory.h"
 #include "json.hpp"
@@ -93,4 +94,10 @@ public:
 
     /** Phase 6 — SSE connection + engine health snapshot (Local: applies=false). */
     virtual Thoth::EventStreamSnapshot eventStreamSnapshot() const = 0;
+
+    /** CM-1 user feedback for one goal-synthesis answer version. */
+    virtual Thoth::OperationResult submitCm1UserFeedback(
+        const Thoth::Cm1FeedbackSubmission& submission) = 0;
+    virtual std::optional<Thoth::Cm1UserFeedback> latestCm1UserFeedback(
+        const std::string& answer_id) const = 0;
 };
