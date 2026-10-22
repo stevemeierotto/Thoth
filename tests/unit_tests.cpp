@@ -337,19 +337,50 @@ static bool testInferenceEndpointResolution() {
     bool ok = true;
 
     {
+        ScopedEnvVar unsetBackend("THOTH_INFERENCE_BACKEND", nullptr);
         ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
         ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
         ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
 
         const auto endpoints = Thoth::resolveInferenceEndpoints();
-        if (endpoints.base_url != "http://127.0.0.1:11434") {
+        if (endpoints.base_url != "http://127.0.0.1:8080") {
             std::cerr << "testInferenceEndpointResolution: default base_url mismatch: "
                       << endpoints.base_url << "\n";
             ok = false;
         }
-        if (endpoints.embed_base_url != "http://127.0.0.1:11434") {
+        if (endpoints.embed_base_url != "http://127.0.0.1:8081") {
             std::cerr << "testInferenceEndpointResolution: default embed_base_url mismatch: "
                       << endpoints.embed_base_url << "\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "llama_cpp");
+        ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+        ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+        ScopedEnvVar host("OLLAMA_HOST", "custom-host:11434");
+
+        const auto endpoints = Thoth::resolveInferenceEndpoints();
+        if (endpoints.base_url != "http://127.0.0.1:8080"
+            || endpoints.embed_base_url != "http://127.0.0.1:8081") {
+            std::cerr << "testInferenceEndpointResolution: llama_cpp ignored OLLAMA_HOST failed: "
+                      << endpoints.base_url << " embed " << endpoints.embed_base_url << "\n";
+            ok = false;
+        }
+    }
+
+    {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "ollama");
+        ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
+        ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
+        ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
+
+        const auto endpoints = Thoth::resolveInferenceEndpoints();
+        if (endpoints.base_url != "http://127.0.0.1:11434"
+            || endpoints.embed_base_url != "http://127.0.0.1:11434") {
+            std::cerr << "testInferenceEndpointResolution: explicit ollama default failed: "
+                      << endpoints.base_url << " embed " << endpoints.embed_base_url << "\n";
             ok = false;
         }
     }
@@ -371,6 +402,7 @@ static bool testInferenceEndpointResolution() {
     }
 
     {
+        ScopedEnvVar backend("THOTH_INFERENCE_BACKEND", "ollama");
         ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
         ScopedEnvVar host("OLLAMA_HOST", "custom-host:11434");
         ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
@@ -534,8 +566,8 @@ static bool testInferenceBackendResolution() {
         ScopedEnvVar unset("THOTH_INFERENCE_BACKEND", nullptr);
         std::string error;
         const auto backend = Thoth::tryResolveInferenceBackend(error);
-        if (!backend || *backend != Thoth::InferenceBackend::Ollama || !error.empty()) {
-            std::cerr << "testInferenceBackendResolution: default should be ollama\n";
+        if (!backend || *backend != Thoth::InferenceBackend::LlamaCpp || !error.empty()) {
+            std::cerr << "testInferenceBackendResolution: default should be llama_cpp\n";
             ok = false;
         }
     }
@@ -1027,11 +1059,13 @@ static bool testRuntimeBootstrapIdempotent() {
     Thoth::bootstrapRuntimeEnvironment();
     Thoth::bootstrapRuntimeEnvironment();
 
+    ScopedEnvVar unsetBackend("THOTH_INFERENCE_BACKEND", nullptr);
     ScopedEnvVar unsetInference("THOTH_INFERENCE_BASE_URL", nullptr);
     ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
     ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
     const auto endpoints = Thoth::resolveInferenceEndpoints();
-    return endpoints.base_url == "http://127.0.0.1:11434";
+    return endpoints.base_url == "http://127.0.0.1:8080"
+        && endpoints.embed_base_url == "http://127.0.0.1:8081";
 }
 
 static bool testRuntimeBootstrapDiagnosticsDisabledByDefault() {

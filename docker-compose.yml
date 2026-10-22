@@ -12,6 +12,10 @@ services:
     restart: unless-stopped
     networks:
       - thoth-net
+    # Host GUI default is http://127.0.0.1:8080. Loopback only; the engine
+    # container still uses http://llama-server:8080 on thoth-net.
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - llama-models:/models:ro
     command:
@@ -35,6 +39,10 @@ services:
     restart: unless-stopped
     networks:
       - thoth-net
+    # Host GUI default is http://127.0.0.1:8081. Loopback only; the engine
+    # container still uses http://llama-embed-server:8081 on thoth-net.
+    ports:
+      - "127.0.0.1:8081:8081"
     volumes:
       - llama-models:/models:ro
     command:

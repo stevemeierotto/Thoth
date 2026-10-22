@@ -192,6 +192,8 @@ A later DEV rebuild moves the `thoth-engine:local` tag. It does not move that di
 | `THOTH_ENGINE_BIND` | `0.0.0.0` |
 | `THOTH_ENGINE_PORT` | `8090` |
 
+The host GUI does not join `thoth-net`. Compose publishes llama.cpp on `127.0.0.1:8080` (chat) and `127.0.0.1:8081` (embeddings) so a normal launch, with no inference environment overrides, reaches those servers. The engine container keeps the Docker DNS URLs in the table above.
+
 Example operator env: [`docker/embed.env.example`](embed.env.example) (inference + embedding) and [`docker/alp.env.example`](alp.env.example) (ALP flags).
 
 ## Troubleshooting embeddings

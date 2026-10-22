@@ -330,29 +330,21 @@ agent_workspace/
 
 **First Launch Checklist:**
 1. ✅ GUI window opens
-2. ✅ Check status bar for "Ollama connection" status
-3. ✅ Verify `agent_workspace/` directory was created
-4. ✅ Try a simple query: "What is Thoth?"
+2. ✅ Chat server responds: `curl -sf http://127.0.0.1:8080/health`
+3. ✅ Embedding server responds: `curl -sf http://127.0.0.1:8081/health`
+4. ✅ Verify `agent_workspace/` directory was created
+5. ✅ Try a simple query: "What is Thoth?"
 
-### Verify Ollama Connection
+An unset `THOTH_INFERENCE_BACKEND` selects llama.cpp at those ports. With `docker compose up`, those ports are published on loopback. Set `THOTH_INFERENCE_BACKEND=ollama` to use an Ollama daemon at `http://127.0.0.1:11434` instead.
 
-The GUI should show Ollama connection status. If it fails:
+### Verify llama.cpp
 
-1. **Check Ollama is running:**
-   ```bash
-   curl http://localhost:11434/api/tags
-   ```
+```bash
+curl -sf http://127.0.0.1:8080/health
+curl -sf http://127.0.0.1:8081/health
+```
 
-2. **Check required models are available:**
-   ```bash
-   ollama list
-   # Should show: qwen2.5:3b (or your model) and nomic-embed-text
-   ```
-
-3. **Test embedding endpoint:**
-   ```bash
-   curl http://localhost:11434/api/embed -d '{"model":"nomic-embed-text","prompt":"test"}'
-   ```
+If generation reports `Couldn't connect to server`, the GUI is not reaching llama.cpp. Confirm both health checks, and that `agent_workspace/config.json` does not point `inference_base_url` or `embed_base_url` at a stopped Ollama daemon.
 
 ---
 
@@ -450,6 +442,11 @@ brew install cmake
 ```
 
 ### Runtime Issues
+
+**"Couldn't connect to server" during generation:**
+- Default backend is llama.cpp: `curl -sf http://127.0.0.1:8080/health` and `curl -sf http://127.0.0.1:8081/health`
+- With Compose, those are the published llama-server and llama-embed-server ports
+- An explicit `THOTH_INFERENCE_BACKEND=ollama` uses `http://127.0.0.1:11434` unless `OLLAMA_HOST` or a URL override is set
 
 **"Ollama connection failed":**
 - Verify Ollama is running: `ollama list`
