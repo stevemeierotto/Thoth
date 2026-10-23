@@ -157,6 +157,16 @@ target_include_directories(thoth-cm1-live-evidence PRIVATE
 )
 target_link_libraries(thoth-cm1-live-evidence PRIVATE basic_agent sqlite3 Threads::Threads)
 
+# Live controller E2E for the single-passage baseline and the two-passage
+# scenario. Not registered with CTest. It calls the local model. Run only
+# with an explicit operator request.
+add_executable(thoth-cm1-live-controller cm1_live_controller.cpp)
+target_include_directories(thoth-cm1-live-controller PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-cm1-live-controller PRIVATE basic_agent sqlite3 Threads::Threads)
+
 # EGAR-LX Package 1. Each case is a new process so the containment flag starts off.
 add_executable(thoth-containment-tests containment_tests.cpp)
 target_include_directories(thoth-containment-tests PRIVATE
