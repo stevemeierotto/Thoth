@@ -8,6 +8,7 @@
 
 #include "cm1_telemetry.h"
 #include "alp_sha256.h"
+#include "executive_controller.h"
 #include "generation_call.h"
 #include "grag_diagnostics.h"
 #include "memory.h"
@@ -656,12 +657,474 @@ bool testAnswerFeedbackAndVerifiedLabels() {
     return true;
 }
 
+Thoth::Cm1EvidenceCompletion completionWith(const std::string& text,
+                                             const std::string& finish_reason,
+                                             bool ok = true) {
+    Thoth::Cm1EvidenceCompletion completion;
+    completion.called = true;
+    completion.ok = ok;
+    completion.text = text;
+    completion.finish_reason = finish_reason;
+    completion.generation_id = "gen-judge";
+    if (!ok) completion.error = "down";
+    return completion;
+}
+
+Thoth::Cm1AnswerVersionRecord evidenceAnswer() {
+    return Thoth::buildCm1AnswerVersion("p7", "synthesize", "gen-answer", "answer body", 50);
+}
+
+bool testEvidenceSegmentation() {
+    const auto budget = Thoth::segmentCm1EvidenceClaims("The budget is 900 seconds.");
+    expect(budget.size() == 1 && budget[0] == "The budget is 900 seconds.",
+           "evidence segment: short factual sentence");
+    const auto decimal = Thoth::segmentCm1EvidenceClaims("w_t = -0.05.");
+    expect(decimal.size() == 1 && decimal[0] == "w_t = -0.05.",
+           "evidence segment: decimal stays in the claim");
+    const auto abbrev = Thoth::segmentCm1EvidenceClaims("See e.g. the timeout.");
+    expect(abbrev.size() == 1 && abbrev[0] == "See e.g. the timeout.",
+           "evidence segment: abbreviation stays in the claim");
+    const auto listed = Thoth::segmentCm1EvidenceClaims("1. Alpha is on. Beta is off.");
+    expect(listed.size() == 2 && listed[0] == "Alpha is on." && listed[1] == "Beta is off.",
+           "evidence segment: numbered item splits sentences");
+    const auto code = Thoth::segmentCm1EvidenceClaims("Use `a.b` here. Done.");
+    expect(code.size() == 2 && code[0] == "Use `a.b` here." && code[1] == "Done.",
+           "evidence segment: backtick span stays intact");
+    return true;
+}
+
+bool testEvidenceJudgmentGate() {
+    ::unsetenv("THOTH_CM1_EVIDENCE");
+    expect(!Thoth::cm1EvidenceEnabled(), "evidence: default off");
+
+    const auto answer = evidenceAnswer();
+    expect(!Thoth::runCm1EvidenceJudgment(
+               Thoth::Cm1AnswerVersionRecord{}, "The budget is 900 seconds.", {}, true, true, false,
+               [](const std::string&, int) { return Thoth::Cm1EvidenceCompletion{}; }, 1)
+                .has_value(),
+           "evidence: missing answer is not_recorded");
+
+    Thoth::Cm1EvidenceChunk passage;
+    passage.content = "The budget is 900 seconds.";
+    passage.content_sha256 = Thoth::sha256Hex(passage.content);
+    const std::vector<Thoth::Cm1EvidenceChunk> included = {passage};
+    const std::string answer_text = "The budget is 900 seconds.";
+
+    auto judge = [&](const Thoth::Cm1EvidenceCompletion& completion) {
+        return Thoth::runCm1EvidenceJudgment(
+            answer, answer_text, included, true, true, false,
+            [&](const std::string&, int) { return completion; }, 60);
+    };
+
+    const auto supported = judge(completionWith(
+        "{\"label\":\"supported\",\"evidence_quote\":\"The budget is 900 seconds.\"}", "stop"));
+    const auto supportedPayload = nlohmann::json::parse(supported->payload_json);
+    expect(supportedPayload["claims_total"] == 1, "evidence: one claim is the total");
+    expect(supportedPayload["claims_evaluated"] == 1, "evidence: one claim is evaluated");
+    expect(supportedPayload["claims_not_judged"] == 0, "evidence: a judged claim is not unjudged");
+    expect(supportedPayload["claims"][0]["evaluation_status"] == "available",
+           "evidence: supported is available");
+    expect(supportedPayload["claims"][0]["label"] == "supported", "evidence: supported label");
+    expect(supportedPayload["claims"][0]["evidence_chunk_sha256"] == passage.content_sha256,
+           "evidence: quote binds one included chunk");
+    expect(!supportedPayload.contains("predicted_correctness"), "evidence: no correctness field");
+    expect(!supportedPayload.contains("goal_confidence"), "evidence: no confidence field");
+    expect(!supportedPayload.contains("success_score"), "evidence: no success field");
+
+    const auto contradicted = judge(completionWith(
+        "{\"label\":\"contradicted\",\"evidence_quote\":\"The budget is 900 seconds.\"}", "stop"));
+    expect(nlohmann::json::parse(contradicted->payload_json)["claims"][0]["label"] == "contradicted",
+           "evidence: contradicted label");
+
+    const auto insufficient = judge(completionWith(
+        "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}", "stop"));
+    const auto insufficientClaim = nlohmann::json::parse(insufficient->payload_json)["claims"][0];
+    expect(insufficientClaim["label"] == "insufficient_evidence", "evidence: insufficient label");
+    expect(insufficientClaim["evidence_quote"] == "", "evidence: insufficient quote is empty");
+    expect(!insufficientClaim.contains("evidence_chunk_sha256"),
+           "evidence: insufficient has no chunk");
+
+    const auto outside = judge(completionWith(
+        "{\"label\":\"supported\",\"evidence_quote\":\"selected but not included\"}", "stop"));
+    expect(nlohmann::json::parse(outside->payload_json)["claims"][0]["unavailable_reason"]
+               == "quote_not_in_evidence",
+           "evidence: excluded quote is unavailable");
+
+    Thoth::Cm1EvidenceChunk second = passage;
+    second.content_sha256 = "other-hash";
+    const auto ambiguous = Thoth::runCm1EvidenceJudgment(
+        answer, answer_text, {passage, second}, true, true, false,
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"The budget is 900 seconds.\"}",
+                "stop");
+        },
+        60);
+    expect(nlohmann::json::parse(ambiguous->payload_json)["claims"][0]["unavailable_reason"]
+               == "quote_ambiguous",
+           "evidence: quote in two chunks is unavailable");
+
+    const auto quotedInsufficient = judge(completionWith(
+        "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"The budget is 900 seconds.\"}",
+        "stop"));
+    expect(nlohmann::json::parse(quotedInsufficient->payload_json)["claims"][0]["unavailable_reason"]
+               == "quote_present",
+           "evidence: insufficient with a quote is unavailable");
+
+    const auto missingQuote = judge(completionWith(
+        "{\"label\":\"supported\",\"evidence_quote\":\"\"}", "stop"));
+    expect(nlohmann::json::parse(missingQuote->payload_json)["claims"][0]["unavailable_reason"]
+               == "quote_required",
+           "evidence: support without a quote is unavailable");
+
+    const auto truncated = judge(completionWith("{\"label\":\"supported\"", "length"));
+    expect(nlohmann::json::parse(truncated->payload_json)["claims"][0]["unavailable_reason"] == "length",
+           "evidence: length finish is unavailable");
+
+    const auto broken = judge(completionWith("not json", "stop"));
+    expect(nlohmann::json::parse(broken->payload_json)["claims"][0]["unavailable_reason"] == "parse",
+           "evidence: broken JSON is unavailable");
+
+    const auto twoObjects = judge(completionWith(
+        "{\"label\":\"supported\",\"evidence_quote\":\"The budget is 900 seconds.\"}"
+        "{\"label\":\"contradicted\",\"evidence_quote\":\"The budget is 900 seconds.\"}",
+        "stop"));
+    expect(nlohmann::json::parse(twoObjects->payload_json)["claims"][0]["unavailable_reason"] == "parse",
+           "evidence: two objects are unavailable");
+
+    const auto provider = judge(completionWith("", "", false));
+    expect(nlohmann::json::parse(provider->payload_json)["claims"][0]["unavailable_reason"]
+               == "provider_error",
+           "evidence: provider error is unavailable");
+
+    int calls = 0;
+    const auto mocked = Thoth::runCm1EvidenceJudgment(
+        answer, answer_text, included, true, true, true,
+        [&](const std::string&, int) {
+            ++calls;
+            return completionWith("{}", "stop");
+        },
+        60);
+    expect(calls == 0, "evidence: mock synthesis does not call the model");
+    expect(nlohmann::json::parse(mocked->payload_json)["claims"][0]["unavailable_reason"]
+               == "mock_synthesis",
+           "evidence: mock synthesis is unavailable");
+
+    std::string many;
+    for (int i = 0; i < 9; ++i) {
+        if (i) many += " ";
+        many += "Claim" + std::to_string(i) + " stands.";
+    }
+    int judged_calls = 0;
+    const auto capped = Thoth::runCm1EvidenceJudgment(
+        answer, many, included, true, true, false,
+        [&](const std::string&, int) {
+            ++judged_calls;
+            return completionWith(
+                "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}", "stop");
+        },
+        60);
+    const auto cappedPayload = nlohmann::json::parse(capped->payload_json);
+    expect(judged_calls == Thoth::kCm1EvidenceClaimCap, "evidence: cap limits model calls");
+    expect(cappedPayload["claims"].size() == 8, "evidence: eight claims are judged");
+    expect(cappedPayload["claims_total"] == 9, "evidence: claims_total counts every segment");
+    expect(cappedPayload["claims_evaluated"] == 8, "evidence: claims_evaluated counts judged rows");
+    expect(cappedPayload["claims_not_judged"] == 1, "evidence: the ninth claim is not judged");
+    expect(cappedPayload["claims_total"] ==
+               cappedPayload["claims_evaluated"].get<int>() + cappedPayload["claims_not_judged"].get<int>(),
+           "evidence: claim counts add up");
+
+    const auto dbPath = makeTempDb();
+    auto repo = std::make_shared<Thoth::SQLiteMemoryRepository>(dbPath.string());
+    Thoth::Cm1SnapshotBuildInput input;
+    input.plan_id = "p7";
+    input.step_id = "synthesize";
+    input.snapshot_type = "synthesis_observed";
+    input.lifecycle_stage = "after_synthesis";
+    input.observed_at_ms = 60;
+    auto snap = Thoth::buildCm1Snapshot(input);
+    const std::string rawFeatures = snap.features_json;
+    expect(repo->commitStepCheckpoint(activePlan("p7"), std::nullopt, episode("p7", 0), snap, answer),
+           "evidence: checkpoint");
+    expect(repo->insertCm1EvidenceJudgment(*supported), "evidence: insert judgment");
+    Thoth::Cm1EvidenceJudgmentRecord replacement = *supported;
+    replacement.payload_json = "{\"replaced\":true}";
+    replacement.created_at_ms = 99;
+    expect(repo->insertCm1EvidenceJudgment(replacement), "evidence: replay insert");
+    const auto loaded = repo->loadCm1EvidenceJudgment(supported->judgment_id);
+    expect(loaded && loaded->payload_json == supported->payload_json, "evidence: replay keeps the first row");
+    expect(loaded->estimator_version == Thoth::kCm1EvidenceVersion, "evidence: version cm1-evidence-1");
+    const auto raw = repo->loadCm1Snapshot(snap.snapshot_id);
+    expect(raw && raw->features_json == rawFeatures, "evidence: snapshot bytes unchanged");
+    expect(raw->estimator_status == Thoth::kCm1EstimatorStatus, "evidence: estimator stays none_active");
+    expect(repo->listCm1UserFeedback(answer.answer_id).empty(), "evidence: feedback untouched");
+    expect(repo->listCm1VerifiedLabels(answer.answer_id).empty(), "evidence: verified labels untouched");
+    const auto storedAnswer = repo->loadCm1AnswerVersion(answer.answer_id);
+    expect(storedAnswer && storedAnswer->content_sha256 == answer.content_sha256,
+           "evidence: answer hash unchanged");
+    return true;
+}
+
+bool testEvidenceJsonWrapper() {
+    const auto answer = evidenceAnswer();
+    Thoth::Cm1EvidenceChunk passage;
+    passage.content = "The retrieval weight w_t is negative.";
+    passage.content_sha256 = Thoth::sha256Hex(passage.content);
+    const std::string claim = "Trajectory weight is below zero.";
+    const std::string object =
+        "{\"label\":\"supported\",\"evidence_quote\":\"The retrieval weight w_t is negative.\"}";
+    const std::string captured =
+        "To determine if the claim \"Trajectory weight is below zero\" is supported by the evidence, "
+        "we need to analyze the provided passage.\n\n"
+        "The passage states: \"The retrieval weight w_t is negative.\"\n\n"
+        "1. The claim uses the term \"trajectory weight,\" while the passage mentions \"retrieval weight.\"\n"
+        "2. The claim states that the weight is \"below zero,\" which is equivalent to being negative.\n\n"
+        "Since the passage explicitly states that the retrieval weight \\( w_t \\) is negative, and the "
+        "claim is essentially saying the same thing (that the weight is below zero), the claim is "
+        "supported by the evidence.\n\n"
+        + object;
+
+    auto judge = [&](const std::string& text) {
+        return Thoth::runCm1EvidenceJudgment(
+            answer, claim, {passage}, true, true, false,
+            [&](const std::string&, int) { return completionWith(text, "stop"); }, 60);
+    };
+
+    const auto leading = nlohmann::json::parse(judge(captured)->payload_json)["claims"][0];
+    expect(leading["evaluation_status"] == "available",
+           "evidence wrapper: captured leading explanation is available");
+    expect(leading["label"] == "supported", "evidence wrapper: captured response is supported");
+    expect(leading["evidence_quote"] == passage.content,
+           "evidence wrapper: captured quote is the passage");
+    expect(leading["evidence_chunk_sha256"] == passage.content_sha256,
+           "evidence wrapper: captured quote binds the included chunk");
+
+    const auto trailing = nlohmann::json::parse(
+        judge(object + "\nThe passages establish the claim.")->payload_json)["claims"][0];
+    expect(trailing["label"] == "supported", "evidence wrapper: text after the object is accepted");
+    expect(trailing["evidence_quote"] == passage.content,
+           "evidence wrapper: trailing text does not change the quote");
+
+    const auto two = nlohmann::json::parse(
+        judge("First reading " + object + " " +
+              "{\"label\":\"contradicted\",\"evidence_quote\":\"The retrieval weight w_t is negative.\"}")
+            ->payload_json)["claims"][0];
+    expect(two["unavailable_reason"] == "parse", "evidence wrapper: two objects are rejected");
+
+    const auto unclosed = nlohmann::json::parse(
+        judge("The answer is {\"label\":\"supported\",\"evidence_quote\":\"The retrieval weight w_t is negative.\"")
+            ->payload_json)["claims"][0];
+    expect(unclosed["unavailable_reason"] == "parse", "evidence wrapper: an unclosed object is rejected");
+
+    const auto malformed = nlohmann::json::parse(
+        judge("Note {\"label\":supported,\"evidence_quote\":\"The retrieval weight w_t is negative.\"} done")
+            ->payload_json)["claims"][0];
+    expect(malformed["unavailable_reason"] == "parse", "evidence wrapper: malformed JSON is rejected");
+
+    const auto badLabel = nlohmann::json::parse(
+        judge("Result {\"label\":\"maybe\",\"evidence_quote\":\"The retrieval weight w_t is negative.\"}")
+            ->payload_json)["claims"][0];
+    expect(badLabel["unavailable_reason"] == "schema", "evidence wrapper: an invalid label is rejected");
+
+    const auto missingQuote = nlohmann::json::parse(
+        judge("Result {\"label\":\"supported\",\"evidence_quote\":\"not in the passage\"}")
+            ->payload_json)["claims"][0];
+    expect(missingQuote["unavailable_reason"] == "quote_not_in_evidence",
+           "evidence wrapper: a quote outside the passage is rejected");
+
+    Thoth::Cm1EvidenceChunk duplicate = passage;
+    duplicate.content_sha256 = "other-hash";
+    const auto ambiguous = Thoth::runCm1EvidenceJudgment(
+        answer, claim, {passage, duplicate}, true, true, false,
+        [&](const std::string&, int) {
+            return completionWith("See the passage. " + object, "stop");
+        },
+        60);
+    expect(nlohmann::json::parse(ambiguous->payload_json)["claims"][0]["unavailable_reason"]
+               == "quote_ambiguous",
+           "evidence wrapper: a quote in two chunks is rejected");
+    return true;
+}
+
+bool testEvidenceDeadlineAndState() {
+    const auto answer = evidenceAnswer();
+    Thoth::Cm1EvidenceChunk passage;
+    passage.content = "The budget is 900 seconds.";
+    passage.content_sha256 = Thoth::sha256Hex(passage.content);
+    const std::vector<Thoth::Cm1EvidenceChunk> included = {passage};
+
+    std::int64_t now = 0;
+    int calls = 0;
+    int seen_timeout = 0;
+    const auto exhausted = Thoth::runCm1EvidenceJudgment(
+        answer, "One stands. Two stands. Three stands.", included, true, true, false,
+        [&](const std::string&, int timeout_seconds) {
+            ++calls;
+            seen_timeout = timeout_seconds;
+            now = 2500;
+            return completionWith(
+                "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}", "stop");
+        },
+        60, 2, [&]() { return now; });
+    const auto exhaustedPayload = nlohmann::json::parse(exhausted->payload_json);
+    expect(calls == 1, "evidence deadline: later claims are not called");
+    expect(seen_timeout == 2, "evidence deadline: the call uses the remaining seconds");
+    expect(exhaustedPayload["claims"].size() == 1, "evidence deadline: unissued claims have no row");
+    expect(exhaustedPayload["claims"][0]["label"] == "insufficient_evidence",
+           "evidence deadline: an issued call keeps its label");
+    expect(exhaustedPayload["claims_total"] == 3, "evidence deadline: total counts every claim");
+    expect(exhaustedPayload["claims_evaluated"] == 1, "evidence deadline: only the issued call is evaluated");
+    expect(exhaustedPayload["claims_not_judged"] == 2, "evidence deadline: unissued claims are not judged");
+
+    calls = 0;
+    const auto timedOut = Thoth::runCm1EvidenceJudgment(
+        answer, "One stands. Two stands.", included, true, true, false,
+        [&](const std::string&, int) {
+            ++calls;
+            auto completion = completionWith("", "", false);
+            completion.error = "timeout";
+            return completion;
+        },
+        60, 10, []() { return static_cast<std::int64_t>(0); });
+    const auto timedPayload = nlohmann::json::parse(timedOut->payload_json);
+    expect(calls == 1, "evidence timeout: a timed-out call stops the rest");
+    expect(timedPayload["claims"].size() == 1, "evidence timeout: the unissued claim has no row");
+    expect(timedPayload["claims"][0]["evaluation_status"] == "unavailable",
+           "evidence timeout: the issued call is unavailable");
+    expect(timedPayload["claims"][0]["unavailable_reason"] == "timeout",
+           "evidence timeout: the reason is timeout");
+    expect(!timedPayload["claims"][0].contains("label"),
+           "evidence timeout: a timeout is not insufficient evidence");
+    expect(timedPayload["claims_total"] == 2, "evidence timeout: total stays the segment count");
+    expect(timedPayload["claims_evaluated"] == 1, "evidence timeout: the timed-out call was evaluated");
+    expect(timedPayload["claims_not_judged"] == 1, "evidence timeout: the remaining claim is not judged");
+    expect(timedPayload["claims_total"] ==
+               timedPayload["claims_evaluated"].get<int>() + timedPayload["claims_not_judged"].get<int>(),
+           "evidence timeout: claim counts add up");
+
+    calls = 0;
+    const auto unissued = Thoth::runCm1EvidenceJudgment(
+        answer, "One stands. Two stands.", included, true, true, false,
+        [&](const std::string&, int) {
+            ++calls;
+            return completionWith(
+                "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}", "stop");
+        },
+        60, 0, []() { return static_cast<std::int64_t>(0); });
+    const auto unissuedPayload = nlohmann::json::parse(unissued->payload_json);
+    expect(calls == 0, "evidence deadline: no call is issued when the budget is already spent");
+    expect(unissuedPayload["claims"].empty(), "evidence deadline: spent budget writes no claim rows");
+    expect(unissuedPayload["claims_total"] == 2 && unissuedPayload["claims_evaluated"] == 0 &&
+               unissuedPayload["claims_not_judged"] == 2,
+           "evidence deadline: an unissued claim is not judged");
+
+    const int observing = static_cast<int>(Thoth::ControllerState::OBSERVING_RESULT);
+    const int aborted = static_cast<int>(Thoth::ControllerState::ABORTED);
+    expect(Thoth::cm1EvidenceStateUnchanged(observing, observing),
+           "evidence state: an unchanged observation may return to idle");
+    expect(!Thoth::cm1EvidenceStateUnchanged(observing, aborted),
+           "evidence state: a newer abort is left in place");
+    return true;
+}
+
 bool testDeterministicSnapshotIds() {
     const auto a = Thoth::makeCm1SnapshotId("p", "s", "retrieval_observed", "after_retrieval");
     const auto b = Thoth::makeCm1SnapshotId("p", "s", "retrieval_observed", "after_retrieval");
     expect(a == b, "ids: deterministic");
     expect(a != Thoth::makeCm1SnapshotId("p", "s2", "retrieval_observed", "after_retrieval"),
            "ids: step distinguishes");
+    return true;
+}
+
+bool testEvidencePromptStructure() {
+    const std::string claim = "Each claim is judged by its own model call.";
+    const std::string stop =
+        "Emit exactly one JSON object, stop immediately afterward, and copy any quotation only from the evidence passage, not from the claim.\n";
+    Thoth::Cm1EvidenceChunk passage;
+    passage.content = "The evidence judge sends one model call for each claim.";
+    passage.content_sha256 = Thoth::sha256Hex(passage.content);
+
+    const std::string expected =
+        "Judge whether the claim is established by the evidence passages.\n"
+        "Use only those passages.\n"
+        "Reply with one JSON object and no other text:\n"
+        "{\"label\":\"supported\",\"evidence_quote\":\"exact span from one passage\"}\n"
+        "{\"label\":\"contradicted\",\"evidence_quote\":\"exact span from one passage\"}\n"
+        "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}\n"
+        "supported means the passages establish the claim.\n"
+        "contradicted means the passages conflict with the claim.\n"
+        "insufficient_evidence means the passages establish neither conclusion.\n"
+        "Copy the quote exactly from one passage. Leave it empty for insufficient_evidence.\n"
+        "\n"
+        "EVIDENCE PASSAGE START\n"
+        "[passage " + passage.content_sha256 + "]\n" + passage.content + "\n"
+        "\n"
+        "EVIDENCE PASSAGE END\n"
+        "\n"
+        "CLAIM START\n" + claim + "\n"
+        "CLAIM END\n"
+        "\n"
+        + stop;
+    const std::string prompt = Thoth::buildCm1EvidencePrompt(claim, {passage});
+    expect(prompt == expected, "evidence prompt: one passage matches the verified structure");
+
+    const auto evidence_at = prompt.find("EVIDENCE PASSAGE START\n");
+    const auto evidence_end = prompt.find("EVIDENCE PASSAGE END\n");
+    const auto claim_at = prompt.find("CLAIM START\n");
+    const auto claim_end = prompt.find("CLAIM END\n");
+    const auto stop_at = prompt.find(stop);
+    expect(evidence_at != std::string::npos && evidence_end > evidence_at && claim_at > evidence_end
+               && claim_end > claim_at && stop_at > claim_end && prompt.find(stop, stop_at + 1) == std::string::npos,
+           "evidence prompt: evidence, claim, and one stop sentence are in order");
+    const std::string evidence_body = prompt.substr(evidence_at, evidence_end - evidence_at);
+    const std::string claim_body = prompt.substr(claim_at, claim_end - claim_at);
+    expect(evidence_body.find(passage.content) != std::string::npos
+               && evidence_body.find(claim) == std::string::npos,
+           "evidence prompt: the passage is inside the evidence block");
+    expect(claim_body.find(claim) != std::string::npos
+               && claim_body.find(passage.content) == std::string::npos,
+           "evidence prompt: the claim is inside the claim block");
+    expect(prompt.find("[Evidence]\n") == std::string::npos && prompt.find("[Claim]\n") == std::string::npos,
+           "evidence prompt: evidence and claim blocks are closed");
+    const std::string supported_example =
+        "{\"label\":\"supported\",\"evidence_quote\":\"exact span from one passage\"}\n";
+    const std::string contradicted_example =
+        "{\"label\":\"contradicted\",\"evidence_quote\":\"exact span from one passage\"}\n";
+    const std::string insufficient_example =
+        "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}\n";
+    expect(prompt.find(supported_example) < evidence_at
+               && prompt.find(contradicted_example) < evidence_at
+               && prompt.find(insufficient_example) < evidence_at
+               && prompt.find(supported_example) == prompt.rfind(supported_example)
+               && prompt.find(contradicted_example) == prompt.rfind(contradicted_example)
+               && prompt.find(insufficient_example) == prompt.rfind(insufficient_example),
+           "evidence prompt: the three JSON examples stay in the instruction section");
+
+    Thoth::Cm1EvidenceChunk second;
+    second.content = "Plan revision runs after a failed step.";
+    second.content_sha256 = Thoth::sha256Hex(second.content);
+    const std::string multi = Thoth::buildCm1EvidencePrompt(claim, {passage, second});
+    const auto multi_start = multi.find("EVIDENCE PASSAGE START\n");
+    const auto multi_end = multi.find("EVIDENCE PASSAGE END\n");
+    const std::string both = multi.substr(multi_start, multi_end - multi_start);
+    expect(multi.find("EVIDENCE PASSAGE START\n") == multi.rfind("EVIDENCE PASSAGE START\n")
+               && multi.find("EVIDENCE PASSAGE END\n") == multi.rfind("EVIDENCE PASSAGE END\n")
+               && both.find(passage.content) < both.find(second.content)
+               && both.find(claim) == std::string::npos,
+           "evidence prompt: several passages share one closed evidence block");
+    expect(multi.find("CLAIM START\n" + claim + "\nCLAIM END\n") != std::string::npos
+               && multi.rfind(stop) > multi.find("CLAIM END\n"),
+           "evidence prompt: several passages still close the claim before the stop sentence");
+
+    const std::string empty = Thoth::buildCm1EvidencePrompt(claim, {});
+    const auto empty_start = empty.find("EVIDENCE PASSAGE START\n");
+    const auto empty_end = empty.find("EVIDENCE PASSAGE END\n");
+    const std::string empty_body = empty.substr(empty_start, empty_end - empty_start);
+    expect(empty_body.find("No evidence passages were included.") != std::string::npos
+               && empty_body.find(claim) == std::string::npos
+               && empty.find("CLAIM START\n" + claim + "\nCLAIM END\n") != std::string::npos
+               && empty.rfind(stop) > empty.find("CLAIM END\n"),
+           "evidence prompt: an empty passage list stays inside the closed evidence block");
     return true;
 }
 
@@ -675,6 +1138,11 @@ int main() {
     testTelemetryWriteFailurePreservesCheckpoint();
     testGenerationIdsSurviveRestartShape();
     testAnswerFeedbackAndVerifiedLabels();
+    testEvidenceSegmentation();
+    testEvidenceJudgmentGate();
+    testEvidenceJsonWrapper();
+    testEvidencePromptStructure();
+    testEvidenceDeadlineAndState();
     testDeterministicSnapshotIds();
     testBreadthScoring();
     testBreadthReplayAndDisabledByDefault();

@@ -148,6 +148,15 @@ set_tests_properties(thoth-cm1-twin-equivalence PROPERTIES
     TIMEOUT 180
 )
 
+# Live evidence-judgment benchmark. Not registered with CTest: it calls the
+# local model and is not an EGAR, graph, or longitudinal gate.
+add_executable(thoth-cm1-live-evidence cm1_live_evidence.cpp)
+target_include_directories(thoth-cm1-live-evidence PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-cm1-live-evidence PRIVATE basic_agent sqlite3 Threads::Threads)
+
 # EGAR-LX Package 1. Each case is a new process so the containment flag starts off.
 add_executable(thoth-containment-tests containment_tests.cpp)
 target_include_directories(thoth-containment-tests PRIVATE
