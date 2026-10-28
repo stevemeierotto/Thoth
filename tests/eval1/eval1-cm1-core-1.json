@@ -1,0 +1,121 @@
+{
+  "backend": "llama_cpp",
+  "benchmark": "cm1-core-1",
+  "configured_model": "/models/chat.gguf",
+  "configured_top_p": 1.0,
+  "consistency": 16,
+  "consistency_denominator": 16,
+  "endpoint": "http://127.0.0.1:8080",
+  "evaluated_at": "2026-10-28T18:13:41Z",
+  "evaluation": "EVAL-1",
+  "fixture_count": 16,
+  "fixture_set": "coreFixtures",
+  "generation_max_tokens": "unset",
+  "model": "/models/chat.gguf",
+  "num_predict": 256,
+  "prompt_mutated": false,
+  "prompt_template_sha256": "1c1131103c1761b967f4e65a73243c220c097c4b2b8d7cac2aad26cc6cafc154",
+  "prompt_version": "cm1-evidence-1",
+  "report_version": "eval1-report-1",
+  "requested_temperature": 0.0,
+  "runs": [
+    {
+      "absent_class": "pass",
+      "categories": {
+        "absent": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        },
+        "negation": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        },
+        "number": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        },
+        "paraphrase": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        }
+      },
+      "label_denominator": 16,
+      "label_hits": 16,
+      "quote_denominator": 16,
+      "quote_hits": 16,
+      "quote_provenance": "pass",
+      "requested_max_tokens": 256,
+      "run": 1,
+      "run_pass": "pass",
+      "unavailable": 0,
+      "unavailable_denominator": 16,
+      "unavailable_items": []
+    },
+    {
+      "absent_class": "pass",
+      "categories": {
+        "absent": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        },
+        "negation": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        },
+        "number": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        },
+        "paraphrase": {
+          "label_denominator": 4,
+          "label_failures": [],
+          "labels": 4,
+          "quote_denominator": 4,
+          "quote_failures": [],
+          "quotes": 4
+        }
+      },
+      "label_denominator": 16,
+      "label_hits": 16,
+      "quote_denominator": 16,
+      "quote_hits": 16,
+      "quote_provenance": "pass",
+      "requested_max_tokens": 256,
+      "run": 2,
+      "run_pass": "pass",
+      "unavailable": 0,
+      "unavailable_denominator": 16,
+      "unavailable_items": []
+    }
+  ],
+  "seed": "unset",
+  "timeout_policy_s": 900
+}

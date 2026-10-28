@@ -10,6 +10,7 @@
 
 #include "alp_sha256.h"
 #include "cm1_telemetry.h"
+#include "generation_budget.h"
 #include "generation_call.h"
 #include "inference_client.h"
 #include "inference_endpoint.h"
@@ -20,8 +21,11 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -69,7 +73,10 @@ struct Observed {
     int timeout_seconds = 0;
     std::string generation_id;
     std::string finish_reason;
+    int requested_max_tokens = -1;
 };
+
+bool g_prompt_mutated = false;
 
 struct RunScore {
     bool quote_provenance = true;
@@ -389,7 +396,8 @@ Thoth::Cm1EvidenceCompletion callProductionModel(LLMInterface& llm,
                                                  std::int64_t& elapsed_ms,
                                                  int& used_timeout,
                                                  std::string& generation_id,
-                                                 std::string& finish_reason) {
+                                                 std::string& finish_reason,
+                                                 int& requested_max_tokens) {
     Thoth::GenerationCallContext call;
     call.task_id = fixture_id;
     call.plan_id = "cm1-live-evidence";
@@ -424,6 +432,8 @@ Thoth::Cm1EvidenceCompletion callProductionModel(LLMInterface& llm,
     elapsed_ms = generated.elapsed_ms;
     generation_id = generated.generation_id;
     finish_reason = generated.finish_reason;
+    requested_max_tokens = generated.requested_max_tokens;
+    if (g_core_benchmark && sent != prompt) g_prompt_mutated = true;
     Thoth::Cm1EvidenceCompletion completion;
     completion.called = true;
     completion.ok = generated.ok;
@@ -487,12 +497,14 @@ Observed judgeFixture(LLMInterface& llm, const Fixture& fixture, int run_index) 
     int used_timeout = 0;
     std::string generation_id;
     std::string finish_reason;
+    int requested_max_tokens = -1;
     const auto judgment = Thoth::runCm1EvidenceJudgment(
         answer, fixture.claim, {chunk}, true, true, false,
         [&](const std::string& prompt, int timeout_seconds) {
             return callProductionModel(
                 llm, prompt, timeout_seconds, fixture.id, run_index,
-                elapsed_ms, used_timeout, generation_id, finish_reason);
+                elapsed_ms, used_timeout, generation_id, finish_reason,
+                requested_max_tokens);
         },
         0, static_cast<int>(Thoth::LlmTimeoutPolicy::timeoutSeconds()));
 
@@ -500,6 +512,7 @@ Observed judgeFixture(LLMInterface& llm, const Fixture& fixture, int run_index) 
     observed.timeout_seconds = used_timeout;
     observed.generation_id = generation_id;
     observed.finish_reason = finish_reason;
+    observed.requested_max_tokens = requested_max_tokens;
     if (!judgment) {
         observed.status = "unavailable";
         observed.reason = "not_recorded";
@@ -609,6 +622,218 @@ void printScore(int run, const RunScore& score) {
               << "\n";
 }
 
+struct CategoryCount {
+    int labels = 0;
+    int quotes = 0;
+    int total = 0;
+};
+
+bool labelMatched(const Observed& item) {
+    return item.status == "available" && item.label == item.expected_label;
+}
+
+bool quoteMatched(const Observed& item) {
+    return item.status == "available" && item.quote == item.gold_quote;
+}
+
+CategoryCount scoreCategory(const std::vector<Observed>& items, const char* kind) {
+    CategoryCount count;
+    for (const auto& item : items) {
+        if (item.kind != kind) continue;
+        ++count.total;
+        if (labelMatched(item)) ++count.labels;
+        if (quoteMatched(item)) ++count.quotes;
+    }
+    return count;
+}
+
+void printCategory(int run, const char* kind, const std::vector<Observed>& items) {
+    const CategoryCount count = scoreCategory(items, kind);
+    std::cout << "run=" << run
+              << " category=" << kind
+              << " labels=" << count.labels << "/" << count.total
+              << " quotes=" << count.quotes << "/" << count.total
+              << "\n";
+    for (const auto& item : items) {
+        if (item.kind != kind || labelMatched(item)) continue;
+        std::cout << "  label_failure id=" << item.id
+                  << " expected=" << item.expected_label
+                  << " actual=" << (item.label.empty() ? std::string("-") : item.label)
+                  << " status=" << item.status
+                  << " reason=" << (item.reason.empty() ? std::string("-") : item.reason)
+                  << "\n";
+    }
+    for (const auto& item : items) {
+        if (item.kind != kind || quoteMatched(item)) continue;
+        std::cout << "  quote_failure id=" << item.id
+                  << " gold=" << (item.gold_quote.empty() ? std::string("<empty>") : item.gold_quote)
+                  << " quote=" << (item.quote.empty() ? std::string("<empty>") : item.quote)
+                  << " status=" << item.status
+                  << "\n";
+    }
+}
+
+void printUnavailable(int run, const std::vector<Observed>& items) {
+    int unavailable = 0;
+    for (const auto& item : items) {
+        if (item.status != "available") ++unavailable;
+    }
+    std::cout << "run=" << run << " unavailable=" << unavailable << "/" << items.size() << "\n";
+    for (const auto& item : items) {
+        if (item.status == "available") continue;
+        std::cout << "  unavailable id=" << item.id
+                  << " reason=" << (item.reason.empty() ? std::string("-") : item.reason)
+                  << "\n";
+    }
+}
+
+nlohmann::json categoryJson(const std::vector<Observed>& items, const char* kind) {
+    const CategoryCount count = scoreCategory(items, kind);
+    nlohmann::json failures = nlohmann::json::array();
+    nlohmann::json quote_failures = nlohmann::json::array();
+    for (const auto& item : items) {
+        if (item.kind != kind) continue;
+        if (!labelMatched(item)) {
+            failures.push_back({
+                {"id", item.id},
+                {"expected_label", item.expected_label},
+                {"actual_label", item.label},
+                {"status", item.status},
+                {"reason", item.reason},
+            });
+        }
+        if (!quoteMatched(item)) {
+            quote_failures.push_back({
+                {"id", item.id},
+                {"gold_quote", item.gold_quote},
+                {"quote", item.quote},
+                {"status", item.status},
+            });
+        }
+    }
+    return {
+        {"labels", count.labels},
+        {"label_denominator", count.total},
+        {"quotes", count.quotes},
+        {"quote_denominator", count.total},
+        {"label_failures", std::move(failures)},
+        {"quote_failures", std::move(quote_failures)},
+    };
+}
+
+std::string utcTimestamp(bool& available) {
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+    if (now == static_cast<std::time_t>(-1) || gmtime_r(&now, &tm) == nullptr) {
+        available = false;
+        return "unavailable";
+    }
+    std::ostringstream out;
+    out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+    available = true;
+    return out.str();
+}
+
+std::string textOrUnavailable(const std::string& value) {
+    return value.empty() ? std::string("unavailable") : value;
+}
+
+nlohmann::json runJson(int run, const std::vector<Observed>& items, const RunScore& score) {
+    int unavailable = 0;
+    nlohmann::json unavailable_items = nlohmann::json::array();
+    int requested_max_tokens = -1;
+    for (const auto& item : items) {
+        if (item.requested_max_tokens >= 0 && requested_max_tokens < 0) {
+            requested_max_tokens = item.requested_max_tokens;
+        }
+        if (item.status == "available") continue;
+        ++unavailable;
+        unavailable_items.push_back({
+            {"id", item.id},
+            {"kind", item.kind},
+            {"reason", item.reason},
+        });
+    }
+    nlohmann::json body = {
+        {"run", run},
+        {"categories", {
+            {"paraphrase", categoryJson(items, "paraphrase")},
+            {"negation", categoryJson(items, "negation")},
+            {"number", categoryJson(items, "number")},
+            {"absent", categoryJson(items, "absent")},
+        }},
+        {"unavailable", unavailable},
+        {"unavailable_denominator", static_cast<int>(items.size())},
+        {"unavailable_items", std::move(unavailable_items)},
+        {"label_hits", score.label_hits},
+        {"label_denominator", static_cast<int>(items.size())},
+        {"quote_hits", score.quote_hits},
+        {"quote_denominator", static_cast<int>(items.size())},
+        {"quote_provenance", score.quote_provenance ? "pass" : "fail"},
+        {"absent_class", score.absent_class ? "pass" : "fail"},
+        {"run_pass", score.pass ? "pass" : "fail"},
+    };
+    if (requested_max_tokens >= 0) body["requested_max_tokens"] = requested_max_tokens;
+    else body["requested_max_tokens"] = "unavailable";
+    return body;
+}
+
+void writeCoreBaseline(const std::string& model,
+                        const std::string& configured_model,
+                        const std::string& backend,
+                        const std::string& endpoint,
+                        double top_p,
+                        const std::vector<Observed>& first,
+                        const std::vector<Observed>& second,
+                        const RunScore& first_score,
+                        const RunScore& second_score,
+                        int repeated) {
+    bool date_available = false;
+    const std::string evaluated_at = utcTimestamp(date_available);
+    const std::string prompt_template = Thoth::buildCm1EvidencePrompt("CLAIM", {});
+    nlohmann::json seed = "unset";
+    if (Thoth::GenerationBudget::hasSeed()) seed = Thoth::GenerationBudget::seed();
+    nlohmann::json generation_max_tokens = "unset";
+    if (Thoth::GenerationBudget::hasCeiling()) {
+        generation_max_tokens = Thoth::GenerationBudget::ceiling();
+    }
+    nlohmann::json report = {
+        {"report_version", "eval1-report-1"},
+        {"evaluation", "EVAL-1"},
+        {"benchmark", "cm1-core-1"},
+        {"fixture_set", "coreFixtures"},
+        {"fixture_count", static_cast<int>(coreFixtures().size())},
+        {"evaluated_at", date_available ? evaluated_at : "unavailable"},
+        {"prompt_version", Thoth::kCm1EvidenceVersion},
+        {"prompt_template_sha256", Thoth::sha256Hex(prompt_template)},
+        {"prompt_mutated", g_prompt_mutated},
+        {"requested_temperature", 0.0},
+        {"configured_top_p", top_p},
+        {"num_predict", Thoth::kCm1EvidenceNumPredict},
+        {"timeout_policy_s", static_cast<int>(Thoth::LlmTimeoutPolicy::timeoutSeconds())},
+        {"seed", seed},
+        {"generation_max_tokens", generation_max_tokens},
+        {"backend", textOrUnavailable(backend)},
+        {"endpoint", textOrUnavailable(endpoint)},
+        {"configured_model", textOrUnavailable(configured_model)},
+        {"model", textOrUnavailable(model)},
+        {"consistency", repeated},
+        {"consistency_denominator", 16},
+        {"runs", nlohmann::json::array({
+            runJson(1, first, first_score),
+            runJson(2, second, second_score),
+        })},
+    };
+    const std::string path = g_trace_directory + "/eval1-baseline.json";
+    std::ofstream out(path);
+    if (!out) {
+        std::cout << "baseline_report=unavailable\n";
+        return;
+    }
+    out << report.dump(2) << "\n";
+    std::cout << "baseline_report=" << path << "\n";
+}
+
 } // namespace
 
 const Fixture* findFixture(const std::string& id) {
@@ -695,6 +920,7 @@ int main(int argc, char** argv) {
     LLMInterface llm(LLMBackend::Ollama, &config);
     if (g_core_benchmark) {
         std::cout << "benchmark=cm1-core-1"
+                  << " prompt_version=" << Thoth::kCm1EvidenceVersion
                   << " prompt=examples+closed-blocks+stop-after-claim-end"
                   << "\n";
         std::vector<Observed> first;
@@ -717,10 +943,28 @@ int main(int argc, char** argv) {
         const bool consistency = repeated >= 15;
         printScore(1, first_score);
         printScore(2, second_score);
+        printCategory(1, "paraphrase", first);
+        printCategory(1, "negation", first);
+        printCategory(1, "number", first);
+        printCategory(1, "absent", first);
+        printUnavailable(1, first);
+        printCategory(2, "paraphrase", second);
+        printCategory(2, "negation", second);
+        printCategory(2, "number", second);
+        printCategory(2, "absent", second);
+        printUnavailable(2, second);
         std::cout << "consistency=" << repeated << "/16"
                   << " consistency_pass=" << (consistency ? "pass" : "fail")
                   << " model=" << llm.getSelectedModel()
                   << "\n";
+        const bool model_reached = std::any_of(first.begin(), first.end(), [](const Observed& item) {
+            return item.status == "available";
+        }) || std::any_of(second.begin(), second.end(), [](const Observed& item) {
+            return item.status == "available";
+        });
+        writeCoreBaseline(model_reached ? llm.getSelectedModel() : std::string(), config.llm_model,
+                          Thoth::inferenceBackendName(*backend), endpoints.base_url,
+                          config.top_p, first, second, first_score, second_score, repeated);
         const bool suite = first_score.pass && second_score.pass && consistency;
         std::cout << "suite=" << (suite ? "pass" : "fail") << "\n";
         return suite ? 0 : 1;
