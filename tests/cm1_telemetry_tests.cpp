@@ -15,7 +15,9 @@
 #include "sqlite_memory_repository.h"
 
 #include <json.hpp>
+#include <sqlite3.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -837,10 +839,25 @@ bool testClaimVerification() {
            "claim verify: authorized EGAR eligibility rejected");
     submission.egar_eligibility = "excluded";
 
+    submission.evidence_label = "supported";
+    const auto labeledTruth = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 316);
+    expect(labeledTruth.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: evidence label with true outcome rejected");
+    submission.outcome = "unverifiable";
+    submission.evidence_label = "maybe";
+    const auto badLabel = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 316);
+    expect(badLabel.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: unknown evidence label rejected");
+    submission.evidence_label.clear();
+    submission.outcome = "true";
+
     const auto initial = Thoth::prepareCm1ClaimVerification(
         &*loadedAnswer, &*stored, nullptr, submission, 317);
     expect(initial.disposition == Thoth::Cm1RecordDisposition::Insert, "claim verify: true accepted");
     expect(initial.record.outcome == "true", "claim verify: outcome true");
+    expect(initial.record.evidence_label.empty(), "claim verify: factual outcome has no evidence label");
     expect(initial.record.revision_reason == "initial", "claim verify: reason initial");
     expect(initial.record.revision_index == 1, "claim verify: first revision");
     expect(initial.record.verifier_version.empty(), "claim verify: human version is empty");
@@ -865,6 +882,8 @@ bool testClaimVerification() {
         &*loadedAnswer, &*stored, &initial.record, submission, 319);
     expect(correction.disposition == Thoth::Cm1RecordDisposition::Insert, "claim verify: correction accepted");
     expect(correction.record.outcome == "false", "claim verify: outcome false");
+    expect(correction.record.evidence_label.empty(),
+           "claim verify: factual correction has no evidence label");
     expect(correction.record.revision_reason == "correction", "claim verify: reason correction");
     expect(correction.record.revision_index == 2, "claim verify: correction index");
     expect(correction.record.supersedes_verification_id == initial.record.verification_id,
@@ -989,6 +1008,25 @@ bool testClaimVerification() {
     chunkRef.source_ref = stored->evidence_chunk_sha256;
     refuse(chunkRef, "claim verify: direct evidence chunk rejected");
 
+    auto labeledTruthRow = freshChain("bypass-label-outcome");
+    labeledTruthRow.evidence_label = "supported";
+    refuse(labeledTruthRow, "claim verify: direct evidence label with true outcome rejected");
+    auto unknownLabel = freshChain("bypass-label");
+    unknownLabel.outcome = "unverifiable";
+    unknownLabel.evidence_label = "maybe";
+    refuse(unknownLabel, "claim verify: direct unknown evidence label rejected");
+    auto warmKind = freshChain("bypass-warm");
+    warmKind.source_kind = "warm_memory";
+    refuse(warmKind, "claim verify: direct warm-memory source rejected");
+    auto heldOutMissing = freshChain("bypass-held-out");
+    heldOutMissing.verifier_kind = "automated_agent";
+    heldOutMissing.verifier_version = "cm1-corroboration-1";
+    heldOutMissing.outcome = "unverifiable";
+    heldOutMissing.evidence_label = "supported";
+    heldOutMissing.source_kind = "held_out_passage";
+    heldOutMissing.source_ref = std::string(64, 'a');
+    refuse(heldOutMissing, "claim verify: held-out passage without an inclusion list rejected");
+
     auto skipped = correction.record;
     skipped.verification_id += "~skip";
     skipped.revision_index = 4;
@@ -1035,6 +1073,437 @@ bool testClaimVerification() {
     const auto answerAfter = repo->loadCm1AnswerVersion(answer.answer_id);
     expect(answerAfter && answerAfter->content_sha256 == answer.content_sha256,
            "claim verify: answer version unchanged");
+    return true;
+}
+
+std::string batchRef(const std::vector<std::string>& hashes) {
+    auto ordered = hashes;
+    std::sort(ordered.begin(), ordered.end());
+    ordered.erase(std::unique(ordered.begin(), ordered.end()), ordered.end());
+    std::string joined;
+    for (const auto& hash : ordered) {
+        if (!joined.empty()) joined.push_back('\n');
+        joined += hash;
+    }
+    return joined;
+}
+
+bool testClaimCorroboration() {
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    expect(!Thoth::cm1CorroborationEnabled(), "corroboration: disabled by default");
+
+    const auto migratedPath = makeTempDb();
+    {
+        sqlite3* raw = nullptr;
+        expect(sqlite3_open(migratedPath.c_str(), &raw) == SQLITE_OK, "corroboration: migration db opens");
+        const char* old_schema =
+            "CREATE TABLE cm1_claim_verifications ("
+            "  verification_id TEXT PRIMARY KEY,"
+            "  claim_id TEXT NOT NULL,"
+            "  claim_sha256 TEXT NOT NULL,"
+            "  answer_id TEXT NOT NULL,"
+            "  content_sha256 TEXT NOT NULL,"
+            "  protocol_id TEXT NOT NULL,"
+            "  protocol_version TEXT NOT NULL,"
+            "  reviewer_id TEXT NOT NULL,"
+            "  verifier_kind TEXT NOT NULL,"
+            "  verifier_version TEXT NOT NULL,"
+            "  method_id TEXT NOT NULL,"
+            "  outcome TEXT NOT NULL,"
+            "  source_kind TEXT NOT NULL,"
+            "  source_ref TEXT NOT NULL,"
+            "  calibration_eligibility TEXT NOT NULL,"
+            "  egar_eligibility TEXT NOT NULL,"
+            "  revision_reason TEXT NOT NULL,"
+            "  supersedes_verification_id TEXT NOT NULL,"
+            "  revision_index INTEGER NOT NULL,"
+            "  created_at_ms INTEGER NOT NULL"
+            ");";
+        expect(sqlite3_exec(raw, old_schema, nullptr, nullptr, nullptr) == SQLITE_OK,
+               "corroboration: legacy verification table created");
+        sqlite3_close(raw);
+    }
+    {
+        auto migrated = std::make_shared<Thoth::SQLiteMemoryRepository>(migratedPath.string());
+        sqlite3* raw = nullptr;
+        sqlite3_open(migratedPath.c_str(), &raw);
+        sqlite3_stmt* info = nullptr;
+        sqlite3_prepare_v2(raw, "PRAGMA table_info(cm1_claim_verifications);", -1, &info, nullptr);
+        bool found = false;
+        while (sqlite3_step(info) == SQLITE_ROW) {
+            const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(info, 1));
+            if (name && std::string(name) == "evidence_label") found = true;
+        }
+        sqlite3_finalize(info);
+        sqlite3_close(raw);
+        expect(found, "corroboration: evidence_label column is added");
+        (void)migrated;
+    }
+
+    const std::string answer_text = "The spare relay holds two red tokens.";
+    const std::string included_body = "The spare relay holds two red tokens.";
+    const std::string included_hash = Thoth::sha256Hex(included_body);
+    const std::string decorated = "--- notes.txt ---\n" + included_body + "\n\n";
+    expect(Thoth::sha256Hex(decorated) != included_hash,
+           "corroboration: inclusion hash is the raw chunk content");
+    const std::string near_body = included_body + "x";
+    expect(Thoth::sha256Hex(near_body) != included_hash,
+           "corroboration: a one-character change is a different hash");
+    const std::string newline_body = "Alpha";
+    expect(Thoth::sha256Hex(newline_body + "\n") != Thoth::sha256Hex(newline_body),
+           "corroboration: a trailing newline is a different hash");
+
+    const auto answer = Thoth::buildCm1AnswerVersion(
+        "p-cor", "synthesize", "gen-cor", answer_text, 500);
+    Thoth::Cm1EvidenceChunk cited;
+    cited.content = "A cited handbook sentence.";
+    cited.content_sha256 = Thoth::sha256Hex(cited.content);
+    const auto judged = Thoth::runCm1EvidenceJudgment(
+        answer, answer_text, {cited}, true, true, false,
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"A cited handbook sentence.\"}",
+                "stop");
+        },
+        500);
+    expect(judged.has_value(), "corroboration: judgment exists");
+    if (!judged) return false;
+    const std::string judgment_payload = judged->payload_json;
+
+    const auto dbPath = makeTempDb();
+    auto repo = std::make_shared<Thoth::SQLiteMemoryRepository>(dbPath.string());
+    expect(repo->insertCm1AnswerVersion(answer), "corroboration: answer stored");
+    expect(repo->insertCm1EvidenceJudgment(*judged), "corroboration: judgment stored");
+    const auto loadedJudgment = repo->loadCm1EvidenceJudgment(judged->judgment_id);
+    if (!loadedJudgment) return false;
+    const auto claim_id = nlohmann::json::parse(loadedJudgment->payload_json)["claims"][0]
+                              .value("claim_id", "");
+    const auto stored = Thoth::findCm1StoredClaim(*loadedJudgment, claim_id);
+    if (!stored) return false;
+
+    nlohmann::json plan = {
+        {"plan_id", "p-cor"},
+        {"steps", nlohmann::json::array({{
+            {"step_id", "synthesize"},
+            {"result", {
+                {"cm1_included_in_synthesis_available", true},
+                {"cm1_included_content_sha256", nlohmann::json::array({included_hash})}
+            }}
+        }})}
+    };
+    auto active = activePlan("p-cor");
+    active.steps_json = plan.dump();
+    expect(repo->storeActivePlan(active), "corroboration: plan stored");
+    const auto inclusion = repo->loadCm1SynthesisInclusion("p-cor", "synthesize");
+    expect(inclusion && inclusion->content_sha256.size() == 1
+               && inclusion->content_sha256.front() == included_hash,
+           "corroboration: inclusion hashes load from the plan");
+
+    bool called = false;
+    auto disabled = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{near_body, "handbook.md"}},
+        [&](const std::string&, int) {
+            called = true;
+            return completionWith("{}", "stop");
+        },
+        510);
+    expect(!called && !disabled.wrote && disabled.reason == "disabled",
+           "corroboration: a disabled writer does not call the model");
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+           "corroboration: a disabled writer stores nothing");
+
+    ::setenv("THOTH_CM1_CORROBORATION", "1", 1);
+    called = false;
+    auto exact = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{included_body, "notes.txt"}},
+        [&](const std::string&, int) {
+            called = true;
+            return completionWith("{}", "stop");
+        },
+        511);
+    expect(!called && exact.reason == "no_eligible_passage",
+           "corroboration: exact included content is excluded");
+
+    called = false;
+    auto quoted = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{cited.content, "other.txt"}},
+        [&](const std::string&, int) {
+            called = true;
+            return completionWith("{}", "stop");
+        },
+        512);
+    expect(!called && quoted.reason == "no_eligible_passage",
+           "corroboration: the judgment quote is excluded");
+
+    called = false;
+    auto warm = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{near_body, "warm_memory:session-1"}},
+        [&](const std::string&, int) {
+            called = true;
+            return completionWith("{}", "stop");
+        },
+        513);
+    expect(!called && warm.reason == "no_eligible_passage",
+           "corroboration: warm-memory content is excluded");
+
+    Thoth::Cm1ClaimVerificationSubmission blocked;
+    blocked.claim_id = stored->claim_id;
+    blocked.claim_text = stored->claim_text;
+    blocked.answer_id = answer.answer_id;
+    blocked.answer_text = answer_text;
+    blocked.protocol_id = "direct-held-out";
+    blocked.protocol_version = "v1";
+    blocked.reviewer_id = "bypass";
+    blocked.verifier_kind = "automated_agent";
+    blocked.verifier_version = "cm1-corroboration-1";
+    blocked.method_id = "direct";
+    blocked.outcome = "unverifiable";
+    blocked.evidence_label = "supported";
+    blocked.source_kind = "held_out_passage";
+    blocked.source_ref = included_hash;
+    blocked.revision_reason = "initial";
+    const auto loadedAnswer = repo->loadCm1AnswerVersion(answer.answer_id);
+    const auto blockedDraft = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, blocked, 515);
+    expect(blockedDraft.disposition == Thoth::Cm1RecordDisposition::Insert,
+           "corroboration: prepare accepts a hash the repository must still reject");
+    expect(!repo->insertCm1ClaimVerification(blockedDraft.record),
+           "corroboration: inclusion hash rejected at insert");
+    blocked.source_ref = "ledger.txt";
+    const auto pathRef = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, blocked, 516);
+    expect(pathRef.disposition == Thoth::Cm1RecordDisposition::Insert
+               && !repo->insertCm1ClaimVerification(pathRef.record),
+           "corroboration: a non-hash passage reference is rejected");
+
+    const std::string hash_low = Thoth::sha256Hex("batch-a");
+    const std::string hash_high = Thoth::sha256Hex("batch-b");
+    const std::string first_hash = hash_low < hash_high ? hash_low : hash_high;
+    const std::string second_hash = hash_low < hash_high ? hash_high : hash_low;
+    expect(first_hash < second_hash, "corroboration: fixture hashes are ordered");
+    std::string uppercase = first_hash;
+    for (char& ch : uppercase) {
+        if (ch >= 'a' && ch <= 'f') {
+            ch = static_cast<char>(ch - 'a' + 'A');
+            break;
+        }
+    }
+    expect(uppercase != first_hash, "corroboration: fixture has a hex letter to raise");
+
+    blocked.source_kind = "held_out_batch";
+    blocked.evidence_label = "insufficient_evidence";
+    const std::vector<std::pair<std::string, std::string>> malformed = {
+        {batchRef({included_hash, second_hash}), "an included passage in a batch is rejected"},
+        {batchRef({cited.content_sha256, second_hash}), "a cited judgment chunk in a batch is rejected"},
+        {second_hash + "\n" + first_hash, "an unsorted batch is rejected"},
+        {first_hash + "\n" + first_hash, "a duplicate batch hash is rejected"},
+        {uppercase + "\n" + second_hash, "an uppercase batch hash is rejected"},
+        {first_hash, "a one-hash batch is rejected"},
+        {"trusted-source", "free-text batch provenance is rejected"},
+    };
+    for (const auto& [ref, name] : malformed) {
+        blocked.source_ref = ref;
+        auto draft = Thoth::prepareCm1ClaimVerification(
+            &*loadedAnswer, &*stored, nullptr, blocked, 517);
+        if (draft.disposition == Thoth::Cm1RecordDisposition::Insert) {
+            expect(!repo->insertCm1ClaimVerification(draft.record), "corroboration: " + name);
+        } else {
+            expect(false, "corroboration: prepare should accept the shape the repository rejects: " + name);
+        }
+    }
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+           "corroboration: malformed held-out references are not stored");
+
+    const std::string held_body = "An outside ledger says the spare relay holds two red tokens.";
+    const std::string held_hash = Thoth::sha256Hex(held_body);
+    expect(held_hash != included_hash && held_hash != cited.content_sha256,
+           "corroboration: the held-out passage is outside the inclusion set");
+    auto stored_row = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{held_body, "ledger.txt"}},
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"the spare relay holds two red tokens.\"}",
+                "stop");
+        },
+        520);
+    expect(stored_row.wrote && stored_row.reason == "stored" && stored_row.record,
+           "corroboration: held-out assessment stored");
+    if (!stored_row.record) {
+        ::unsetenv("THOTH_CM1_CORROBORATION");
+        return false;
+    }
+    const auto& row = *stored_row.record;
+    expect(row.verifier_kind == "automated_agent"
+               && row.verifier_version == Thoth::kCm1CorroborationVerifierVersion
+               && row.method_id == Thoth::kCm1CorroborationMethodId
+               && row.outcome == "unverifiable"
+               && row.evidence_label == "supported"
+               && row.calibration_eligibility == "provisional"
+               && row.egar_eligibility == "excluded"
+               && row.source_kind == "held_out_passage"
+               && row.source_ref == held_hash,
+           "corroboration: the row is a provisional passage assessment");
+    expect(row.source_ref != "ledger.txt",
+           "corroboration: the file name is not stored on the verification row");
+
+    auto replay = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{held_body, "ledger.txt"}},
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"the spare relay holds two red tokens.\"}",
+                "stop");
+        },
+        521);
+    expect(!replay.wrote && replay.reason == "unchanged",
+           "corroboration: the same assessment does not append a row");
+    expect(repo->insertCm1ClaimVerification(row), "corroboration: identical replay succeeds");
+    auto conflict = row;
+    conflict.evidence_label = "contradicted";
+    expect(!repo->insertCm1ClaimVerification(conflict),
+           "corroboration: conflicting replay rejected");
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).size() == 1,
+           "corroboration: replay leaves one row");
+
+    blocked.source_kind = "held_out_batch";
+    blocked.evidence_label = "insufficient_evidence";
+    blocked.revision_reason = "initial";
+    blocked.source_ref = batchRef({first_hash, second_hash});
+    const auto validBatch = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, blocked, 518);
+    expect(validBatch.disposition == Thoth::Cm1RecordDisposition::Insert
+               && repo->insertCm1ClaimVerification(validBatch.record)
+               && repo->insertCm1ClaimVerification(validBatch.record),
+           "corroboration: a sorted held-out batch is stored and replays");
+    expect(validBatch.record.source_ref == first_hash + "\n" + second_hash,
+           "corroboration: batch membership is the hash list");
+    blocked.revision_reason = "correction";
+    blocked.source_ref = batchRef({first_hash, Thoth::sha256Hex("batch-c")});
+    const auto batchCorrection = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, &validBatch.record, blocked, 519);
+    expect(batchCorrection.disposition == Thoth::Cm1RecordDisposition::Insert
+               && batchCorrection.record.revision_index == 2
+               && batchCorrection.record.outcome == "unverifiable"
+               && repo->insertCm1ClaimVerification(batchCorrection.record),
+           "corroboration: a batch correction stays unverifiable");
+
+    auto corrected = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{held_body, "ledger.txt"}},
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"contradicted\",\"evidence_quote\":\"the spare relay holds two red tokens.\"}",
+                "stop");
+        },
+        522);
+    expect(corrected.wrote && corrected.record
+               && corrected.record->revision_index == 2
+               && corrected.record->revision_reason == "correction"
+               && corrected.record->evidence_label == "contradicted"
+               && corrected.record->outcome == "unverifiable"
+               && corrected.record->supersedes_verification_id == row.verification_id,
+           "corroboration: a changed label appends an unverifiable correction");
+
+    auto timed_out = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{"A second outside note about red tokens.", "note.txt"}},
+        [&](const std::string&, int) {
+            Thoth::Cm1EvidenceCompletion completion;
+            completion.called = true;
+            completion.ok = false;
+            completion.error = "timeout";
+            return completion;
+        },
+        523);
+    expect(!timed_out.wrote && timed_out.reason == "timeout", "corroboration: timeout writes nothing");
+
+    auto invalid = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{"A second outside note about red tokens.", "note.txt"}},
+        [&](const std::string&, int) { return completionWith("not json", "stop"); },
+        524);
+    expect(!invalid.wrote && invalid.reason == "invalid_output",
+           "corroboration: invalid output writes nothing");
+
+    const std::string shared = "shared red token sentence";
+    auto ambiguous = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{"left " + shared, "left.txt"}, {"right " + shared, "right.txt"}},
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"" + shared + "\"}", "stop");
+        },
+        525);
+    expect(!ambiguous.wrote && ambiguous.reason == "ambiguous",
+           "corroboration: a quote in two passages writes nothing");
+
+    const std::string first = "Ledger A does not mention the relay.";
+    const std::string second = "Ledger B does not mention the relay.";
+    auto insufficient = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{first, "a.txt"}, {second, "b.txt"}},
+        [&](const std::string&, int) {
+            return completionWith("{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}", "stop");
+        },
+        526);
+    const auto expected_batch = batchRef({Thoth::sha256Hex(first), Thoth::sha256Hex(second)});
+    called = false;
+    auto duplicate = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {{near_body, "a.txt"}, {near_body, "b.txt"}},
+        [&](const std::string&, int) {
+            called = true;
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"two red tokens.x\"}", "stop");
+        },
+        527);
+    expect(called && duplicate.wrote && duplicate.record
+               && duplicate.record->source_kind == "held_out_passage"
+               && duplicate.record->source_ref == Thoth::sha256Hex(near_body),
+           "corroboration: identical passage text is assessed once");
+
+    Thoth::Cm1ClaimVerificationSubmission manual;
+    manual.claim_id = stored->claim_id;
+    manual.claim_text = stored->claim_text;
+    manual.answer_id = answer.answer_id;
+    manual.answer_text = answer_text;
+    manual.protocol_id = "claim-check";
+    manual.protocol_version = "v1";
+    manual.reviewer_id = "reviewer-a";
+    manual.verifier_kind = "human";
+    manual.method_id = "desk-read";
+    manual.outcome = "true";
+    manual.source_kind = "external_manual";
+    manual.source_ref = "relay-handbook-4";
+    manual.revision_reason = "initial";
+    const auto manualDraft = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, manual, 530);
+    expect(manualDraft.disposition == Thoth::Cm1RecordDisposition::Insert
+               && manualDraft.record.evidence_label.empty()
+               && repo->insertCm1ClaimVerification(manualDraft.record),
+           "corroboration: an external manual reference stays valid");
+
+    expect(insufficient.wrote && insufficient.record
+               && insufficient.record->evidence_label == "insufficient_evidence"
+               && insufficient.record->outcome == "unverifiable"
+               && insufficient.record->source_kind == "held_out_batch"
+               && insufficient.record->source_ref == expected_batch
+               && expected_batch.find(Thoth::sha256Hex(first)) != std::string::npos
+               && expected_batch.find(Thoth::sha256Hex(second)) != std::string::npos
+               && expected_batch.size() == Thoth::sha256Hex(first).size()
+                      + 1 + Thoth::sha256Hex(second).size(),
+           "corroboration: the batch lists each passage hash");
+
+    const auto judgmentAfter = repo->loadCm1EvidenceJudgment(judged->judgment_id);
+    expect(judgmentAfter && judgmentAfter->payload_json == judgment_payload,
+           "corroboration: judgment payload unchanged");
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    expect(!Thoth::cm1CorroborationEnabled(), "corroboration: flag restored to off");
     return true;
 }
 
@@ -1503,6 +1972,7 @@ int main() {
     testGenerationIdsSurviveRestartShape();
     testAnswerFeedbackAndVerifiedLabels();
     testClaimVerification();
+    testClaimCorroboration();
     testEvidenceSegmentation();
     testEvidenceJudgmentGate();
     testEvidenceJsonWrapper();
