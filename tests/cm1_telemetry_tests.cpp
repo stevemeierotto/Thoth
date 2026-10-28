@@ -674,6 +674,370 @@ Thoth::Cm1AnswerVersionRecord evidenceAnswer() {
     return Thoth::buildCm1AnswerVersion("p7", "synthesize", "gen-answer", "answer body", 50);
 }
 
+Thoth::Cm1ClaimVerificationSubmission claimSubmission(
+    const Thoth::Cm1AnswerVersionRecord& answer,
+    const Thoth::Cm1StoredClaim& claim,
+    const std::string& answer_text) {
+    Thoth::Cm1ClaimVerificationSubmission submission;
+    submission.claim_id = claim.claim_id;
+    submission.claim_text = claim.claim_text;
+    submission.answer_id = answer.answer_id;
+    submission.answer_text = answer_text;
+    submission.protocol_id = "claim-check";
+    submission.protocol_version = "v1";
+    submission.reviewer_id = "reviewer-a";
+    submission.verifier_kind = "human";
+    submission.verifier_version = "";
+    submission.method_id = "desk-read";
+    submission.outcome = "true";
+    submission.source_kind = "external_manual";
+    submission.source_ref = "relay-handbook-4";
+    submission.calibration_eligibility = "provisional";
+    submission.egar_eligibility = "excluded";
+    submission.revision_reason = "initial";
+    return submission;
+}
+
+bool testClaimVerification() {
+    const std::string answer_text = "The relay cache stores one blue token.";
+    const auto answer = Thoth::buildCm1AnswerVersion(
+        "p9", "synthesize", "gen-claim", answer_text, 300);
+    Thoth::Cm1EvidenceChunk passage;
+    passage.content = "The relay cache stores one blue token.";
+    passage.content_sha256 = Thoth::sha256Hex(passage.content);
+    const auto judged = Thoth::runCm1EvidenceJudgment(
+        answer, answer_text, {passage}, true, true, false,
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"The relay cache stores one blue token.\"}",
+                "stop");
+        },
+        300);
+    expect(judged.has_value(), "claim verify: judgment exists");
+    if (!judged) return false;
+    const std::string judgment_payload = judged->payload_json;
+
+    const auto dbPath = makeTempDb();
+    auto repo = std::make_shared<Thoth::SQLiteMemoryRepository>(dbPath.string());
+    expect(repo->insertCm1AnswerVersion(answer), "claim verify: answer stored");
+    expect(repo->insertCm1EvidenceJudgment(*judged), "claim verify: judgment stored");
+    const auto loadedAnswer = repo->loadCm1AnswerVersion(answer.answer_id);
+    const auto loadedJudgment = repo->loadCm1EvidenceJudgment(judged->judgment_id);
+    expect(loadedAnswer.has_value() && loadedJudgment.has_value(), "claim verify: records reloaded");
+    if (!loadedAnswer || !loadedJudgment) return false;
+
+    const auto claim_id = nlohmann::json::parse(loadedJudgment->payload_json)["claims"][0]
+                              .value("claim_id", "");
+    const auto stored = Thoth::findCm1StoredClaim(*loadedJudgment, claim_id);
+    expect(stored.has_value(), "claim verify: stored claim is read from the judgment");
+    expect(!Thoth::findCm1StoredClaim(*loadedJudgment, claim_id + ":missing").has_value(),
+           "claim verify: unknown claim is absent");
+    if (!stored) return false;
+
+    Thoth::Cm1VerifiedLabelSubmission label;
+    label.answer_id = answer.answer_id;
+    label.answer_text = answer_text;
+    label.protocol_id = "desk-check";
+    label.reviewer_id = "reviewer-a";
+    label.factual_bin = 8;
+    const auto labelDraft = Thoth::prepareCm1VerifiedLabel(&*loadedAnswer, nullptr, label, 301);
+    expect(repo->insertCm1VerifiedLabel(labelDraft.record), "claim verify: factual label stored");
+
+    auto submission = claimSubmission(*loadedAnswer, *stored, answer_text);
+    const auto missing = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, nullptr, nullptr, submission, 302);
+    expect(missing.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: missing claim rejected");
+
+    submission.answer_text = "different answer";
+    const auto badAnswer = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 303);
+    expect(badAnswer.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: answer hash rejected");
+    submission.answer_text = answer_text;
+    submission.claim_text = "A different claim.";
+    const auto badClaim = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 304);
+    expect(badClaim.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: claim hash rejected");
+    submission.claim_text = stored->claim_text;
+
+    for (const char* kind : {"cm1_judgment", "evidence_passage", "evidence_quote", "grag"}) {
+        submission.source_kind = kind;
+        const auto internal = Thoth::prepareCm1ClaimVerification(
+            &*loadedAnswer, &*stored, nullptr, submission, 305);
+        expect(internal.disposition == Thoth::Cm1RecordDisposition::Rejected,
+               std::string("claim verify: source kind rejected: ") + kind);
+    }
+    submission.source_kind = "external_manual";
+    submission.source_ref = stored->evidence_quote;
+    const auto quoteRef = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 306);
+    expect(quoteRef.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: evidence quote reference rejected");
+    submission.source_ref = stored->evidence_chunk_sha256;
+    const auto hashRef = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 307);
+    expect(hashRef.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: evidence chunk reference rejected");
+    submission.source_ref = "relay-handbook-4";
+
+    submission.verifier_kind = "human";
+    submission.verifier_version = "1";
+    const auto humanVersion = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 308);
+    expect(humanVersion.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: human version rejected");
+    submission.verifier_version = "";
+    submission.verifier_kind = "automated_agent";
+    const auto agentVersion = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 309);
+    expect(agentVersion.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: agent without version rejected");
+    submission.verifier_kind = "external_service";
+    const auto serviceVersion = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 310);
+    expect(serviceVersion.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: service without version rejected");
+    submission.verifier_kind = "human";
+    submission.method_id = " ";
+    const auto emptyMethod = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 311);
+    expect(emptyMethod.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: empty method rejected");
+    submission.method_id = "desk-read";
+
+    submission.outcome = "maybe";
+    const auto badOutcome = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 312);
+    expect(badOutcome.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: unknown outcome rejected");
+    submission.outcome = "true";
+    submission.revision_reason = "correction";
+    const auto earlyCorrection = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 313);
+    expect(earlyCorrection.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: correction without a chain rejected");
+    submission.revision_reason = "authorization";
+    const auto authorize = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 314);
+    expect(authorize.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: authorization reason rejected");
+    submission.revision_reason = "initial";
+    submission.calibration_eligibility = "authorized";
+    const auto calAuth = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 315);
+    expect(calAuth.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: authorized calibration rejected");
+    submission.calibration_eligibility = "provisional";
+    submission.egar_eligibility = "authorized";
+    const auto egarAuth = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 316);
+    expect(egarAuth.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: authorized EGAR eligibility rejected");
+    submission.egar_eligibility = "excluded";
+
+    const auto initial = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 317);
+    expect(initial.disposition == Thoth::Cm1RecordDisposition::Insert, "claim verify: true accepted");
+    expect(initial.record.outcome == "true", "claim verify: outcome true");
+    expect(initial.record.revision_reason == "initial", "claim verify: reason initial");
+    expect(initial.record.revision_index == 1, "claim verify: first revision");
+    expect(initial.record.verifier_version.empty(), "claim verify: human version is empty");
+    expect(initial.record.calibration_eligibility == "provisional"
+               && initial.record.egar_eligibility == "excluded",
+           "claim verify: eligibility stays provisional and excluded");
+    expect(repo->insertCm1ClaimVerification(initial.record), "claim verify: initial stored");
+    expect(repo->insertCm1ClaimVerification(initial.record), "claim verify: replay insert is ignored");
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).size() == 1,
+           "claim verify: replay does not add a row");
+
+    submission.revision_reason = "initial";
+    const auto secondInitial = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, &initial.record, submission, 318);
+    expect(secondInitial.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: second initial rejected");
+
+    submission.revision_reason = "correction";
+    submission.outcome = "false";
+    submission.source_ref = "relay-handbook-5";
+    const auto correction = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, &initial.record, submission, 319);
+    expect(correction.disposition == Thoth::Cm1RecordDisposition::Insert, "claim verify: correction accepted");
+    expect(correction.record.outcome == "false", "claim verify: outcome false");
+    expect(correction.record.revision_reason == "correction", "claim verify: reason correction");
+    expect(correction.record.revision_index == 2, "claim verify: correction index");
+    expect(correction.record.supersedes_verification_id == initial.record.verification_id,
+           "claim verify: correction points at the previous row");
+    expect(repo->insertCm1ClaimVerification(correction.record), "claim verify: correction stored");
+    expect(repo->insertCm1ClaimVerification(correction.record), "claim verify: correction replay ignored");
+
+    submission.outcome = "unverifiable";
+    submission.revision_reason = "initial";
+    submission.verifier_kind = "automated_agent";
+    submission.verifier_version = "agent-1";
+    submission.method_id = "tool-check";
+    submission.reviewer_id = "agent-alpha";
+    submission.source_kind = "external_tool";
+    submission.source_ref = "tool-run-19";
+    const auto agent = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, &correction.record, submission, 320);
+    expect(agent.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: another chain is not a correction of the human row");
+    const auto agentInitial = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 321);
+    expect(agentInitial.disposition == Thoth::Cm1RecordDisposition::Insert,
+           "claim verify: automated agent accepted");
+    expect(agentInitial.record.outcome == "unverifiable", "claim verify: outcome unverifiable");
+    expect(repo->insertCm1ClaimVerification(agentInitial.record), "claim verify: agent stored");
+
+    submission.method_id = "other-tool";
+    const auto otherMethod = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, &agentInitial.record, submission, 322);
+    expect(otherMethod.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: a different method does not supersede");
+    const auto otherMethodInitial = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 323);
+    expect(otherMethodInitial.disposition == Thoth::Cm1RecordDisposition::Insert,
+           "claim verify: other method starts its own chain");
+    expect(repo->insertCm1ClaimVerification(otherMethodInitial.record), "claim verify: other method stored");
+
+    submission.method_id = "tool-check";
+    submission.verifier_version = "agent-2";
+    const auto nextVersion = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, &agentInitial.record, submission, 324);
+    expect(nextVersion.disposition == Thoth::Cm1RecordDisposition::Rejected,
+           "claim verify: a new verifier version does not supersede");
+    const auto nextVersionInitial = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 325);
+    expect(repo->insertCm1ClaimVerification(nextVersionInitial.record), "claim verify: agent version stored");
+
+    submission.verifier_kind = "external_service";
+    submission.verifier_version = "svc-3";
+    submission.method_id = "api-lookup";
+    submission.reviewer_id = "gold-service";
+    submission.outcome = "true";
+    submission.source_kind = "external_service_record";
+    submission.source_ref = "case-44";
+    const auto service = Thoth::prepareCm1ClaimVerification(
+        &*loadedAnswer, &*stored, nullptr, submission, 326);
+    expect(service.disposition == Thoth::Cm1RecordDisposition::Insert,
+           "claim verify: external service accepted");
+    expect(repo->insertCm1ClaimVerification(service.record), "claim verify: service stored");
+
+    expect(!stored->evidence_quote.empty() && !stored->evidence_chunk_sha256.empty(),
+           "claim verify: fixture keeps the internal evidence identifiers");
+    auto freshChain = [&](const std::string& method) {
+        auto row = initial.record;
+        row.method_id = method;
+        row.verification_id = initial.record.verification_id + "~" + method;
+        row.revision_reason = "initial";
+        row.revision_index = 1;
+        row.supersedes_verification_id.clear();
+        row.created_at_ms = 400;
+        return row;
+    };
+    auto refuse = [&](const Thoth::Cm1ClaimVerification& row, const std::string& name) {
+        const auto before = repo->listCm1ClaimVerifications(answer.answer_id).size();
+        expect(!repo->insertCm1ClaimVerification(row), name);
+        expect(repo->listCm1ClaimVerifications(answer.answer_id).size() == before,
+               name + " is not stored");
+    };
+
+    auto conflict = correction.record;
+    conflict.outcome = "true";
+    refuse(conflict, "claim verify: conflicting replay rejected");
+
+    auto calibration = freshChain("bypass-calibration");
+    calibration.calibration_eligibility = "authorized";
+    refuse(calibration, "claim verify: direct authorized calibration rejected");
+    auto egar = freshChain("bypass-egar");
+    egar.egar_eligibility = "authorized";
+    refuse(egar, "claim verify: direct authorized EGAR eligibility rejected");
+    auto authorization = freshChain("bypass-authorization");
+    authorization.revision_reason = "authorization";
+    refuse(authorization, "claim verify: direct authorization reason rejected");
+
+    auto directHumanVersion = freshChain("bypass-human-version");
+    directHumanVersion.verifier_version = "1";
+    refuse(directHumanVersion, "claim verify: direct human version rejected");
+    auto agentGap = freshChain("bypass-agent");
+    agentGap.verifier_kind = "automated_agent";
+    agentGap.verifier_version.clear();
+    refuse(agentGap, "claim verify: direct agent without version rejected");
+    auto directOutcome = freshChain("bypass-outcome");
+    directOutcome.outcome = "maybe";
+    refuse(directOutcome, "claim verify: direct unknown outcome rejected");
+
+    auto answerHash = freshChain("bypass-answer-hash");
+    answerHash.content_sha256 = "not-the-answer-hash";
+    refuse(answerHash, "claim verify: direct answer hash rejected");
+    auto fabricated = freshChain("bypass-claim");
+    fabricated.claim_id = stored->claim_id + ":fabricated";
+    refuse(fabricated, "claim verify: fabricated claim id rejected");
+    auto claimHash = freshChain("bypass-claim-hash");
+    claimHash.claim_sha256 = "0123456789abcdef";
+    refuse(claimHash, "claim verify: direct claim hash rejected");
+
+    auto internalKind = freshChain("bypass-grag");
+    internalKind.source_kind = "grag";
+    refuse(internalKind, "claim verify: direct internal source kind rejected");
+    auto directQuote = freshChain("bypass-quote");
+    directQuote.source_ref = stored->evidence_quote;
+    refuse(directQuote, "claim verify: direct evidence quote rejected");
+    auto chunkRef = freshChain("bypass-chunk");
+    chunkRef.source_ref = stored->evidence_chunk_sha256;
+    refuse(chunkRef, "claim verify: direct evidence chunk rejected");
+
+    auto skipped = correction.record;
+    skipped.verification_id += "~skip";
+    skipped.revision_index = 4;
+    skipped.created_at_ms = 401;
+    refuse(skipped, "claim verify: skipped revision rejected");
+    auto wrongLink = correction.record;
+    wrongLink.verification_id += "~link";
+    wrongLink.revision_index = 3;
+    wrongLink.supersedes_verification_id = initial.record.verification_id;
+    wrongLink.created_at_ms = 402;
+    refuse(wrongLink, "claim verify: supersedes must name the current revision");
+    auto orphan = freshChain("bypass-orphan");
+    orphan.revision_reason = "correction";
+    orphan.revision_index = 2;
+    orphan.supersedes_verification_id = correction.record.verification_id;
+    refuse(orphan, "claim verify: correction without that chain rejected");
+
+    expect(repo->insertCm1ClaimVerification(initial.record),
+           "claim verify: identical initial replay still succeeds");
+    expect(repo->insertCm1ClaimVerification(correction.record),
+           "claim verify: identical correction replay still succeeds");
+
+    const auto history = repo->listCm1ClaimVerifications(answer.answer_id);
+    expect(history.size() == 6, "claim verify: five chains and the human correction remain");
+    expect(history.front().verification_id == initial.record.verification_id
+               && history.front().outcome == "true",
+           "claim verify: the first revision remains");
+    const auto humanLatest = repo->latestCm1ClaimVerification(
+        stored->claim_id, "claim-check", "v1", "reviewer-a", "human", "", "desk-read");
+    expect(humanLatest && humanLatest->verification_id == correction.record.verification_id
+               && humanLatest->outcome == "false",
+           "claim verify: human latest is the correction");
+    const auto agentLatest = repo->latestCm1ClaimVerification(
+        stored->claim_id, "claim-check", "v1", "agent-alpha", "automated_agent", "agent-1", "tool-check");
+    expect(agentLatest && agentLatest->outcome == "unverifiable"
+               && agentLatest->revision_index == 1,
+           "claim verify: agent chain is unchanged");
+
+    const auto judgmentAfter = repo->loadCm1EvidenceJudgment(judged->judgment_id);
+    expect(judgmentAfter && judgmentAfter->payload_json == judgment_payload,
+           "claim verify: judgment payload unchanged");
+    const auto labelAfter = repo->latestCm1VerifiedLabel(answer.answer_id, "desk-check");
+    expect(labelAfter && labelAfter->factual_bin == 8, "claim verify: factual label unchanged");
+    const auto answerAfter = repo->loadCm1AnswerVersion(answer.answer_id);
+    expect(answerAfter && answerAfter->content_sha256 == answer.content_sha256,
+           "claim verify: answer version unchanged");
+    return true;
+}
+
 bool testEvidenceSegmentation() {
     const auto budget = Thoth::segmentCm1EvidenceClaims("The budget is 900 seconds.");
     expect(budget.size() == 1 && budget[0] == "The budget is 900 seconds.",
@@ -1138,6 +1502,7 @@ int main() {
     testTelemetryWriteFailurePreservesCheckpoint();
     testGenerationIdsSurviveRestartShape();
     testAnswerFeedbackAndVerifiedLabels();
+    testClaimVerification();
     testEvidenceSegmentation();
     testEvidenceJudgmentGate();
     testEvidenceJsonWrapper();
