@@ -2350,6 +2350,97 @@ void testControllerOwnershipAndPluginShutdown() {
     fs::remove_all(scratch, ec);
 }
 
+void testEnforceMemoryLimitsRebuildsWithoutDeadlock() {
+    const char* prior_workspace = std::getenv("THOTH_WORKSPACE_PATH");
+    const std::string saved_workspace = prior_workspace ? prior_workspace : "";
+    const bool had_workspace = prior_workspace != nullptr;
+    const fs::path scratch = fs::temp_directory_path() /
+                             ("thoth_cm1_memlimit_" + std::to_string(::getpid()));
+    fs::create_directories(scratch / "rag");
+    ::setenv("THOTH_WORKSPACE_PATH", scratch.string().c_str(), 1);
+
+    const std::string alpha = "CM1LIMIT alpha sentinel paragraph for eviction.";
+    const std::string omega = "CM1LIMIT omega retained tail paragraph for the memory limit.";
+    constexpr int kBetaParagraphs = 2800;
+
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+    IndexManager index(&engine);
+    const fs::path small = fs::path(FileHandler().getAgentWorkspacePath("rag")) / "limit_alpha.md";
+    const fs::path large = fs::path(FileHandler().getAgentWorkspacePath("rag")) / "limit_beta.md";
+    {
+        std::ofstream out(small);
+        out << alpha << "\n";
+    }
+    {
+        std::ofstream out(large);
+        for (int i = 0; i < kBetaParagraphs; ++i) {
+            out << "CM1LIMIT beta paragraph " << i
+                << " retained memory-limit payload.\n\n";
+        }
+        out << omega << "\n";
+    }
+
+    auto indexWithin = [&](const fs::path& path) {
+        std::atomic<bool> done{false};
+        std::thread worker([&]() {
+            index.indexFile(path.string());
+            done.store(true);
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!done.load() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        if (!done.load()) {
+            std::cerr << "FAIL: enforceMemoryLimits deadlock: indexFile exceeded 30s for "
+                      << path.filename().string() << "\n";
+            std::_Exit(1);
+        }
+        worker.join();
+    };
+
+    indexWithin(small);
+    const size_t afterSmall = index.chunkCount();
+    indexWithin(large);
+    const size_t afterLimit = index.chunkCount();
+
+    const auto containsMarker = [&](const std::string& marker) {
+        for (const auto& chunk : index.snapshotChunks()) {
+            if (chunk.code.find(marker) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::optional<CodeChunk> omegaCopy;
+    for (const auto& chunk : index.snapshotChunks()) {
+        if (chunk.code.find(omega) != std::string::npos) {
+            omegaCopy = index.copyChunkByCode(chunk.code);
+            break;
+        }
+    }
+
+    expect(afterSmall >= 1, "memory limit: sentinel file is indexed");
+    expect(afterLimit > 0 && afterLimit < afterSmall + static_cast<size_t>(kBetaParagraphs + 1),
+           "memory limit: eviction reduces the stored chunk count");
+    expect(!containsMarker(alpha), "memory limit: the oldest file is evicted");
+    expect(omegaCopy.has_value() && omegaCopy->code.find(omega) != std::string::npos,
+           "memory limit: a surviving chunk copies with its text");
+
+    const size_t beforeRepeat = index.chunkCount();
+    indexWithin(large);
+    expect(index.chunkCount() == beforeRepeat,
+           "memory limit: a file that still has chunks keeps its fingerprint");
+
+    indexWithin(small);
+    expect(containsMarker(alpha),
+           "memory limit: a fully evicted file is indexed again");
+
+    if (had_workspace) ::setenv("THOTH_WORKSPACE_PATH", saved_workspace.c_str(), 1);
+    else ::unsetenv("THOTH_WORKSPACE_PATH");
+    std::error_code ec;
+    fs::remove_all(scratch, ec);
+}
+
 } // namespace
 
 int main() {
@@ -2366,6 +2457,7 @@ int main() {
     testConcurrentIndexAndRetrieval();
     testIndexDestructorDrainsQueuedWork();
     testControllerOwnershipAndPluginShutdown();
+    testEnforceMemoryLimitsRebuildsWithoutDeadlock();
     testEvidenceSegmentation();
     testEvidenceJudgmentGate();
     testEvidenceJsonWrapper();
