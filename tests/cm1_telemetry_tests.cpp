@@ -8,24 +8,32 @@
 
 #include "cm1_telemetry.h"
 #include "alp_sha256.h"
+#include "basic_agent_plugin.h"
+#include "command_processor.h"
 #include "embedding_engine.h"
 #include "executive_controller.h"
+#include "file_handler.h"
 #include "generation_call.h"
 #include "grag_diagnostics.h"
 #include "index_manager.h"
+#include "llm_interface.h"
 #include "memory.h"
+#include "rag.h"
 #include "sqlite_memory_repository.h"
 
 #include <json.hpp>
 #include <sqlite3.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -2174,6 +2182,174 @@ bool testClaimDiscovery() {
     return true;
 }
 
+void testConcurrentIndexAndRetrieval() {
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+    IndexManager index(&engine);
+    FileHandler fh;
+    const fs::path dir = fs::path(fh.getAgentWorkspacePath("rag")) /
+                         ("cm1_sync_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    const fs::path file_a = dir / "bay_alpha.txt";
+    const fs::path file_b = dir / "bay_beta.txt";
+    const std::string text_a = "CM1SYNC alpha held-out bay passage for retrieval overlap.";
+    const std::string text_b = "CM1SYNC beta unrelated ledger passage for retrieval overlap.";
+    auto write_overlap_file = [](const fs::path& path, const std::string& marker) {
+        std::ofstream out(path);
+        out << marker << "\n";
+        for (int i = 0; i < 120; ++i) {
+            out << marker << " paragraph " << i
+                << " keeps indexing busy while retrieval runs on the same index.\n";
+        }
+    };
+    write_overlap_file(file_a, text_a);
+    write_overlap_file(file_b, text_b);
+
+    std::atomic<bool> inconsistent{false};
+    std::atomic<bool> stop_reader{false};
+    std::atomic<int> reader_passes{0};
+    std::atomic<int> indexing_depth{0};
+    std::atomic<int> overlapped_retrieves{0};
+    std::thread reader([&]() {
+        while (!stop_reader.load()) {
+            const bool active_before = indexing_depth.load() > 0;
+            const auto hits = index.retrieveChunks(text_a, 4);
+            const bool overlapped = active_before || indexing_depth.load() > 0;
+            if (overlapped) {
+                overlapped_retrieves.fetch_add(1);
+            }
+            for (const auto& hit : hits) {
+                const auto copy = index.copyChunkByCode(hit.first);
+                if (copy && copy->code != hit.first) {
+                    inconsistent = true;
+                }
+            }
+            reader_passes.fetch_add(1);
+        }
+    });
+
+    const auto reader_ready_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (reader_passes.load() == 0 &&
+           std::chrono::steady_clock::now() < reader_ready_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const bool reader_ready = reader_passes.load() > 0;
+
+    std::thread writer_a([&]() {
+        indexing_depth.fetch_add(1);
+        index.indexFile(file_a.string());
+        indexing_depth.fetch_sub(1);
+    });
+    std::thread writer_b([&]() {
+        indexing_depth.fetch_add(1);
+        index.indexFile(file_b.string());
+        indexing_depth.fetch_sub(1);
+    });
+    writer_a.join();
+    writer_b.join();
+    stop_reader.store(true);
+    reader.join();
+
+    expect(reader_ready, "retrieval is running before indexing starts");
+    expect(overlapped_retrieves.load() > 0,
+           "retrieval runs while indexFile holds the index");
+    expect(!inconsistent.load(), "concurrent retrieval copies match ranked text");
+    expect(index.chunkCount() == index.snapshotChunks().size(),
+           "chunk count matches the snapshot");
+    bool saw_a = false;
+    bool saw_b = false;
+    for (const auto& chunk : index.snapshotChunks()) {
+        if (chunk.code.find("CM1SYNC alpha") != std::string::npos) saw_a = true;
+        if (chunk.code.find("CM1SYNC beta") != std::string::npos) saw_b = true;
+    }
+    expect(saw_a && saw_b, "both concurrent indexFile calls are stored");
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+void testIndexDestructorDrainsQueuedWork() {
+    EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+    FileHandler fh;
+    const fs::path dir = fs::path(fh.getAgentWorkspacePath("rag")) /
+                         ("cm1_sync_shutdown_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    const fs::path file = dir / "drain.txt";
+    {
+        std::ofstream out(file);
+        out << "CM1SYNC shutdown drain passage stays queued until the worker finishes.\n";
+    }
+    std::atomic<bool> completed{false};
+    {
+        IndexManager index(&engine);
+        index.setEventCallback([&](const ControllerEvent& ev) {
+            if (ev.type == EventType::INDEXING_COMPLETED) {
+                completed = true;
+            }
+        });
+        index.indexFileAsync(file.string());
+    }
+    expect(completed.load(), "index destructor joins the queued indexing task");
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+void testControllerOwnershipAndPluginShutdown() {
+    const char* prior_workspace = std::getenv("THOTH_WORKSPACE_PATH");
+    const char* prior_dev = std::getenv("THOTH_TEST_SUITE_DEV");
+    const char* prior_index = std::getenv("THOTH_TEST_SUITE_INDEX");
+    const std::string saved_workspace = prior_workspace ? prior_workspace : "";
+    const std::string saved_dev = prior_dev ? prior_dev : "";
+    const std::string saved_index = prior_index ? prior_index : "";
+    const bool had_workspace = prior_workspace != nullptr;
+    const bool had_dev = prior_dev != nullptr;
+    const bool had_index = prior_index != nullptr;
+
+    const fs::path scratch = fs::temp_directory_path() /
+                             ("thoth_cm1_plugin_" + std::to_string(::getpid()));
+    fs::create_directories(scratch);
+    ::setenv("THOTH_WORKSPACE_PATH", scratch.string().c_str(), 1);
+
+    {
+        Config config;
+        Memory memory(config);
+        auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &config);
+        IndexManager index(engine.get());
+        RAGPipeline rag(std::move(engine), &index, &config, &memory);
+        LLMInterface llm(LLMBackend::OpenAI, &config);
+        CommandProcessor processor(memory, rag, llm, &config);
+
+        auto controller = std::make_shared<Thoth::ExecutiveController>(nullptr, nullptr, nullptr, nullptr);
+        std::weak_ptr<Thoth::ExecutiveController> weak = controller;
+        processor.setController(controller);
+        controller.reset();
+        expect(!weak.expired(), "command processor keeps the controller alive after the other owner resets");
+        processor.setController(nullptr);
+        expect(weak.expired(), "clearing the command processor reference destroys the controller");
+
+        const std::string index_path = (scratch / "empty.rag_index.bin").string();
+        ::setenv("THOTH_TEST_SUITE_DEV", "1", 1);
+        ::setenv("THOTH_TEST_SUITE_INDEX", index_path.c_str(), 1);
+        bool plugin_destroyed = false;
+        try {
+            BasicAgentPlugin plugin;
+            plugin_destroyed = true;
+        } catch (const std::exception& ex) {
+            expect(false, std::string("plugin lifecycle constructor: ") + ex.what());
+        }
+        expect(plugin_destroyed, "plugin destructor releases the controller before deleting the index");
+    }
+
+    if (had_workspace) ::setenv("THOTH_WORKSPACE_PATH", saved_workspace.c_str(), 1);
+    else ::unsetenv("THOTH_WORKSPACE_PATH");
+    if (had_dev) ::setenv("THOTH_TEST_SUITE_DEV", saved_dev.c_str(), 1);
+    else ::unsetenv("THOTH_TEST_SUITE_DEV");
+    if (had_index) ::setenv("THOTH_TEST_SUITE_INDEX", saved_index.c_str(), 1);
+    else ::unsetenv("THOTH_TEST_SUITE_INDEX");
+    std::error_code ec;
+    fs::remove_all(scratch, ec);
+}
+
 } // namespace
 
 int main() {
@@ -2187,6 +2363,9 @@ int main() {
     testClaimVerification();
     testClaimCorroboration();
     testClaimDiscovery();
+    testConcurrentIndexAndRetrieval();
+    testIndexDestructorDrainsQueuedWork();
+    testControllerOwnershipAndPluginShutdown();
     testEvidenceSegmentation();
     testEvidenceJudgmentGate();
     testEvidenceJsonWrapper();
