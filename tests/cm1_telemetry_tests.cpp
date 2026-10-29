@@ -2441,6 +2441,178 @@ void testEnforceMemoryLimitsRebuildsWithoutDeadlock() {
     fs::remove_all(scratch, ec);
 }
 
+bool testDiscoveryEligibilitySelector() {
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    expect(!Thoth::cm1CorroborationEnabled(), "eligibility: discovery stays off");
+
+    const std::string eligible_text = "The spare relay holds two red tokens.";
+    const std::string unavailable_text = "This claim was not judged.";
+    const std::string corroborated_text = "The pump cabinet stores one green fuse.";
+    const std::string missing_text = "The north dock lists an empty crate.";
+    const std::string notes = "Notes: the spare relay holds two red tokens.";
+    const std::string other_notes = "Notes: the pump cabinet stores one green fuse.";
+    const std::string missing_notes = "Notes: the north dock lists an empty crate.";
+
+    auto answerFor = [](const std::string& plan, const std::string& generation, const std::string& text,
+                        std::int64_t at) {
+        return Thoth::buildCm1AnswerVersion(plan, "synthesize", generation, text, at);
+    };
+    auto claimId = [](const Thoth::Cm1AnswerVersionRecord& answer, int index, const std::string& text) {
+        return answer.answer_id + ":" + std::to_string(index) + ":" + Thoth::sha256Hex(text);
+    };
+    auto judgmentFor = [](const Thoth::Cm1AnswerVersionRecord& answer, nlohmann::json claims,
+                          std::int64_t at) {
+        Thoth::Cm1EvidenceJudgmentRecord record;
+        record.judgment_id = std::string("cm1e1:") + answer.answer_id;
+        record.answer_id = answer.answer_id;
+        record.content_sha256 = answer.content_sha256;
+        record.estimator_version = Thoth::kCm1EvidenceVersion;
+        record.created_at_ms = at;
+        record.payload_json = nlohmann::json{
+            {"estimator_version", Thoth::kCm1EvidenceVersion},
+            {"answer_id", answer.answer_id},
+            {"content_sha256", answer.content_sha256},
+            {"claims", std::move(claims)}
+        }.dump();
+        return record;
+    };
+    auto claimRow = [&](const Thoth::Cm1AnswerVersionRecord& answer, int index, const std::string& text,
+                        const std::string& status) {
+        nlohmann::json row = {
+            {"claim_index", index},
+            {"claim_id", claimId(answer, index, text)},
+            {"claim_sha256", Thoth::sha256Hex(text)},
+            {"claim_text", text},
+            {"evaluation_status", status}
+        };
+        if (status == "available") {
+            row["label"] = "insufficient_evidence";
+            row["evidence_quote"] = "";
+        } else {
+            row["unavailable_reason"] = "timeout";
+        }
+        return row;
+    };
+    auto planWith = [](const std::string& plan_id, const std::string& answer_text, const std::string& file,
+                       const std::string& content, const std::string& inclusion_hash, bool include_chunk) {
+        nlohmann::json chunks = nlohmann::json::array();
+        if (include_chunk) chunks.push_back({{"file", file}, {"content", content}});
+        return nlohmann::json{
+            {"plan_id", plan_id},
+            {"steps", nlohmann::json::array({
+                {{"step_id", "retrieve"},
+                 {"result", {{"data", {{"chunks", chunks}}}}}},
+                {{"step_id", "synthesize"},
+                 {"result", {
+                     {"data", {{"response", answer_text}}},
+                     {"cm1_included_in_synthesis_available", true},
+                     {"cm1_included_content_sha256", nlohmann::json::array({inclusion_hash})}
+                 }}}
+            })}
+        };
+    };
+
+    const auto eligible = answerFor("p-elig", "gen-elig", eligible_text, 10);
+    const auto corroborated = answerFor("p-corrob", "gen-corrob", corroborated_text, 20);
+    const auto missing = answerFor("p-miss", "gen-miss", missing_text, 30);
+    const auto eligible_judgment = judgmentFor(eligible, nlohmann::json::array({
+        claimRow(eligible, 0, eligible_text, "available"),
+        claimRow(eligible, 1, unavailable_text, "unavailable")
+    }), 10);
+    const auto corroborated_judgment = judgmentFor(corroborated, nlohmann::json::array({
+        claimRow(corroborated, 0, corroborated_text, "available")
+    }), 20);
+    const auto missing_judgment = judgmentFor(missing, nlohmann::json::array({
+        claimRow(missing, 0, missing_text, "available")
+    }), 30);
+
+    const auto dbPath = makeTempDb();
+    {
+        auto repo = std::make_shared<Thoth::SQLiteMemoryRepository>(dbPath.string());
+        expect(repo->insertCm1AnswerVersion(eligible), "eligibility: eligible answer stored");
+        expect(repo->insertCm1AnswerVersion(corroborated), "eligibility: corroborated answer stored");
+        expect(repo->insertCm1AnswerVersion(missing), "eligibility: missing-provenance answer stored");
+        expect(repo->insertCm1EvidenceJudgment(eligible_judgment), "eligibility: eligible judgment stored");
+        expect(repo->insertCm1EvidenceJudgment(corroborated_judgment),
+               "eligibility: corroborated judgment stored");
+        expect(repo->insertCm1EvidenceJudgment(missing_judgment),
+               "eligibility: missing-provenance judgment stored");
+
+        auto storePlan = [&](const Thoth::Cm1AnswerVersionRecord& answer, const nlohmann::json& plan) {
+            auto active = activePlan(answer.plan_id);
+            active.steps_json = plan.dump();
+            return repo->storeActivePlan(active);
+        };
+        expect(storePlan(eligible, planWith("p-elig", eligible_text, "notes.txt", notes,
+                                            Thoth::sha256Hex(notes), true)),
+               "eligibility: eligible plan stored");
+        expect(storePlan(corroborated, planWith("p-corrob", corroborated_text, "pump.txt", other_notes,
+                                                Thoth::sha256Hex(other_notes), true)),
+               "eligibility: corroborated plan stored");
+        expect(storePlan(missing, planWith("p-miss", missing_text, "dock.txt", missing_notes,
+                                           Thoth::sha256Hex(missing_notes), false)),
+               "eligibility: plan without the cited source stored");
+
+        const auto loaded = repo->loadCm1EvidenceJudgment(corroborated_judgment.judgment_id);
+        const auto stored = loaded
+            ? Thoth::findCm1StoredClaim(*loaded, claimId(corroborated, 0, corroborated_text))
+            : std::nullopt;
+        expect(stored.has_value(), "eligibility: corroborated claim reloads");
+        if (!stored) return false;
+        Thoth::Cm1ClaimVerificationSubmission submission;
+        submission.claim_id = stored->claim_id;
+        submission.claim_text = stored->claim_text;
+        submission.answer_id = corroborated.answer_id;
+        submission.answer_text = corroborated_text;
+        submission.protocol_id = Thoth::kCm1CorroborationProtocolId;
+        submission.protocol_version = Thoth::kCm1CorroborationProtocolVersion;
+        submission.reviewer_id = Thoth::kCm1CorroborationReviewerId;
+        submission.verifier_kind = "automated_agent";
+        submission.verifier_version = Thoth::kCm1CorroborationVerifierVersion;
+        submission.method_id = Thoth::kCm1CorroborationMethodId;
+        submission.outcome = "unverifiable";
+        submission.evidence_label = "insufficient_evidence";
+        submission.source_kind = "external_manual";
+        submission.source_ref = "pump-ledger-9";
+        submission.calibration_eligibility = "provisional";
+        submission.egar_eligibility = "excluded";
+        submission.revision_reason = "initial";
+        const auto loaded_answer = repo->loadCm1AnswerVersion(corroborated.answer_id);
+        const auto draft = Thoth::prepareCm1ClaimVerification(
+            loaded_answer ? &*loaded_answer : nullptr, &*stored, nullptr, submission, 21);
+        expect(draft.disposition == Thoth::Cm1RecordDisposition::Insert
+                   && repo->insertCm1ClaimVerification(draft.record),
+               "eligibility: corroboration row stored");
+
+        const auto listed = repo->listCm1EvidenceJudgments();
+        expect(listed.size() == 3
+                   && listed[0].judgment_id == eligible_judgment.judgment_id
+                   && listed[1].judgment_id == corroborated_judgment.judgment_id
+                   && listed[2].judgment_id == missing_judgment.judgment_id,
+               "eligibility: judgments list oldest first");
+
+        const auto before = repo->listCm1ClaimVerifications(eligible.answer_id).size();
+        const auto selected = Thoth::selectCm1DiscoveryCandidates(*repo);
+        expect(selected.size() == 1
+                   && selected[0].answer_id == eligible.answer_id
+                   && selected[0].claim_id == claimId(eligible, 0, eligible_text)
+                   && selected[0].answer_text == eligible_text,
+               "eligibility: only the available uncorroborated claim is returned");
+        expect(repo->listCm1ClaimVerifications(eligible.answer_id).size() == before,
+               "eligibility: selection writes no verification");
+        expect(!Thoth::cm1CorroborationEnabled(), "eligibility: selection leaves discovery off");
+    }
+
+    auto reopened = std::make_shared<Thoth::SQLiteMemoryRepository>(dbPath.string());
+    const auto again = Thoth::selectCm1DiscoveryCandidates(*reopened);
+    expect(again.size() == 1
+               && again[0].answer_id == eligible.answer_id
+               && again[0].claim_id == claimId(eligible, 0, eligible_text)
+               && again[0].answer_text == eligible_text,
+           "eligibility: reopening the database reconstructs the same candidate");
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -2454,6 +2626,7 @@ int main() {
     testClaimVerification();
     testClaimCorroboration();
     testClaimDiscovery();
+    testDiscoveryEligibilitySelector();
     testConcurrentIndexAndRetrieval();
     testIndexDestructorDrainsQueuedWork();
     testControllerOwnershipAndPluginShutdown();
