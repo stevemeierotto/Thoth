@@ -167,6 +167,15 @@ target_include_directories(thoth-cm1-live-controller PRIVATE
 )
 target_link_libraries(thoth-cm1-live-controller PRIVATE basic_agent sqlite3 Threads::Threads)
 
+# Live claim-discovery retrieval check. Not registered with CTest: it calls the
+# local embedding server and is not part of the offline CM-1 regression set.
+add_executable(thoth-cm1-live-discovery cm1_live_discovery.cpp)
+target_include_directories(thoth-cm1-live-discovery PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-cm1-live-discovery PRIVATE basic_agent sqlite3 Threads::Threads)
+
 # EGAR-LX Package 1. Each case is a new process so the containment flag starts off.
 add_executable(thoth-containment-tests containment_tests.cpp)
 target_include_directories(thoth-containment-tests PRIVATE

@@ -8,9 +8,11 @@
 
 #include "cm1_telemetry.h"
 #include "alp_sha256.h"
+#include "embedding_engine.h"
 #include "executive_controller.h"
 #include "generation_call.h"
 #include "grag_diagnostics.h"
+#include "index_manager.h"
 #include "memory.h"
 #include "sqlite_memory_repository.h"
 
@@ -1961,6 +1963,217 @@ bool testEvidencePromptStructure() {
     return true;
 }
 
+bool testClaimDiscovery() {
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    const std::string answer_text = "The spare relay holds two red tokens.";
+    const std::string notes = "Notes: the spare relay holds two red tokens.";
+    const std::string cited_body = "A cited handbook sentence.";
+    const std::string other_span = "The spare relay was painted blue last year.";
+    const std::string ledger = "Bay 4 inventory lists a spare relay beside the pump.";
+    const std::string warm = "warm-memory summary of yesterday";
+    const std::string notes_hash = Thoth::sha256Hex(notes);
+
+    const auto answer = Thoth::buildCm1AnswerVersion(
+        "p-disc", "synthesize", "gen-disc", answer_text, 700);
+    Thoth::Cm1EvidenceChunk cited;
+    cited.content = cited_body;
+    cited.content_sha256 = Thoth::sha256Hex(cited.content);
+    const auto judged = Thoth::runCm1EvidenceJudgment(
+        answer, answer_text, {cited}, true, true, false,
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"A cited handbook sentence.\"}",
+                "stop");
+        },
+        700);
+    expect(judged.has_value(), "discovery: judgment exists");
+    if (!judged) return false;
+
+    auto openRepo = [&](const nlohmann::json& plan) {
+        auto repo = std::make_shared<Thoth::SQLiteMemoryRepository>(makeTempDb().string());
+        expect(repo->insertCm1AnswerVersion(answer), "discovery: answer stored");
+        expect(repo->insertCm1EvidenceJudgment(*judged), "discovery: judgment stored");
+        auto active = activePlan("p-disc");
+        active.steps_json = plan.dump();
+        expect(repo->storeActivePlan(active), "discovery: plan stored");
+        return repo;
+    };
+    auto claimId = [&](Thoth::SQLiteMemoryRepository& repo) {
+        const auto loaded = repo.loadCm1EvidenceJudgment(judged->judgment_id);
+        if (!loaded) return std::string();
+        return nlohmann::json::parse(loaded->payload_json)["claims"][0].value("claim_id", "");
+    };
+    auto planWith = [&](bool include_notes) {
+        nlohmann::json chunks = nlohmann::json::array();
+        if (include_notes) {
+            chunks.push_back({{"file", "synthesis.txt"}, {"content", notes}});
+        }
+        chunks.push_back({{"file", "synthesis.txt"}, {"content", other_span}});
+        chunks.push_back({{"file", "handbook.txt"}, {"content", cited_body}});
+        return nlohmann::json{
+            {"plan_id", "p-disc"},
+            {"steps", nlohmann::json::array({
+                {{"step_id", "retrieve"},
+                 {"result", {{"data", {{"chunks", chunks}}}}}},
+                {{"step_id", "synthesize"},
+                 {"result", {
+                     {"cm1_included_in_synthesis_available", true},
+                     {"cm1_included_content_sha256", nlohmann::json::array({notes_hash})}
+                 }}}
+            })}
+        };
+    };
+    auto addText = [](IndexManager& index, EmbeddingEngine& engine,
+                      const std::string& file, const std::string& text) {
+        CodeChunk chunk;
+        chunk.fileName = file;
+        chunk.code = text;
+        chunk.embedding = engine.embed(text);
+        chunk.keyword_score = 1.0f;
+        index.addChunkToIndex(std::move(chunk));
+    };
+    auto insufficient = [](const std::string&, int) {
+        return completionWith(
+            "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}", "stop");
+    };
+
+    ::setenv("THOTH_CM1_CORROBORATION", "1", 1);
+    {
+        auto repo = openRepo(planWith(true));
+        const auto claim_id = claimId(*repo);
+        EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+        IndexManager index(&engine);
+        addText(index, engine, "ledger.txt", ledger);
+        index.setIndexingForTests(true);
+        bool called = false;
+        auto blocked = Thoth::runCm1ClaimDiscovery(
+            index, *repo, answer.answer_id, claim_id, answer_text,
+            [&](const std::string&, int) {
+                called = true;
+                return insufficient("", 0);
+            },
+            710);
+        index.setIndexingForTests(false);
+        expect(!called && !blocked.wrote && blocked.reason == "indexing",
+               "discovery: indexing blocks retrieval and the model");
+        expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+               "discovery: indexing stores nothing");
+    }
+    {
+        auto repo = openRepo(planWith(false));
+        const auto claim_id = claimId(*repo);
+        EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+        IndexManager index(&engine);
+        addText(index, engine, "ledger.txt", ledger);
+        bool called = false;
+        auto missing = Thoth::runCm1ClaimDiscovery(
+            index, *repo, answer.answer_id, claim_id, answer_text,
+            [&](const std::string&, int) {
+                called = true;
+                return insufficient("", 0);
+            },
+            711);
+        expect(!called && !missing.wrote && missing.reason == "provenance_missing",
+               "discovery: a hash without a source file does not search");
+        expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+               "discovery: missing provenance stores nothing");
+    }
+    {
+        auto repo = openRepo(planWith(true));
+        const auto claim_id = claimId(*repo);
+        EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+        IndexManager index(&engine);
+        bool called = false;
+        auto empty = Thoth::runCm1ClaimDiscovery(
+            index, *repo, answer.answer_id, claim_id, answer_text,
+            [&](const std::string&, int) {
+                called = true;
+                return insufficient("", 0);
+            },
+            712);
+        expect(!called && !empty.wrote && empty.reason == "no_eligible_passage",
+               "discovery: an empty index is no eligible evidence");
+    }
+    {
+        auto repo = openRepo(planWith(true));
+        const auto claim_id = claimId(*repo);
+        EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+        IndexManager index(&engine);
+        addText(index, engine, "synthesis.txt", other_span);
+        addText(index, engine, "copy.txt", notes);
+        addText(index, engine, "warm_memory:session-1", warm);
+        bool called = false;
+        auto excluded = Thoth::runCm1ClaimDiscovery(
+            index, *repo, answer.answer_id, claim_id, answer_text,
+            [&](const std::string&, int) {
+                called = true;
+                return insufficient("", 0);
+            },
+            713);
+        expect(!called && !excluded.wrote && excluded.reason == "no_eligible_passage",
+               "discovery: synthesis files, duplicate content, and warm memory leave no evidence");
+        expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+               "discovery: a fully excluded search stores nothing");
+    }
+    {
+        auto repo = openRepo(planWith(true));
+        const auto claim_id = claimId(*repo);
+        EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+        IndexManager index(&engine);
+        addText(index, engine, "copy.txt", notes);
+        bool called = false;
+        auto duplicate = Thoth::runCm1ClaimDiscovery(
+            index, *repo, answer.answer_id, claim_id, answer_text,
+            [&](const std::string&, int) {
+                called = true;
+                return insufficient("", 0);
+            },
+            714);
+        expect(!called && !duplicate.wrote && duplicate.reason == "no_eligible_passage",
+               "discovery: identical content under another file is excluded");
+    }
+    {
+        auto repo = openRepo(planWith(true));
+        const auto claim_id = claimId(*repo);
+        EmbeddingEngine engine(EmbeddingEngine::Method::TfIdf);
+        IndexManager index(&engine);
+        addText(index, engine, "synthesis.txt", other_span);
+        addText(index, engine, "copy.txt", notes);
+        addText(index, engine, "warm_memory:session-1", warm);
+        addText(index, engine, "ledger.txt", ledger);
+        bool called = false;
+        std::string prompt;
+        auto found = Thoth::runCm1ClaimDiscovery(
+            index, *repo, answer.answer_id, claim_id, answer_text,
+            [&](const std::string& sent, int) {
+                called = true;
+                prompt = sent;
+                return insufficient(sent, 0);
+            },
+            715);
+        expect(called && found.wrote && found.reason == "stored",
+               "discovery: a different file reaches the writer");
+        expect(prompt.find("Bay 4 inventory") != std::string::npos
+                   && prompt.find("painted blue") == std::string::npos
+                   && prompt.find("Notes: the spare relay") == std::string::npos
+                   && prompt.find("warm-memory summary") == std::string::npos,
+               "discovery: the prompt keeps only the held-out file");
+        const auto rows = repo->listCm1ClaimVerifications(answer.answer_id);
+        expect(rows.size() == 1
+                   && rows.front().evidence_label == "insufficient_evidence"
+                   && rows.front().outcome == "unverifiable"
+                   && rows.front().calibration_eligibility == "provisional"
+                   && rows.front().egar_eligibility == "excluded"
+                   && rows.front().source_ref == Thoth::sha256Hex(ledger),
+               "discovery: insufficient_evidence stays unverifiable and provisional");
+        expect(found.reason != "no_eligible_passage",
+               "discovery: a model insufficient_evidence judgment is not an empty search");
+    }
+
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -1973,6 +2186,7 @@ int main() {
     testAnswerFeedbackAndVerifiedLabels();
     testClaimVerification();
     testClaimCorroboration();
+    testClaimDiscovery();
     testEvidenceSegmentation();
     testEvidenceJudgmentGate();
     testEvidenceJsonWrapper();
