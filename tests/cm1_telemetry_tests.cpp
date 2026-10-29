@@ -7,6 +7,7 @@
  */
 
 #include "cm1_telemetry.h"
+#include "cm1_foreground.h"
 #include "alp_sha256.h"
 #include "basic_agent_plugin.h"
 #include "command_processor.h"
@@ -16,7 +17,10 @@
 #include "generation_call.h"
 #include "grag_diagnostics.h"
 #include "index_manager.h"
+#include "iplanner.h"
 #include "llm_interface.h"
+#include "llm_timeout_policy.h"
+#include "mock_inference_client.h"
 #include "memory.h"
 #include "rag.h"
 #include "sqlite_memory_repository.h"
@@ -2613,6 +2617,492 @@ bool testDiscoveryEligibilitySelector() {
     return true;
 }
 
+template <typename Pred>
+bool waitUntil(Pred pred, int ms) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return pred();
+}
+
+struct SavedEnv {
+    const char* key;
+    std::string value;
+    bool present;
+    explicit SavedEnv(const char* key) : key(key) {
+        const char* current = std::getenv(key);
+        present = current != nullptr;
+        if (present) value = current;
+    }
+    ~SavedEnv() {
+        if (present) ::setenv(key, value.c_str(), 1);
+        else ::unsetenv(key);
+    }
+    SavedEnv(const SavedEnv&) = delete;
+    SavedEnv& operator=(const SavedEnv&) = delete;
+};
+
+class HoldPlanner : public IPlanner {
+public:
+    std::atomic<int> entered{0};
+    std::atomic<int> seen_foreground{0};
+    std::atomic<bool> fail{false};
+
+    Plan create_plan(const std::string& goal) override {
+        (void)goal;
+        ++entered;
+        seen_foreground.store(Thoth::cm1ForegroundGoalCount().load());
+        while (!fail.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        throw std::runtime_error("plan rejected");
+    }
+
+    Plan revise_plan(const Plan&, const nlohmann::json&) override { return Plan(); }
+};
+
+class ReadyPlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "ready-plan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        return plan;
+    }
+
+    Plan revise_plan(const Plan&, const nlohmann::json&) override { return Plan(); }
+};
+
+class HoldMode : public Thoth::IExecutionMode {
+public:
+    std::atomic<bool> release{false};
+
+    std::string name() const override { return "hold"; }
+
+    void execute_step(Thoth::ExecutiveController&) override {
+        for (int i = 0; i < 40 && !release.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+    }
+};
+
+std::atomic<bool> g_discovery_probe_release{false};
+std::atomic<int> g_discovery_probe_runs{0};
+std::atomic<int> g_discovery_probe_holds{0};
+
+void holdDiscoveryForForeground() {
+    g_discovery_probe_runs.fetch_add(1, std::memory_order_acq_rel);
+    Thoth::cm1ForegroundGoalCount().fetch_add(1, std::memory_order_acq_rel);
+    g_discovery_probe_holds.store(1, std::memory_order_release);
+    while (!g_discovery_probe_release.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+struct DiscoveryProbeGuard {
+    ~DiscoveryProbeGuard() {
+        g_discovery_probe_release.store(true, std::memory_order_release);
+        Thoth::cm1DiscoveryBeforeCallForTests().store(nullptr, std::memory_order_release);
+        if (g_discovery_probe_holds.exchange(0) == 1) {
+            Thoth::cm1ForegroundGoalCount().fetch_sub(1, std::memory_order_acq_rel);
+        }
+    }
+};
+
+bool testIdleDiscoveryLifecycle() {
+    SavedEnv saved_flag("THOTH_CM1_CORROBORATION");
+    SavedEnv saved_timeout("THOTH_CM1_DISCOVERY_TIMEOUT_SECONDS");
+    SavedEnv saved_retry("THOTH_CM1_DISCOVERY_RETRY_MS");
+    SavedEnv saved_workspace("THOTH_WORKSPACE_PATH");
+    SavedEnv saved_dev("THOTH_TEST_SUITE_DEV");
+    ::unsetenv("THOTH_TEST_SUITE_DEV");
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    ::unsetenv("THOTH_CM1_DISCOVERY_RETRY_MS");
+    Thoth::cm1DiscoveryBeforeCallForTests().store(nullptr, std::memory_order_release);
+
+    const fs::path scratch = fs::temp_directory_path() /
+                             ("thoth_cm1_idle_" + std::to_string(::getpid()) + "_"
+                              + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(scratch);
+    ::setenv("THOTH_WORKSPACE_PATH", scratch.string().c_str(), 1);
+
+    const std::string answer_text = "The spare relay holds two red tokens.";
+    const std::string notes = "Notes: the spare relay holds two red tokens.";
+    const std::string cited_body = "A cited handbook sentence.";
+    const std::string ledger = "Bay 4 inventory lists a spare relay beside the pump.";
+    const std::string notes_hash = Thoth::sha256Hex(notes);
+    const auto answer = Thoth::buildCm1AnswerVersion(
+        "p-idle", "synthesize", "gen-idle", answer_text, 800);
+    Thoth::Cm1EvidenceChunk cited;
+    cited.content = cited_body;
+    cited.content_sha256 = Thoth::sha256Hex(cited.content);
+    const auto judged = Thoth::runCm1EvidenceJudgment(
+        answer, answer_text, {cited}, true, true, false,
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"A cited handbook sentence.\"}",
+                "stop");
+        },
+        800);
+    expect(judged.has_value(), "idle: judgment exists");
+    if (!judged) return false;
+
+    Config config;
+    auto memory = std::make_shared<Memory>(config);
+    auto* repo = memory->getSQLiteRepo();
+    expect(repo != nullptr, "idle: sqlite repository");
+    if (!repo) return false;
+    expect(repo->insertCm1AnswerVersion(answer), "idle: answer stored");
+    expect(repo->insertCm1EvidenceJudgment(*judged), "idle: judgment stored");
+    const std::string judgment_payload = judged->payload_json;
+    auto active = activePlan("p-idle");
+    active.steps_json = nlohmann::json{
+        {"plan_id", "p-idle"},
+        {"steps", nlohmann::json::array({
+            {{"step_id", "retrieve"},
+             {"result", {{"data", {{"chunks", nlohmann::json::array({
+                 {{"file", "synthesis.txt"}, {"content", notes}},
+                 {{"file", "handbook.txt"}, {"content", cited_body}}
+             })}}}}}},
+            {{"step_id", "synthesize"},
+             {"result", {
+                 {"data", {{"response", answer_text}}},
+                 {"cm1_included_in_synthesis_available", true},
+                 {"cm1_included_content_sha256", nlohmann::json::array({notes_hash})}
+             }}}
+        })}
+    }.dump();
+    expect(repo->storeActivePlan(active), "idle: plan stored");
+    const auto loaded = repo->loadCm1EvidenceJudgment(judged->judgment_id);
+    expect(loaded.has_value(), "idle: claim id loaded");
+    if (!loaded) return false;
+    const std::string claim_id =
+        nlohmann::json::parse(loaded->payload_json)["claims"][0].value("claim_id", "");
+
+    ::setenv("THOTH_CM1_CORROBORATION", "1", 1);
+    const auto yielded = Thoth::runCm1ClaimCorroboration(
+        *repo, answer.answer_id, claim_id, answer_text,
+        {Thoth::Cm1CorroborationPassage{ledger, "ledger.txt"}},
+        [&](const std::string&, int) {
+            Thoth::Cm1EvidenceCompletion completion;
+            completion.called = true;
+            completion.ok = false;
+            completion.error = Thoth::kCm1DiscoveryYieldError;
+            return completion;
+        },
+        800, 17);
+    expect(!yielded.wrote && yielded.reason == "yielded", "idle: yield writes nothing");
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+           "idle: yield leaves no corroboration row");
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &config);
+    EmbeddingEngine* raw_engine = engine.get();
+    IndexManager index(raw_engine);
+    CodeChunk chunk;
+    chunk.fileName = "ledger.txt";
+    chunk.code = ledger;
+    chunk.embedding = raw_engine->embed(ledger);
+    chunk.keyword_score = 1.0f;
+    index.addChunkToIndex(std::move(chunk));
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), &index, &config, memory.get());
+
+    std::atomic<int> calls{0};
+    std::atomic<long> seen_timeout{-1};
+    LLMInterface llm(LLMBackend::Ollama, &config);
+    {
+        auto client = std::make_unique<Thoth::MockInferenceClient>();
+        client->on_generate = [&](const Thoth::InferenceGenerateRequest& request) {
+            ++calls;
+            if (request.timeout_seconds.has_value()) {
+                seen_timeout.store(*request.timeout_seconds);
+            }
+            Thoth::InferenceGenerateResult result;
+            result.ok = true;
+            result.text = "{\"label\":\"insufficient_evidence\",\"evidence_quote\":\"\"}";
+            result.finish_reason = "stop";
+            return result;
+        };
+        llm.setInferenceClientForTests(std::move(client));
+    }
+
+    {
+        auto off = std::make_shared<Thoth::ExecutiveController>(nullptr, nullptr, rag, memory);
+        off->set_llm_interface(&llm);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        expect(calls.load() == 0, "idle: flag off does not call the model");
+        off.reset();
+    }
+
+    ::setenv("THOTH_CM1_CORROBORATION", "1", 1);
+    ::setenv("THOTH_CM1_DISCOVERY_TIMEOUT_SECONDS", "17", 1);
+    const long shared_budget = Thoth::LlmTimeoutPolicy::timeoutSeconds();
+    const int expected_timeout = static_cast<int>(std::min(shared_budget, 17L));
+    expect(Thoth::cm1DiscoveryTimeoutSeconds() == expected_timeout,
+           "idle: discovery timeout is the short override capped by the shared budget");
+
+    expect(Thoth::cm1ForegroundGoalCount().load() == 0, "idle: foreground starts clear");
+    Thoth::cm1ForegroundGoalCount().fetch_add(1, std::memory_order_acq_rel);
+    {
+        Thoth::Cm1DiscoveryYieldScope scope;
+        Thoth::GenerationCallContext context;
+        context.call_type = "cm1_discovery";
+        const auto outcome = llm.generateCall("discover", 32, {}, context, 0.0, 17L);
+        expect(!outcome.ok && outcome.error == Thoth::kCm1DiscoveryYieldError,
+               "idle: an armed call yields before HTTP while a goal is active");
+    }
+    expect(calls.load() == 0, "idle: a yielded call does not enter the model client");
+
+    auto planner = std::make_shared<HoldPlanner>();
+    auto controller = std::make_shared<Thoth::ExecutiveController>(planner, nullptr, rag, memory);
+    controller->set_max_reflections(0);
+    controller->set_llm_interface(&llm);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    expect(calls.load() == 0, "idle: the worker does not call the model while a goal is active");
+
+    bool threw = false;
+    std::thread goal([&]() {
+        try {
+            controller->execute_goal("held goal");
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+    });
+    expect(waitUntil([&]() { return planner->entered.load() >= 1; }, 2000),
+           "idle: goal acceptance reaches planning");
+    expect(planner->seen_foreground.load() >= 2, "idle: acceptance increments the foreground count");
+    expect(calls.load() == 0, "idle: planning keeps discovery off the model");
+    Thoth::cm1ForegroundGoalCount().fetch_sub(1, std::memory_order_acq_rel);
+    expect(Thoth::cm1ForegroundGoalCount().load() >= 1,
+           "idle: the accepted goal still holds foreground priority");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    expect(calls.load() == 0, "idle: discovery stays yielded for the accepted goal");
+    planner->fail.store(true);
+    goal.join();
+    expect(threw, "idle: planning failure returns before the loop starts");
+    expect(Thoth::cm1ForegroundGoalCount().load() == 0,
+           "idle: an early return drops the foreground count");
+
+    expect(waitUntil([&]() { return calls.load() >= 1; }, 3000),
+           "idle: discovery calls the model once the goal is gone");
+    expect(seen_timeout.load() == expected_timeout,
+           "idle: discovery passes its timeout to the model request");
+    const auto rows = repo->listCm1ClaimVerifications(answer.answer_id);
+    expect(rows.size() == 1
+               && rows[0].outcome == "unverifiable"
+               && rows[0].calibration_eligibility == "provisional"
+               && rows[0].egar_eligibility == "excluded",
+           "idle: a stored discovery row stays unverifiable, provisional, and excluded");
+    const auto after = repo->loadCm1EvidenceJudgment(judged->judgment_id);
+    expect(after && after->payload_json == judgment_payload,
+           "idle: discovery does not change the evidence judgment");
+
+    const int calls_before_shutdown = calls.load();
+    const auto shutdown_started = std::chrono::steady_clock::now();
+    controller.reset();
+    const auto shutdown_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - shutdown_started)
+                                 .count();
+    expect(shutdown_ms < 2000, "idle: shutdown joins the worker");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    expect(calls.load() == calls_before_shutdown, "idle: shutdown starts no further model call");
+
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    auto overlap = std::make_shared<Thoth::ExecutiveController>(
+        std::make_shared<ReadyPlanner>(), nullptr, nullptr, nullptr);
+    overlap->set_max_reflections(0);
+    auto hold = std::make_unique<HoldMode>();
+    HoldMode* hold_mode = hold.get();
+    overlap->set_execution_mode(std::move(hold));
+    std::thread first([&]() { overlap->execute_goal("first goal"); });
+    first.join();
+    expect(Thoth::cm1ForegroundGoalCount().load() >= 1, "idle: the first goal loop stays foreground");
+    std::thread second([&]() { overlap->execute_goal("second goal"); });
+    expect(waitUntil([&]() { return Thoth::cm1ForegroundGoalCount().load() >= 2; }, 2000),
+           "idle: the next goal increments before joining the previous loop");
+    hold_mode->release.store(true);
+    second.join();
+    expect(waitUntil([&]() { return Thoth::cm1ForegroundGoalCount().load() == 1; }, 3000),
+           "idle: the previous loop exits and the newer goal keeps one count");
+
+    Plan finished;
+    finished.plan_id = "finished-plan";
+    finished.goal = "finished";
+    finished.status = PlanStatus::COMPLETED;
+    overlap->resume_from_plan(finished);
+    expect(Thoth::cm1ForegroundGoalCount().load() == 0,
+           "idle: a resume that does not start a loop drops its foreground count");
+    overlap.reset();
+
+    std::error_code ec;
+    fs::remove_all(scratch, ec);
+    return true;
+}
+
+bool testIdleDiscoveryRetryCooldown() {
+    SavedEnv saved_flag("THOTH_CM1_CORROBORATION");
+    SavedEnv saved_timeout("THOTH_CM1_DISCOVERY_TIMEOUT_SECONDS");
+    SavedEnv saved_retry("THOTH_CM1_DISCOVERY_RETRY_MS");
+    SavedEnv saved_workspace("THOTH_WORKSPACE_PATH");
+    SavedEnv saved_dev("THOTH_TEST_SUITE_DEV");
+    ::unsetenv("THOTH_TEST_SUITE_DEV");
+    ::unsetenv("THOTH_CM1_CORROBORATION");
+    ::unsetenv("THOTH_CM1_DISCOVERY_RETRY_MS");
+    Thoth::cm1DiscoveryBeforeCallForTests().store(nullptr, std::memory_order_release);
+    g_discovery_probe_release.store(false, std::memory_order_release);
+    g_discovery_probe_runs.store(0, std::memory_order_release);
+    g_discovery_probe_holds.store(0, std::memory_order_release);
+
+    const fs::path scratch = fs::temp_directory_path() /
+                             ("thoth_cm1_retry_" + std::to_string(::getpid()) + "_"
+                              + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(scratch);
+    ::setenv("THOTH_WORKSPACE_PATH", scratch.string().c_str(), 1);
+    auto remove_scratch = [&]() {
+        std::error_code ec;
+        fs::remove_all(scratch, ec);
+    };
+
+    const std::string answer_text = "The spare relay holds two red tokens.";
+    const std::string notes = "Notes: the spare relay holds two red tokens.";
+    const std::string cited_body = "A cited handbook sentence.";
+    const std::string ledger = "Bay 4 inventory lists a spare relay beside the pump.";
+    const std::string notes_hash = Thoth::sha256Hex(notes);
+    const auto answer = Thoth::buildCm1AnswerVersion(
+        "p-retry", "synthesize", "gen-retry", answer_text, 900);
+    Thoth::Cm1EvidenceChunk cited;
+    cited.content = cited_body;
+    cited.content_sha256 = Thoth::sha256Hex(cited.content);
+    const auto judged = Thoth::runCm1EvidenceJudgment(
+        answer, answer_text, {cited}, true, true, false,
+        [&](const std::string&, int) {
+            return completionWith(
+                "{\"label\":\"supported\",\"evidence_quote\":\"A cited handbook sentence.\"}",
+                "stop");
+        },
+        900);
+    expect(judged.has_value(), "retry: judgment exists");
+    if (!judged) {
+        remove_scratch();
+        return false;
+    }
+
+    Config config;
+    auto memory = std::make_shared<Memory>(config);
+    auto* repo = memory->getSQLiteRepo();
+    expect(repo != nullptr, "retry: sqlite repository");
+    if (!repo) {
+        remove_scratch();
+        return false;
+    }
+    expect(repo->insertCm1AnswerVersion(answer), "retry: answer stored");
+    expect(repo->insertCm1EvidenceJudgment(*judged), "retry: judgment stored");
+    const std::string judgment_payload = judged->payload_json;
+    auto active = activePlan("p-retry");
+    active.steps_json = nlohmann::json{
+        {"plan_id", "p-retry"},
+        {"steps", nlohmann::json::array({
+            {{"step_id", "retrieve"},
+             {"result", {{"data", {{"chunks", nlohmann::json::array({
+                 {{"file", "synthesis.txt"}, {"content", notes}},
+                 {{"file", "handbook.txt"}, {"content", cited_body}}
+             })}}}}}},
+            {{"step_id", "synthesize"},
+             {"result", {
+                 {"data", {{"response", answer_text}}},
+                 {"cm1_included_in_synthesis_available", true},
+                 {"cm1_included_content_sha256", nlohmann::json::array({notes_hash})}
+             }}}
+        })}
+    }.dump();
+    expect(repo->storeActivePlan(active), "retry: plan stored");
+
+    auto engine = std::make_unique<EmbeddingEngine>(EmbeddingEngine::Method::TfIdf, &config);
+    EmbeddingEngine* raw_engine = engine.get();
+    IndexManager index(raw_engine);
+    CodeChunk chunk;
+    chunk.fileName = "ledger.txt";
+    chunk.code = ledger;
+    chunk.embedding = raw_engine->embed(ledger);
+    chunk.keyword_score = 1.0f;
+    index.addChunkToIndex(std::move(chunk));
+    auto rag = std::make_shared<RAGPipeline>(std::move(engine), &index, &config, memory.get());
+
+    std::atomic<int> calls{0};
+    LLMInterface llm(LLMBackend::Ollama, &config);
+    {
+        auto client = std::make_unique<Thoth::MockInferenceClient>();
+        client->on_generate = [&](const Thoth::InferenceGenerateRequest&) {
+            ++calls;
+            Thoth::InferenceGenerateResult result;
+            result.ok = true;
+            result.text = "not-json";
+            result.finish_reason = "stop";
+            return result;
+        };
+        llm.setInferenceClientForTests(std::move(client));
+    }
+
+    expect(Thoth::cm1ForegroundGoalCount().load() == 0, "retry: foreground starts clear");
+    ::setenv("THOTH_CM1_CORROBORATION", "1", 1);
+    ::setenv("THOTH_CM1_DISCOVERY_TIMEOUT_SECONDS", "17", 1);
+    ::setenv("THOTH_CM1_DISCOVERY_RETRY_MS", "8000", 1);
+    Thoth::cm1DiscoveryBeforeCallForTests().store(&holdDiscoveryForForeground,
+                                                  std::memory_order_release);
+
+    auto controller = std::make_shared<Thoth::ExecutiveController>(nullptr, nullptr, rag, memory);
+    DiscoveryProbeGuard probe_guard;
+    controller->set_llm_interface(&llm);
+
+    expect(waitUntil([&]() {
+               return g_discovery_probe_runs.load(std::memory_order_acquire) >= 1
+                      && calls.load() == 0;
+           }, 4000),
+           "retry: discovery reaches the model call while foreground is still clear");
+    g_discovery_probe_release.store(true, std::memory_order_release);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    expect(calls.load() == 0, "retry: a yielded call does not enter the model client");
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+           "retry: a yielded call writes no corroboration row");
+
+    ::setenv("THOTH_CM1_DISCOVERY_RETRY_MS", "500", 1);
+    Thoth::cm1DiscoveryBeforeCallForTests().store(nullptr, std::memory_order_release);
+    if (g_discovery_probe_holds.exchange(0) == 1) {
+        Thoth::cm1ForegroundGoalCount().fetch_sub(1, std::memory_order_acq_rel);
+    }
+
+    expect(waitUntil([&]() { return calls.load() >= 1; }, 2000),
+           "retry: a yielded claim is attempted again once foreground work is gone");
+    const int first = calls.load();
+    expect(first == 1, "retry: the post-yield attempt is a single model call");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    expect(calls.load() == first,
+           "retry: an unsuccessful claim does not call the model again in a tight loop");
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+           "retry: invalid discovery output writes no corroboration row");
+
+    expect(waitUntil([&]() { return calls.load() >= first + 1; }, 2000),
+           "retry: an eligible unsuccessful claim is attempted again after the cooldown");
+    expect(calls.load() >= first + 1, "retry: the cooldown elapsed into another model call");
+    expect(repo->listCm1ClaimVerifications(answer.answer_id).empty(),
+           "retry: the later attempt still writes no corroboration row");
+    const auto after = repo->loadCm1EvidenceJudgment(judged->judgment_id);
+    expect(after && after->payload_json == judgment_payload,
+           "retry: discovery does not change the evidence judgment");
+
+    const int calls_before_shutdown = calls.load();
+    controller.reset();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    expect(calls.load() == calls_before_shutdown, "retry: shutdown starts no further model call");
+    expect(Thoth::cm1ForegroundGoalCount().load() == 0, "retry: foreground count is balanced");
+
+    remove_scratch();
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -2639,6 +3129,8 @@ int main() {
     testDeterministicSnapshotIds();
     testBreadthScoring();
     testBreadthReplayAndDisabledByDefault();
+    testIdleDiscoveryLifecycle();
+    testIdleDiscoveryRetryCooldown();
 
     std::cout << "cm1_telemetry_tests failures=" << g_failures << "\n";
     return g_failures == 0 ? 0 : 1;
