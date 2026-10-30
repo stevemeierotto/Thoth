@@ -1073,6 +1073,23 @@ static bool testRuntimeBootstrapDiagnosticsDisabledByDefault() {
     return !Thoth::runtimeConfigDiagnosticsEnabled(nullptr);
 }
 
+static bool testConfigChatModelDefault() {
+    ScopedEnvVar unsetModel("OLLAMA_MODEL", nullptr);
+    ScopedEnvVar unsetEmbed("OLLAMA_EMBED_MODEL", nullptr);
+    ScopedEnvVar unsetThothEmbed("THOTH_EMBEDDING_MODEL", nullptr);
+    Config cfg;
+    if (cfg.llm_model != "chat-model") {
+        std::cerr << "testConfigChatModelDefault: expected chat-model, got " << cfg.llm_model << "\n";
+        return false;
+    }
+    if (cfg.embedding_model != "nomic-embed-text:v1.5") {
+        std::cerr << "testConfigChatModelDefault: embedding default changed to "
+                  << cfg.embedding_model << "\n";
+        return false;
+    }
+    return true;
+}
+
 static bool testConfigEnvironmentOverrides() {
     Config cfg;
     cfg.llm_model = "from-default";
@@ -5988,6 +6005,7 @@ static bool testPastPlanRetrieval() {
     good.outline = R"({"steps":[{"step_id":"s1"}]})";
     good.success_score = 0.9f;
     good.goal_embedding = embed(goodGoal);
+    good.plan_origin = "model";
     memory.storePastPlan(good);
 
     Memory::PastPlanRecord low;
@@ -5996,6 +6014,7 @@ static bool testPastPlanRetrieval() {
     low.outline = R"({"steps":[]})";
     low.success_score = 0.3f;
     low.goal_embedding = embed(lowGoal);
+    low.plan_origin = "model";
     memory.storePastPlan(low);
 
     Memory::PastPlanRecord unrelated;
@@ -6004,6 +6023,7 @@ static bool testPastPlanRetrieval() {
     unrelated.outline = R"({"steps":[]})";
     unrelated.success_score = 0.95f;
     unrelated.goal_embedding = embed(unrelatedGoal);
+    unrelated.plan_origin = "model";
     memory.storePastPlan(unrelated);
 
     auto query = embed(queryGoal);
@@ -26425,6 +26445,7 @@ int main() {
     if (!testRuntimeBootstrapRespectsExistingEnv()) failures++;
     if (!testRuntimeBootstrapIdempotent()) failures++;
     if (!testRuntimeBootstrapDiagnosticsDisabledByDefault()) failures++;
+    if (!testConfigChatModelDefault()) failures++;
     if (!testConfigEnvironmentOverrides()) failures++;
     if (!testEngineErrorSchema()) failures++;
     if (!testEngineSessionNormalization()) failures++;
