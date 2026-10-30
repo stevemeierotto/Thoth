@@ -3,7 +3,7 @@
 **Date:** 2026-10-15
 **Status:** Planning analysis only. No configuration is approved as the final design. No acquisition or evaluation sample size is frozen.
 **Rules used:** Section 6 of `docs/EGAR_LINUX_DIAGNOSTIC_AB_PROTOCOL.md`, and the audited calculations in `docs/EGAR_LX_SAMPLE_SIZE_PLANNING_REPORT.md`.
-**This report does not modify the approved protocol.**
+**This report does not modify the approved protocol.** Provisional source roles were recorded in that protocol on 2026-10-30. The tables below were not recalculated.
 
 ## 1. Objective and scope
 
@@ -145,7 +145,7 @@ At SD 0.75, every eligible row in every candidate has an analytical half-width u
 
 ## 9. Historical case sourcing
 
-No inventory of eligible Linux cases was consulted, and none is claimed. Whether 40–60 evaluation cases across 8–12 families can be assembled is not known. The protocol states that a Linux diagnostic corpus for this experiment does not already exist, and that corpus collection waits on a read-only investigation of how a diagnostic goal writes trajectories, plans, and `success_score`. That investigation has not been done.
+No inventory of eligible Linux cases was consulted, and none is claimed. Whether 40–60 evaluation cases across 8–12 families can be assembled is not known. A Linux diagnostic corpus for this experiment does not exist. The experience-pathway investigation was closed for protocol design on 2026-10-15. Provisional source roles were recorded in the protocol on 2026-10-30. Collection remains unauthorized.
 
 Before anyone asserts that a family count is achievable, an inventory would need to record, for each candidate issue, at least the following. This report does not perform that inventory.
 
@@ -169,7 +169,7 @@ Acquisition stays separate from evaluation. The approved pilot design remains fo
 
 Arm B's experience has to come from actual Thoth runs on acquisition cases. Hand-written solutions and external grades are not seeded into the snapshot. An evaluation case may share a family with an acquisition case and must not be the same issue or a near-duplicate.
 
-More acquisition cases, and more than one family among them, give the snapshot more than one neighborhood in which repeated trajectories could appear. Whether those rows meet the existing retrieval and promotion thresholds is exactly the investigation the protocol still requires. A larger acquisition set does not guarantee a promoted strategy, a trajectory injection, or a useful experience effect. A small set can still produce a valid Arm B snapshot whose main observation is that injection did not occur. That observation is already an approved descriptive outcome. No acquisition count is recommended here.
+More acquisition cases, and more than one family among them, give the snapshot more than one neighborhood in which repeated trajectories could appear. Whether a future acquisition run will meet the existing retrieval and promotion thresholds is unknown until such a run exists. The static pathway investigation is closed for protocol design, and that run is not authorized. A larger acquisition set does not guarantee a promoted strategy, a trajectory injection, or a useful experience effect. A small set can still produce a valid Arm B snapshot whose main observation is that injection did not occur. That observation is already an approved descriptive outcome. No acquisition count is recommended here.
 
 Practical considerations before a later choice of that count: how many distinct issues remain after the evaluation set and the near-duplicate screen are reserved; whether several acquisition cases sit in families the evaluation will actually use; disk and time for acquisition runs on the same workstation, in addition to the evaluation runs below; and the still-open question of whether diagnostic goals produce promotable records at all.
 
@@ -211,7 +211,7 @@ M2 costs the same evaluation runtime as M1. L2 and L3 cost the same as L1. The e
 - The approximations ignore selection bias from missing and quarantined pairs.
 - No SD, ICC, or loss rate is a measurement.
 - No count of available historical cases is known. This report does not establish that any layout can be filled.
-- Corpus collection still waits on the Section 4 investigation of stored trajectories and promotion. That gate is unchanged.
+- Corpus collection remains unauthorized. The Section 4 pathway investigation is closed for protocol design. Provisional sources are recorded in the protocol. Per-case licensing review is still open.
 - Reviewer time, audit time, and per-run minutes are hypothetical.
 - Final evaluation size, family count, case allocation, and acquisition count remain unapproved.
 - The numerical bootstrap seed and the generator documentation remain unselected.
@@ -225,7 +225,7 @@ At a fixed evaluation-pair budget, more and smaller families are the better stat
 
 L4's extra families and cases buy about 13% on the half-width and a small corner of the SD 2.00 grid. They do not make SD 2.00 a solved planning case. They add 40 generations and 20 evaluation cases on a single workstation.
 
-The binding unknown is not another half-width. It is whether distinct, licensable, cutoff-separable issues exist in families of three, four, or five after a separate acquisition pool is reserved. The useful next decision is whether to authorize a documentation-only inventory of that supply. This report does not authorize the inventory, case registration, or a sample size.
+The binding unknown is not another half-width. It is whether distinct, licensable, cutoff-separable issues exist in families of three, four, or five after a separate acquisition pool is reserved. The useful next decision is whether to authorize a documentation-only inventory of that supply. This report does not authorize the inventory, case registration, or a sample size. The protocol’s 2026-10-30 source record is not that inventory.
 
 ## 14. Complete scenario table
 

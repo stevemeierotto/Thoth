@@ -1,8 +1,8 @@
 # EGAR Linux Diagnostic A/B Experimental Protocol
 
 **Protocol version:** EGAR-LX v0.1  
-**Status:** EGAR-LX v0.1 — DRAFT, not frozen, not authorized for experimental execution. Sections 1–12 are approved for protocol design through 2026-10-15. No baseline is frozen. No sample size or acquisition count is selected. No corpus has been collected. No engineering pilot, acquisition, or evaluation is authorized. No C6.4 window is opened. Approval of the twelve design sections is not permission to implement or run the experiment.  
-**Date:** 2026-10-14. Design amendments through 2026-10-15.  
+**Status:** EGAR-LX v0.1 — DRAFT, not frozen, not authorized for experimental execution. Sections 1–12 are approved for protocol design through 2026-10-15. A provisional source, eligibility-screen, and measurement record was added on 2026-10-30. That record does not freeze a baseline and does not authorize collection or execution. No baseline is frozen. No sample size or acquisition count is selected. No corpus has been collected. No engineering pilot, acquisition, or evaluation is authorized. No C6.4 window is opened. Approval of the twelve design sections is not permission to implement or run the experiment.  
+**Date:** 2026-10-14. Design amendments through 2026-10-15. Provisional corpus-planning record 2026-10-30.  
 **Does not modify:** `C6_phase4_protocol.md`, `C6_phase3_protocol.md`, `E2_PROTOCOL.md`, `E_PHASE_PROTOCOL.md`, `B1_PROTOCOL.md`, `EGAR.md`, `MAX_TOKEN_CHARACTERIZATION_PROTOCOL.md`, engine code, Docker compose, or any experience store.
 
 This draft proposes a future controlled comparison. It does not claim that a Linux diagnostic corpus, an EGAR A/B harness, or a sealed EGAR Linux troubleshooting corpus already exists. The phrase “sealed EGAR Linux troubleshooting corpus” in MTCP v1.0 names a forbidden input for that characterization. It does not define a dataset.
@@ -17,7 +17,7 @@ Claims in §11 are marked **VERIFIED** for current source behavior, **HISTORICAL
 
 | Class | Sections | Binding? |
 |-------|----------|----------|
-| **Design rules** | §§1–12 | Yes, for protocol design. Not a baseline freeze and not an execution authorization. §10’s open rows stay open |
+| **Design rules** | §§1–12 | Yes, for protocol design. Not a baseline freeze and not an execution authorization. D10’s source roles are provisional as of 2026-10-30. The other §10 open rows stay open |
 | **Evidence labels** | §11 | Approved as an evidence register for protocol design, 2026-10-15. Not a baseline freeze and not an execution authorization |
 | **Future research** | Future Research and Follow-Up Experiments, after §12 | No. Not part of EGAR-LX v0.1. Not approved for execution |
 
@@ -137,7 +137,7 @@ How an external diagnosis grade is handled is decided: it is not written into `s
 
 ## 3. Corpus design
 
-**Section status:** Approved for the decisions in this section, 2026-10-14. No case is selected. Nothing is downloaded. This approval does not authorize corpus collection.
+**Section status:** Approved for the decisions in this section, 2026-10-14. Provisional source roles recorded 2026-10-30. No case is selected. Nothing is downloaded. Neither the 2026-10-14 approval nor the 2026-10-30 record authorizes corpus collection.
 
 ### Role
 
@@ -181,9 +181,21 @@ Reject a case when the pre-resolution evidence cannot be separated from the answ
 
 Historical resolutions, later patches, and evaluation answer keys must not be exposed to Thoth during diagnosis.
 
-### Public sources to consider later
+### Provisional sources
 
-**PROPOSED options, not a selection.** Naming a source here does not admit any case from it.
+**Planning record, 2026-10-30.** These roles follow the read-only D10 source study. They do not admit any case, download any document, or authorize collection. The approved arms, blinded scoring, acquisition and evaluation separation, and fixed pre-cutoff evidence rule are unchanged.
+
+| Role | Source |
+|------|--------|
+| Visible historical reports | Debian-style public bug mail, and [Kernel Bugzilla](https://bugzilla.kernel.org/) |
+| Historical verification and duplicate detection | [lore.kernel.org](https://lore.kernel.org/) |
+| Sealed resolution references | Stable-tree commits and published CVE records |
+
+The cutoff for a case is the first public statement of the cause or the fix. A later stable application, ticket closure, or CVE publication is a later event. It stays in the sealed bundle. lore dates that first public patch and catches the same issue in another archive. A lore thread supplies a visible bundle only when a symptom report is a separate, earlier message from the patch.
+
+Editable or embargoed distribution trackers are outside this provisional visible set. Their first public text is often the advisory itself.
+
+**Leakage notes retained from the 2026-10-14 source list.** Naming a risk here does not admit a case.
 
 | Source | What it can supply | Leakage risk |
 |--------|--------------------|--------------|
@@ -260,7 +272,7 @@ These limitations stay in force:
 
 ## 5. Evaluation methodology
 
-**Section status:** Scoring approved 2026-10-14. Justified-uncertainty amendment approved 2026-10-15. Rubric clarifications approved 2026-10-15. Independent reviewer procedure approved 2026-10-15. Secondary measurements and leakage integrity approved 2026-10-15. Standardized diagnostic goal approved 2026-10-15. Case-eligibility requirements approved 2026-10-15. Diagnosis-scoring boundary approved 2026-10-15. Contradictory causal claims approved 2026-10-15. Mixed causal errors approved 2026-10-15. Remedy verification approved 2026-10-15. Measurement instrumentation approved 2026-10-15. Leakage-audit procedure approved 2026-10-15. Pretraining-contamination policy approved 2026-10-15. Fixed historical evidence approach approved 2026-10-15. Acquisition/evaluation fixed-evidence parity approved 2026-10-15. This approval does not authorize scoring software, case construction, tool-restriction enforcement, or the experiment.
+**Section status:** Scoring approved 2026-10-14. Justified-uncertainty amendment approved 2026-10-15. Rubric clarifications approved 2026-10-15. Independent reviewer procedure approved 2026-10-15. Secondary measurements and leakage integrity approved 2026-10-15. Standardized diagnostic goal approved 2026-10-15. Case-eligibility requirements approved 2026-10-15. Diagnosis-scoring boundary approved 2026-10-15. Contradictory causal claims approved 2026-10-15. Mixed causal errors approved 2026-10-15. Remedy verification approved 2026-10-15. Measurement instrumentation approved 2026-10-15. Leakage-audit procedure approved 2026-10-15. Pretraining-contamination policy approved 2026-10-15. Fixed historical evidence approach approved 2026-10-15. Acquisition/evaluation fixed-evidence parity approved 2026-10-15. Historical case screen and minimal measurement set recorded 2026-10-30. Those additions leave the 0–4 rubric, blinded review, acquisition and evaluation separation, and fixed-evidence rule as approved. This approval does not authorize scoring software, case construction, tool-restriction enforcement, or the experiment.
 
 ### Task
 
@@ -307,6 +319,21 @@ For each evaluation case, Arm A and Arm B receive the same case-specific evidenc
 **APPROVED 2026-10-14.** The case score is the sum of a diagnosis score and a remedy score. Each part is an integer from 0 to 2. The combined score is an integer from 0 to 4. There is no bonus point outside those scales.
 
 Report the diagnosis score, the remedy score, and the combined score for every case. External scores do not replace, modify, or get written into the controller’s `success_score`.
+
+### Minimal measurement set
+
+**Planning record, 2026-10-30.** This is the measurement set for the corpus plan. It does not change the approved arms, the blinded review procedure, acquisition and evaluation separation, or the immutable pre-cutoff bundle.
+
+| Measurement | Scale | Role |
+|-------------|-------|------|
+| Diagnosis | Integer 0–2 | Approved primary component, scored blind |
+| Remedy or next action | Integer 0–2 | Approved primary component, scored blind |
+| Combined score | Integer 0–4 | Sum of those two components. The primary outcome |
+| Technical complexity | No scale selected | Descriptive property of the case. It does not add to the 0–4 score |
+| Evidence difficulty | No scale selected | Descriptive property of the pre-cutoff bundle. It does not add to the 0–4 score |
+| EGAR experience use | Existing events, where the logs support them | `STRATEGY_INJECTION`, `TRAJECTORY_INJECTION`, `PLAN_REUSE_INJECTION`, and `experience_dropped`, under the EGAR-activation rules below. Unavailable stays unavailable. This record adds no telemetry |
+
+Blinded reviewers still do not see which arm produced a response, the experience store, or the internal `success_score`.
 
 ### Diagnosis
 
@@ -357,7 +384,16 @@ Do not award score 2 only because the action resembles the historical patch, tem
 - **Separation.** Pre-resolution evidence can be separated reliably from the eventual answer. Resolutions, sealed keys, and post-cutoff findings are not exposed through the visible bundle, the goal text, the retrieval context, or the EGAR experience store. Suspected leakage and confirmed leakage stay distinct. Confirmed exposure of sealed answer material remains an experimental integrity failure.
 - **Independence.** An acquisition case and a held-out evaluation case do not share the same underlying bug, the same issue, or a near-duplicate. Related problem families are allowed. The record states why the cases are sufficiently distinct.
 
-Every candidate, accepted or rejected, has a written eligibility record: case identifier and source provenance; cutoff and its justification; evidence that the issue was resolved; pre-cutoff diagnostic evidence; relevant environment information; visible and sealed separation; the independence assessment; the decision and its rationale; and any unresolved concerns. Rejected-candidate records are kept for later methodological review.
+**Historical case screen, recorded 2026-10-30.** A candidate from the provisional sources in §3 still has to pass the approved requirements above. The screen records these checks, and it does not select or download a case.
+
+- **Authentic pre-solution evidence.** The visible bundle is historical material from before the cause or the fix was public.
+- **Defensible cutoff.** The record states why every visible document is at or before that first public statement. A summary or description edited after the cutoff is not used in place of the text that existed then.
+- **Independently verifiable resolution.** The sealed bundle shows that the reported problem was resolved. A closed ticket, a merged change, a stable application, or a CVE publication is a reference. It is not that showing by itself.
+- **Duplicate checks.** lore, stable commits, CVE records, and sibling distribution tickets are checked so the same bug is not kept twice and does not cross the acquisition and evaluation partitions.
+- **Provenance.** The eligibility record names the source, the retrieval time, and the historical timestamp used for the cutoff.
+- **Licensing review.** Visible text is stored and shown to reviewers only when the record states a basis for doing so. Public access to a bug page is not that basis. No case has completed this review.
+
+Every candidate, accepted or rejected, has a written eligibility record: case identifier and source provenance; cutoff and its justification; evidence that the issue was resolved; pre-cutoff diagnostic evidence; relevant environment information; visible and sealed separation; the duplicate check; the licensing review; the independence assessment; the decision and its rationale; and any unresolved concerns. Rejected-candidate records are kept for later methodological review.
 
 **Pretraining contamination.** **APPROVED 2026-10-15.** A familiarity flag means possible prior exposure through model pretraining. It is not confirmed memorization and it is not confirmed experimental leakage. It does not add or subtract diagnosis or remedy points. Confirmed experimental leakage stays under the leakage-audit procedure. This amendment does not collect or classify cases.
 
@@ -727,7 +763,7 @@ Open rows in §10 block the stage that depends on them. They do not block protoc
 ### Order
 
 1. Protocol-design review of Sections 1–12 is complete. Resolving an open §10 row is required only before the stage that row governs.
-2. Before any collection, resolve the §10 rows that block collection, including source choice and the empty-database row-count inspection. Then select and validate candidate cases only under a separate collection authorization. Apply the cutoff test. Do not index sealed bundles.
+2. Before any collection, apply the provisional source roles in §3. Resolve the remaining §10 rows that block collection, including per-case licensing review and the empty-database row-count inspection. Then select and validate candidate cases only under a separate collection authorization. Apply the cutoff test. Do not index sealed bundles.
 3. Freeze evaluation case ids, visible bytes, sealed bytes, family mappings, and the scoring rules before evaluation. Acquisition cases stay a distinct set.
 4. Verify isolation before any run: C6 window closed, development and sealed baselines untouched, and the experiment workspace free of foreign experience. Record the result. A missing check is indeterminate. It is not a passed check.
 5. Run the engineering pilot only after Steve explicitly authorizes pilot execution. The pilot remains a procedural check. It is not an effectiveness result.
@@ -808,13 +844,20 @@ These rows record decisions already approved in Sections 1–9. This register do
 | D8 | One generation per arm. No llama.cpp generation seed. Arm order uses a separate reproducible seed | Decided in §6. The numerical arm-order seed is not selected in this register. It is frozen with the execution schedule before final evaluation, and it is not a generation seed |
 | D9 | Primary uncertainty is the 95% family-cluster bootstrap. Reviewer procedure is the §5 rule. Replicate count, percentile interval, and eight-family minimum are decided | Decided in §5 and §6. The numerical bootstrap seed remains open below |
 
+### Provisional decisions
+
+These rows record the 2026-10-30 corpus-planning study. They do not admit a case, authorize collection, or close the per-case checks named in the row.
+
+| Id | Decision | Status |
+|----|----------|--------|
+| D10 | Visible reports come from Debian-style historical bug mail and Kernel Bugzilla. lore.kernel.org is used for historical verification and duplicate detection. Stable-tree commits and CVE records are sealed resolution references | Recorded 2026-10-30. See §3. Per-case licensing review, cutoff justification, and duplicate checks remain part of the §5 screen. Collection stays unauthorized |
+
 ### Open decisions
 
 No value below is selected by this approval.
 
 | Id | Still unresolved | Earliest stage that requires it | Later requirement |
 |----|------------------|---------------------------------|-------------------|
-| D10 | Historical Linux case-source selection. The §5 cutoff and fixed-evidence rules are already approved. The sources are not chosen | Corpus collection and case selection | Provenance and the acquisition/evaluation separation are checked again at the engineering pilot, experience acquisition, and evaluation |
 | D11 | Experimental workspace or Compose project name, distinct from DEV, C6-LIVE, and EGAR-LAB. Isolation rules are approved in §7. The name is not chosen | Implementation and environment preparation | The named workspace is verified before the engineering pilot, acquisition, and evaluation. Creating it is not authorized by this register |
 | D12 | Whether a harness may generate E1 evidence rows. §7 does not extend E1 rows | Implementation and environment preparation, and only for a harness change that would emit those rows | Not required for documentation review, collection, or the current manifest. Evaluation does not depend on E1 rows unless a later implementation is separately authorized to emit them |
 | D13 | Transcript redaction and retention rules if transcripts are stored in git | None of the experimental stages must stop for this decision. It is required before any commit of transcripts | The engineering pilot is the first stage that can produce transcripts. Local evidence preservation under §8 may proceed, if that stage is later authorized, without committing those transcripts |
@@ -839,7 +882,7 @@ Each item is unresolved. None is complete. This register does not treat a design
 
 1. The injected payload carries a step pattern, a prior goal string, and a mechanical score. It does not ordinarily carry the previous diagnosis. That limit is accepted under D2 Option 1. It is not a reason to change the payload. This question is closed.
 2. Does empty-schema initialization actually leave every experience path the planner and GRAG consult empty? The inspection is the first implementation prerequisite above. It remains open. It is not a source-selection decision.
-3. Which historical sources can be split on a cutoff without including the fix in the visible bundle? This is D10. It remains open and blocks corpus collection and case selection.
+3. Which source classes can be split on a cutoff without including the fix in the visible bundle? D10 records the provisional roles in §3. A particular candidate can still fail that split. Licensing review for its visible text remains open and still blocks collection of that candidate.
 
 ---
 
@@ -896,6 +939,7 @@ These observations were recorded on 2026-10-14 and checked again on 2026-10-15. 
 | Claim | Label | Support |
 |-------|-------|---------|
 | Sections 1–12 are approved for protocol design. Final evaluation size and acquisition count are not selected. No baseline is frozen and no execution is authorized | APPROVED DESIGN | This document, 2026-10-15 |
+| Provisional source roles, the historical case screen, and the minimal measurement set are recorded. Scales for technical complexity and evidence difficulty are not selected. No case is admitted | UNRESOLVED | §3, §5, and §10 |
 | Blinded external grades are not mapped into `success_score`. Graph behavior is the D2 interpretation. No llama.cpp generation seed is used | APPROVED DESIGN | §2, §4, and §6. The numerical bootstrap seed remains UNRESOLVED |
 
 ### Conflicts deliberately left in place
@@ -910,9 +954,9 @@ These observations were recorded on 2026-10-14 and checked again on 2026-10-15. 
 
 **Section status:** Approved for protocol design, 2026-10-15. This section records the design status. It does not freeze a baseline, select a sample size, or authorize implementation or execution.
 
-EGAR-LX v0.1 remains **DRAFT**. Sections 1–12 are approved for protocol design. No experimental baseline is frozen. No final evaluation sample size or acquisition count is selected. No corpus has been collected under this protocol. No engineering pilot, acquisition, or evaluation has been authorized. No C6.4 experimental window has been opened.
+EGAR-LX v0.1 remains **DRAFT**. Sections 1–12 are approved for protocol design. On 2026-10-30 the provisional source roles, the historical case screen, and the minimal measurement set were recorded. No experimental baseline is frozen. No final evaluation sample size or acquisition count is selected. No corpus has been collected under this protocol. No engineering pilot, acquisition, or evaluation has been authorized. No C6.4 experimental window has been opened.
 
-Approval of all twelve design sections does not authorize implementation or execution. Open decisions in §10 stay open. Unimplemented prerequisites stay unimplemented. The Future Research register after this section is not part of EGAR-LX v0.1 and is not an experimental requirement.
+Approval of all twelve design sections does not authorize implementation or execution. The 2026-10-30 record does not authorize them either. Open decisions in §10, other than the source-class part of D10, stay open. Unimplemented prerequisites stay unimplemented. The Future Research register after this section is not part of EGAR-LX v0.1 and is not an experimental requirement.
 
 ---
 
