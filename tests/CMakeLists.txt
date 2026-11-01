@@ -109,6 +109,32 @@ target_include_directories(thoth-egar-live-lifecycle PRIVATE
 )
 target_link_libraries(thoth-egar-live-lifecycle PRIVATE basic_agent sqlite3 Threads::Threads)
 
+add_executable(thoth-trajectory-injection-format-tests trajectory_injection_format_tests.cpp)
+target_include_directories(thoth-trajectory-injection-format-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-trajectory-injection-format-tests PRIVATE basic_agent Threads::Threads)
+add_test(NAME thoth-trajectory-injection-format-tests COMMAND thoth-trajectory-injection-format-tests)
+set_tests_properties(thoth-trajectory-injection-format-tests PROPERTIES
+    LABELS "pr;unit"
+    TIMEOUT 60
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_executable(thoth-graph-reinforcement-log-tests graph_reinforcement_log_tests.cpp)
+target_include_directories(thoth-graph-reinforcement-log-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-graph-reinforcement-log-tests PRIVATE basic_agent sqlite3 Threads::Threads)
+add_test(NAME thoth-graph-reinforcement-log-tests COMMAND thoth-graph-reinforcement-log-tests)
+set_tests_properties(thoth-graph-reinforcement-log-tests PROPERTIES
+    LABELS "pr;unit"
+    TIMEOUT 60
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 add_executable(thoth-core-tests unit_tests.cpp)
 target_compile_definitions(thoth-core-tests PRIVATE THOTH_HAS_GUI=0)
 target_include_directories(thoth-core-tests PRIVATE
@@ -197,6 +223,8 @@ set(THOTH_CONTAINMENT_CASES
     no_confirmation
     confirmed_true
     disabled_behavior
+    production_goal_path
+    fixed_evidence_goal
     step_failed_metadata
 )
 foreach(case IN LISTS THOTH_CONTAINMENT_CASES)
@@ -207,6 +235,150 @@ foreach(case IN LISTS THOTH_CONTAINMENT_CASES)
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
 endforeach()
+
+add_executable(thoth-fixed-evidence-goal-tests fixed_evidence_goal_run_tests.cpp)
+target_include_directories(thoth-fixed-evidence-goal-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-fixed-evidence-goal-tests PRIVATE basic_agent Threads::Threads)
+add_test(NAME fixed-evidence-goal-contained
+    COMMAND thoth-fixed-evidence-goal-tests contained)
+add_test(NAME fixed-evidence-goal-one-process
+    COMMAND thoth-fixed-evidence-goal-tests one_goal)
+add_test(NAME fixed-evidence-goal-invalid
+    COMMAND thoth-fixed-evidence-goal-tests invalid $<TARGET_FILE:thoth-engine>)
+set_tests_properties(
+    fixed-evidence-goal-contained
+    fixed-evidence-goal-one-process
+    fixed-evidence-goal-invalid
+    PROPERTIES
+        LABELS "pr;unit;containment"
+        TIMEOUT 60
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_executable(thoth-workspace-index-tests workspace_index_run_tests.cpp)
+target_include_directories(thoth-workspace-index-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-workspace-index-tests PRIVATE basic_agent Threads::Threads)
+foreach(case IN ITEMS persist no_evidence preserve isolate)
+    add_test(NAME workspace-index-${case}
+        COMMAND thoth-workspace-index-tests ${case})
+endforeach()
+add_test(NAME workspace-index-cli
+    COMMAND thoth-workspace-index-tests cli $<TARGET_FILE:thoth-engine>)
+set_tests_properties(
+    workspace-index-persist
+    workspace-index-no_evidence
+    workspace-index-preserve
+    workspace-index-isolate
+    workspace-index-cli
+    PROPERTIES
+        LABELS "pr;unit"
+        TIMEOUT 60
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_executable(thoth-fixed-evidence-retrieval-scope-tests
+    fixed_evidence_retrieval_scope_tests.cpp)
+target_include_directories(thoth-fixed-evidence-retrieval-scope-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-fixed-evidence-retrieval-scope-tests PRIVATE basic_agent Threads::Threads)
+foreach(case IN ITEMS authorized sibling symlink duplicate empty production containment reject retrieval)
+    add_test(NAME fixed-evidence-scope-${case}
+        COMMAND thoth-fixed-evidence-retrieval-scope-tests ${case})
+endforeach()
+set_tests_properties(
+    fixed-evidence-scope-authorized
+    fixed-evidence-scope-sibling
+    fixed-evidence-scope-symlink
+    fixed-evidence-scope-duplicate
+    fixed-evidence-scope-empty
+    fixed-evidence-scope-production
+    fixed-evidence-scope-containment
+    fixed-evidence-scope-reject
+    fixed-evidence-scope-retrieval
+    PROPERTIES
+        LABELS "pr;unit"
+        TIMEOUT 60
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+find_package(SQLite3 REQUIRED)
+add_executable(thoth-memory-snapshot-tests memory_snapshot_tests.cpp)
+target_include_directories(thoth-memory-snapshot-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-memory-snapshot-tests PRIVATE basic_agent SQLite::SQLite3 Threads::Threads)
+foreach(case IN ITEMS missing incomplete invalid_wal count_mismatch)
+    add_test(NAME memory-snapshot-${case}
+        COMMAND thoth-memory-snapshot-tests ${case})
+endforeach()
+foreach(case IN ITEMS snapshot goal)
+    add_test(NAME memory-snapshot-${case}
+        COMMAND thoth-memory-snapshot-tests ${case} $<TARGET_FILE:thoth-engine>)
+endforeach()
+set_tests_properties(
+    memory-snapshot-missing
+    memory-snapshot-incomplete
+    memory-snapshot-invalid_wal
+    memory-snapshot-count_mismatch
+    memory-snapshot-snapshot
+    memory-snapshot-goal
+    PROPERTIES
+        LABELS "pr;unit"
+        TIMEOUT 60
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_executable(thoth-synthetic-ab-pilot-tests synthetic_ab_pilot_tests.cpp)
+target_include_directories(thoth-synthetic-ab-pilot-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-synthetic-ab-pilot-tests PRIVATE basic_agent Threads::Threads)
+foreach(case IN ITEMS identity_match identity_digest identity_model identity_retrieval identity_evidence identity_goal exit_required library_missing live_identity)
+    add_test(NAME synthetic-ab-${case}
+        COMMAND thoth-synthetic-ab-pilot-tests ${case})
+endforeach()
+add_test(NAME synthetic-ab-library-resolve
+    COMMAND thoth-synthetic-ab-pilot-tests library_resolve $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-pilot
+    COMMAND thoth-synthetic-ab-pilot-tests pilot $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-live-pair
+    COMMAND thoth-synthetic-ab-pilot-tests live_pair $<TARGET_FILE:thoth-engine>)
+set_tests_properties(
+    synthetic-ab-identity_match
+    synthetic-ab-identity_digest
+    synthetic-ab-identity_model
+    synthetic-ab-identity_retrieval
+    synthetic-ab-identity_evidence
+    synthetic-ab-identity_goal
+    synthetic-ab-exit_required
+    synthetic-ab-library_missing
+    synthetic-ab-live_identity
+    synthetic-ab-library-resolve
+    PROPERTIES
+        LABELS "pr;unit"
+        TIMEOUT 30
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(synthetic-ab-pilot PROPERTIES
+    LABELS "pr;unit"
+    TIMEOUT 180
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(synthetic-ab-live-pair PROPERTIES
+    LABELS "live"
+    TIMEOUT 2400
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
 
 if(THOTH_BUILD_GUI)
     add_executable(thoth-gui-tests

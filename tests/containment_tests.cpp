@@ -65,6 +65,19 @@ public:
     }
 };
 
+bool waitForTerminal(Thoth::ExecutiveController& controller) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto state = controller.get_state();
+        if (state == Thoth::ControllerState::COMPLETED || state == Thoth::ControllerState::FAILED
+            || state == Thoth::ControllerState::ABORTED) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return false;
+}
+
 bool containmentError(const nlohmann::json& body) {
     return body.value("error_message", "") == "fixed_evidence_containment";
 }
@@ -104,6 +117,22 @@ PlanStep toolStep(const std::string& id, const std::string& tool) {
     step.failure_policy.revise_plan_on_failure = false;
     return step;
 }
+
+class ToolGoalPlanner : public IPlanner {
+public:
+    Plan create_plan(const std::string& goal) override {
+        Plan plan;
+        plan.plan_id = "goal-path-plan";
+        plan.goal = goal;
+        plan.status = PlanStatus::ACTIVE;
+        plan.steps.push_back(toolStep("goal-tool", "web_scrape"));
+        plan.steps.back().failure_policy.max_retries = 0;
+        return plan;
+    }
+    Plan revise_plan(const Plan& existing_plan, const nlohmann::json&) override {
+        return existing_plan;
+    }
+};
 
 bool expectDeniedStep(const Thoth::StepResult& result, const std::string& label) {
     if (result.success) {
@@ -407,6 +436,83 @@ bool testDisabledBehavior() {
     return ok;
 }
 
+bool testProductionGoalPath() {
+    if (Thoth::FixedEvidenceContainment::enabled()) {
+        fail("production_goal_path: flag started enabled");
+        return false;
+    }
+    const auto dir = std::filesystem::temp_directory_path() / "thoth_lx_containment" / "production_goal";
+    std::filesystem::create_directories(dir);
+    Config config;
+    config.database_path = (dir / "memory.db").string();
+    auto memory = std::make_shared<Memory>(config);
+    auto registry = std::make_shared<ToolRegistry>();
+    g_probe_calls.store(0);
+    registry->registerTool(std::make_unique<ProbeTool>("web_scrape", false));
+    auto planner = std::make_shared<ToolGoalPlanner>();
+    Thoth::ExecutiveController controller(planner, registry, nullptr, memory);
+    controller.set_max_reflections(0);
+    const std::string accepted = controller.execute_goal("diagnose the historical case");
+    const bool finished = waitForTerminal(controller);
+    const bool ok = accepted.rfind("GOAL ACCEPTED:", 0) == 0 && finished
+        && controller.get_state() == Thoth::ControllerState::COMPLETED
+        && !Thoth::FixedEvidenceContainment::enabled()
+        && g_probe_calls.load() == 1;
+    if (!ok) {
+        fail("production_goal_path: accepted=" + accepted
+             + " state=" + std::to_string(static_cast<int>(controller.get_state()))
+             + " calls=" + std::to_string(g_probe_calls.load())
+             + " enabled=" + std::to_string(Thoth::FixedEvidenceContainment::enabled()));
+    }
+    std::filesystem::remove_all(dir);
+    return ok;
+}
+
+bool testFixedEvidenceGoal() {
+    if (Thoth::FixedEvidenceContainment::enabled()) {
+        fail("fixed_evidence_goal: flag started enabled");
+        return false;
+    }
+    const auto dir = std::filesystem::temp_directory_path() / "thoth_lx_containment" / "fixed_evidence_goal";
+    std::filesystem::create_directories(dir);
+    Config config;
+    config.database_path = (dir / "memory.db").string();
+    auto memory = std::make_shared<Memory>(config);
+    auto registry = std::make_shared<ToolRegistry>();
+    g_probe_calls.store(0);
+    registry->registerTool(std::make_unique<ProbeTool>("web_scrape", false));
+    auto planner = std::make_shared<ToolGoalPlanner>();
+    Thoth::ExecutiveController controller(planner, registry, nullptr, memory);
+    controller.set_max_reflections(0);
+    std::string failed_error;
+    controller.set_event_callback([&](const ControllerEvent& event) {
+        if (event.type == EventType::STEP_FAILED) {
+            failed_error = event.metadata.value("error", "");
+        }
+    });
+    const std::string accepted =
+        controller.execute_fixed_evidence_goal("diagnose the historical case", dir.string());
+    const bool enabled_before_wait = Thoth::FixedEvidenceContainment::enabled();
+    const bool finished = waitForTerminal(controller);
+    const Thoth::ContainmentConfirmation status =
+        Thoth::FixedEvidenceContainment::confirmContainmentEnabled();
+    const bool ok = accepted.rfind("GOAL ACCEPTED:", 0) == 0 && enabled_before_wait && finished
+        && controller.get_state() == Thoth::ControllerState::FAILED
+        && failed_error == "fixed_evidence_containment"
+        && g_probe_calls.load() == 0
+        && status.containment_enabled
+        && !status.experimental_environment_ready;
+    if (!ok) {
+        fail("fixed_evidence_goal: accepted=" + accepted
+             + " state=" + std::to_string(static_cast<int>(controller.get_state()))
+             + " error=" + failed_error
+             + " calls=" + std::to_string(g_probe_calls.load())
+             + " enabled=" + std::to_string(enabled_before_wait));
+    }
+    std::filesystem::remove_all(dir);
+    return ok;
+}
+
 bool testStepFailedMetadata() {
     const auto dir = std::filesystem::temp_directory_path() / "thoth_lx_containment" / "step_failed";
     WorkflowHarness harness(dir);
@@ -466,6 +572,8 @@ int main(int argc, char** argv) {
     else if (id == "no_confirmation") ok = testNoConfirmationAndConfirmed();
     else if (id == "confirmed_true") ok = testNoConfirmationAndConfirmed();
     else if (id == "disabled_behavior") ok = testDisabledBehavior();
+    else if (id == "production_goal_path") ok = testProductionGoalPath();
+    else if (id == "fixed_evidence_goal") ok = testFixedEvidenceGoal();
     else if (id == "step_failed_metadata") ok = testStepFailedMetadata();
     else {
         std::cerr << "unknown case: " << id << "\n";
