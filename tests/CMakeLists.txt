@@ -109,6 +109,19 @@ target_include_directories(thoth-egar-live-lifecycle PRIVATE
 )
 target_link_libraries(thoth-egar-live-lifecycle PRIVATE basic_agent sqlite3 Threads::Threads)
 
+add_executable(thoth-synthesis-prompt-tests synthesis_prompt_tests.cpp)
+target_include_directories(thoth-synthesis-prompt-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
+)
+target_link_libraries(thoth-synthesis-prompt-tests PRIVATE basic_agent Threads::Threads)
+add_test(NAME thoth-synthesis-prompt-tests COMMAND thoth-synthesis-prompt-tests)
+set_tests_properties(thoth-synthesis-prompt-tests PROPERTIES
+    LABELS "pr;unit"
+    TIMEOUT 60
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 add_executable(thoth-trajectory-injection-format-tests trajectory_injection_format_tests.cpp)
 target_include_directories(thoth-trajectory-injection-format-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/include
