@@ -9,11 +9,14 @@
  */
 #include "../external/basic_agent/include/synthetic_ab_pilot.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -160,6 +163,18 @@ bool testPilot(const std::string& binary) {
         fail("pilot failed: " + error);
         return false;
     }
+    const bool orders_legacy =
+        !report.arm_order_seeded
+        && report.arm_order_procedure == "legacy_fixed_a_then_b"
+        && report.evaluation_orders.size() == 2
+        && report.evaluation_orders[0].assigned_order == Thoth::ArmRunOrder::AThenB
+        && report.evaluation_orders[1].assigned_order == Thoth::ArmRunOrder::AThenB
+        && report.evaluation_orders[0].actual_starts.size() == 2
+        && report.evaluation_orders[0].actual_starts[0] == "A"
+        && report.evaluation_orders[0].actual_starts[1] == "B"
+        && report.evaluation_orders[1].actual_starts.size() == 2
+        && report.evaluation_orders[1].actual_starts[0] == "A"
+        && report.evaluation_orders[1].actual_starts[1] == "B";
     const bool ok = report.execution == "mock" && report.frozen_unchanged && report.identities_match
         && report.acquisition_sha256.size() == 64
         && report.frozen_sha256_after_evaluation == report.acquisition_sha256
@@ -171,7 +186,8 @@ bool testPilot(const std::string& binary) {
         && report.service_models.empty()
         && report.arm_a.evidence_files.size() == 2
         && report.arm_b.goal_files.size() == 2
-        && fs::is_regular_file(report.report_path);
+        && fs::is_regular_file(report.report_path)
+        && orders_legacy;
     std::cout << "ACQUISITION_SHA256 " << report.acquisition_sha256 << "\n";
     std::cout << "ACQUISITION_COUNTS trajectories=" << report.acquisition_counts.trajectories
               << " past_plans=" << report.acquisition_counts.past_plans
@@ -367,6 +383,195 @@ bool testLivePair(const std::string& binary) {
     return true;
 }
 
+bool scheduleBalanced(const std::vector<Thoth::ArmRunOrder>& orders) {
+    std::size_t a_then_b = 0;
+    std::size_t b_then_a = 0;
+    for (const Thoth::ArmRunOrder order : orders) {
+        if (order == Thoth::ArmRunOrder::BThenA) {
+            ++b_then_a;
+        } else {
+            ++a_then_b;
+        }
+    }
+    const std::size_t diff = a_then_b > b_then_a ? a_then_b - b_then_a : b_then_a - a_then_b;
+    return diff <= 1 && a_then_b + b_then_a == orders.size();
+}
+
+bool testArmOrderSchedule() {
+    const auto first = Thoth::buildArmOrderSchedule(4, std::optional<std::uint64_t>(42));
+    const auto second = Thoth::buildArmOrderSchedule(4, std::optional<std::uint64_t>(42));
+    if (first != second) {
+        fail("same seed did not reproduce the schedule");
+        return false;
+    }
+    if (!scheduleBalanced(first) || first.size() != 4) {
+        fail("even schedule is not balanced");
+        return false;
+    }
+    std::size_t b_count = 0;
+    for (const Thoth::ArmRunOrder order : first) {
+        if (order == Thoth::ArmRunOrder::BThenA) {
+            ++b_count;
+        }
+    }
+    if (b_count != 2) {
+        fail("four-case seeded schedule must contain two B_THEN_A assignments");
+        return false;
+    }
+    const auto odd = Thoth::buildArmOrderSchedule(5, std::optional<std::uint64_t>(7));
+    if (!scheduleBalanced(odd) || odd.size() != 5) {
+        fail("odd schedule is not approximately balanced");
+        return false;
+    }
+    const auto legacy = Thoth::buildArmOrderSchedule(3, std::nullopt);
+    if (legacy.size() != 3
+        || legacy[0] != Thoth::ArmRunOrder::AThenB
+        || legacy[1] != Thoth::ArmRunOrder::AThenB
+        || legacy[2] != Thoth::ArmRunOrder::AThenB) {
+        fail("unseeded schedule must stay A_THEN_B");
+        return false;
+    }
+    if (std::string(Thoth::armRunOrderLabel(Thoth::ArmRunOrder::AThenB)) != "A_THEN_B"
+        || std::string(Thoth::armRunOrderLabel(Thoth::ArmRunOrder::BThenA)) != "B_THEN_A") {
+        fail("arm order labels are wrong");
+        return false;
+    }
+    return true;
+}
+
+bool testArmOrderBFirst(const std::string& binary) {
+    const fs::path root = fs::temp_directory_path() / "thoth_lx_ab_order_b_first";
+    fs::remove_all(root);
+    Thoth::SyntheticAbRequest request;
+    request.engine_binary = binary;
+    request.work_root = root.string();
+    request.retrieval_config_path = "docker/experiment/retrieval_config.json";
+    request.acquisition = {makeCase("acq-order", "acquisition-order")};
+    request.evaluation = {
+        makeCase("eval-order-1", "evaluation-order-one"),
+        makeCase("eval-order-2", "evaluation-order-two"),
+    };
+    request.engine_timeout_seconds = 45;
+    request.arm_order_seed = 42;
+
+    Thoth::SyntheticAbReport report;
+    std::string error;
+    if (!Thoth::runSyntheticAbPilot(request, report, error)) {
+        fail("seeded pilot failed: " + error);
+        return false;
+    }
+    if (!report.arm_order_seeded
+        || report.arm_order_seed != 42
+        || report.arm_order_procedure != "seeded_balanced_shuffle_v1"
+        || report.evaluation_orders.size() != 2) {
+        fail("seeded report metadata is incomplete");
+        return false;
+    }
+    const auto expected = Thoth::buildArmOrderSchedule(2, std::optional<std::uint64_t>(42));
+    bool saw_b_first = false;
+    for (std::size_t i = 0; i < report.evaluation_orders.size(); ++i) {
+        const auto& row = report.evaluation_orders[i];
+        if (row.assigned_order != expected[i]) {
+            fail("assigned order diverged from the seeded schedule");
+            return false;
+        }
+        if (row.actual_starts.size() != 2) {
+            fail("successful case did not record two goal starts");
+            return false;
+        }
+        if (row.assigned_order == Thoth::ArmRunOrder::BThenA) {
+            saw_b_first = true;
+            if (row.actual_starts[0] != "B" || row.actual_starts[1] != "A") {
+                fail("B_THEN_A actual starts are wrong");
+                return false;
+            }
+        } else if (row.actual_starts[0] != "A" || row.actual_starts[1] != "B") {
+            fail("A_THEN_B actual starts are wrong");
+            return false;
+        }
+    }
+    if (!saw_b_first) {
+        fail("seeded two-case schedule did not include B_THEN_A");
+        return false;
+    }
+    if (!report.frozen_unchanged
+        || report.frozen_sha256_after_evaluation != report.acquisition_sha256
+        || report.acquisition_counts.trajectories != 1
+        || report.acquisition_counts.past_plans != 1) {
+        fail("B-first run damaged the frozen snapshot or acquisition counts");
+        return false;
+    }
+    fs::remove_all(root);
+    return true;
+}
+
+bool testArmOrderIncomplete(const std::string& binary) {
+    const fs::path root = fs::temp_directory_path() / "thoth_lx_ab_order_incomplete";
+    fs::remove_all(root);
+    const fs::path wrapper = root / "fail_b_goal.sh";
+    fs::create_directories(root);
+    {
+        std::ofstream out(wrapper);
+        out << "#!/bin/bash\n"
+            << "REAL=" << binary << "\n"
+            << "args=\"$*\"\n"
+            << "if [[ \"$args\" == *\"--fixed-evidence-goal\"* && \"$args\" == *\"/arm_b/\"* ]]; then\n"
+            << "  echo \"FIXED_EVIDENCE_GOAL FAILED intentional\"\n"
+            << "  exit 1\n"
+            << "fi\n"
+            << "exec \"$REAL\" \"$@\"\n";
+    }
+    fs::permissions(wrapper,
+                    fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
+                    fs::perm_options::replace);
+
+    Thoth::SyntheticAbRequest request;
+    request.engine_binary = wrapper.string();
+    request.work_root = (root / "work").string();
+    request.retrieval_config_path = "docker/experiment/retrieval_config.json";
+    request.acquisition = {makeCase("acq-incomplete", "acquisition-incomplete")};
+    request.evaluation = {
+        makeCase("eval-incomplete-1", "evaluation-incomplete-one"),
+        makeCase("eval-incomplete-2", "evaluation-incomplete-two"),
+    };
+    request.engine_timeout_seconds = 45;
+    request.arm_order_seed = 42;
+
+    Thoth::SyntheticAbReport report;
+    std::string error;
+    const bool ran = Thoth::runSyntheticAbPilot(request, report, error);
+    if (ran) {
+        fail("incomplete B-first launch should fail the pilot");
+        return false;
+    }
+    if (report.evaluation_orders.size() != 1) {
+        fail("failed pilot should record exactly the case that began evaluation goals");
+        return false;
+    }
+    // seed 42 with n=2 is balanced. First case may be A_THEN_B or B_THEN_A.
+    // A_THEN_B: A succeeds then B fails → actual_starts ["A","B"].
+    // B_THEN_A: B fails immediately → actual_starts ["B"].
+    const auto expected = Thoth::buildArmOrderSchedule(2, std::optional<std::uint64_t>(42));
+    const auto& recorded = report.evaluation_orders.front();
+    if (recorded.assigned_order != expected.front()) {
+        fail("incomplete run assigned order does not match the seeded schedule");
+        return false;
+    }
+    if (expected.front() == Thoth::ArmRunOrder::BThenA) {
+        if (recorded.actual_starts.size() != 1 || recorded.actual_starts[0] != "B") {
+            fail("B-first incomplete launch did not record only the B start");
+            return false;
+        }
+    } else if (recorded.actual_starts.size() != 2
+               || recorded.actual_starts[0] != "A"
+               || recorded.actual_starts[1] != "B") {
+        fail("A-first case that fails on B should record A then B starts");
+        return false;
+    }
+    fs::remove_all(root);
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -412,6 +617,20 @@ int main(int argc, char** argv) {
             return 2;
         }
         ok = testLivePair(argv[2]);
+    } else if (case_name == "arm_order_schedule") {
+        ok = testArmOrderSchedule();
+    } else if (case_name == "arm_order_b_first") {
+        if (argc < 3) {
+            fail("arm_order_b_first requires the thoth-engine path");
+            return 2;
+        }
+        ok = testArmOrderBFirst(argv[2]);
+    } else if (case_name == "arm_order_incomplete") {
+        if (argc < 3) {
+            fail("arm_order_incomplete requires the thoth-engine path");
+            return 2;
+        }
+        ok = testArmOrderIncomplete(argv[2]);
     } else {
         fail("unknown case: " + case_name);
         return 2;

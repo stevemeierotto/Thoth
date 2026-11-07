@@ -356,7 +356,7 @@ target_include_directories(thoth-synthetic-ab-pilot-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
 )
 target_link_libraries(thoth-synthetic-ab-pilot-tests PRIVATE basic_agent Threads::Threads)
-foreach(case IN ITEMS identity_match identity_digest identity_model identity_retrieval identity_evidence identity_goal exit_required library_missing live_identity)
+foreach(case IN ITEMS identity_match identity_digest identity_model identity_retrieval identity_evidence identity_goal exit_required library_missing live_identity arm_order_schedule)
     add_test(NAME synthetic-ab-${case}
         COMMAND thoth-synthetic-ab-pilot-tests ${case})
 endforeach()
@@ -364,6 +364,10 @@ add_test(NAME synthetic-ab-library-resolve
     COMMAND thoth-synthetic-ab-pilot-tests library_resolve $<TARGET_FILE:thoth-engine>)
 add_test(NAME synthetic-ab-pilot
     COMMAND thoth-synthetic-ab-pilot-tests pilot $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-arm-order-b-first
+    COMMAND thoth-synthetic-ab-pilot-tests arm_order_b_first $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-arm-order-incomplete
+    COMMAND thoth-synthetic-ab-pilot-tests arm_order_incomplete $<TARGET_FILE:thoth-engine>)
 add_test(NAME synthetic-ab-live-pair
     COMMAND thoth-synthetic-ab-pilot-tests live_pair $<TARGET_FILE:thoth-engine>)
 set_tests_properties(
@@ -376,6 +380,7 @@ set_tests_properties(
     synthetic-ab-exit_required
     synthetic-ab-library_missing
     synthetic-ab-live_identity
+    synthetic-ab-arm_order_schedule
     synthetic-ab-library-resolve
     PROPERTIES
         LABELS "pr;unit"
@@ -383,6 +388,11 @@ set_tests_properties(
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 set_tests_properties(synthetic-ab-pilot PROPERTIES
+    LABELS "pr;unit"
+    TIMEOUT 180
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(synthetic-ab-arm-order-b-first synthetic-ab-arm-order-incomplete PROPERTIES
     LABELS "pr;unit"
     TIMEOUT 180
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
