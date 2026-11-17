@@ -1,0 +1,11 @@
+# EGAR-LX R3 v1.2.1 SHA-256 checksums
+
+Generated: 2026-11-17
+
+## Final exploratory-freeze workbooks
+28fa7c18dd3e8f6f3cc39bcc89a84a767846a28e2a89431885e56b6c81651dd2  EGAR_R3_Diagnostic_Visible_v1.2.1.xlsx
+e282a70eba231cc2e09e4c4e07b62ae35029af592e5329b2e72f3a01cce76d0b  EGAR_R3_Sealed_Adjudication_Key_v1.2.1.xlsx
+
+## Preserved prior v1.2 byte copies
+085f014bea739df7de4ddb97c69a3e1d1c9223e66e27f167c4de725967697fa9  PRESERVED_EGAR_R3_Diagnostic_Visible_v1.2.xlsx
+104c28244a5781e983dcacd32683a0d0ab4cf40edb4d95a015f83046fc7710db  PRESERVED_EGAR_R3_Sealed_Adjudication_Key_v1.2.xlsx
