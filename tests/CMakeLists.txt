@@ -162,6 +162,18 @@ set_tests_properties(thoth-core-tests PROPERTIES
     TIMEOUT 1800
 )
 
+add_executable(thoth-synthesis-output-guard-tests synthesis_output_guard_tests.cpp)
+target_include_directories(thoth-synthesis-output-guard-tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/external/basic_agent/include
+)
+target_link_libraries(thoth-synthesis-output-guard-tests PRIVATE basic_agent Threads::Threads)
+add_test(NAME thoth-synthesis-output-guard-tests COMMAND thoth-synthesis-output-guard-tests)
+set_tests_properties(thoth-synthesis-output-guard-tests PROPERTIES
+    LABELS "pr;unit"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 add_executable(thoth-cm1-tests cm1_telemetry_tests.cpp)
 target_include_directories(thoth-cm1-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/include
@@ -356,7 +368,7 @@ target_include_directories(thoth-synthetic-ab-pilot-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/basic_agent/third_party
 )
 target_link_libraries(thoth-synthetic-ab-pilot-tests PRIVATE basic_agent Threads::Threads)
-foreach(case IN ITEMS identity_match identity_digest identity_model identity_retrieval identity_evidence identity_goal exit_required library_missing live_identity arm_order_schedule)
+foreach(case IN ITEMS identity_match identity_digest identity_model identity_retrieval identity_evidence identity_goal exit_required library_missing live_identity arm_order_schedule egar_r3_loader_hashes egar_r3_loader_assignments egar_r3_loader_missing_manifest egar_r3_loader_invalid_seed)
     add_test(NAME synthetic-ab-${case}
         COMMAND thoth-synthetic-ab-pilot-tests ${case})
 endforeach()
@@ -368,8 +380,28 @@ add_test(NAME synthetic-ab-arm-order-b-first
     COMMAND thoth-synthetic-ab-pilot-tests arm_order_b_first $<TARGET_FILE:thoth-engine>)
 add_test(NAME synthetic-ab-arm-order-incomplete
     COMMAND thoth-synthetic-ab-pilot-tests arm_order_incomplete $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-acquisition-only
+    COMMAND thoth-synthetic-ab-pilot-tests acquisition_only $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-evaluation-from-frozen
+    COMMAND thoth-synthetic-ab-pilot-tests evaluation_from_frozen $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-frozen-tamper
+    COMMAND thoth-synthetic-ab-pilot-tests frozen_tamper $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-identity-mismatch-from-frozen
+    COMMAND thoth-synthetic-ab-pilot-tests identity_mismatch_from_frozen $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-empty-template-tamper
+    COMMAND thoth-synthetic-ab-pilot-tests empty_template_tamper $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-frozen-count-mismatch
+    COMMAND thoth-synthetic-ab-pilot-tests frozen_count_mismatch $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-image-digest-require-unavailable
+    COMMAND thoth-synthetic-ab-pilot-tests image_digest_require_unavailable $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-frozen-count-inspection-readonly
+    COMMAND thoth-synthetic-ab-pilot-tests frozen_count_inspection_readonly $<TARGET_FILE:thoth-engine>)
 add_test(NAME synthetic-ab-live-pair
     COMMAND thoth-synthetic-ab-pilot-tests live_pair $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-live-phase-split
+    COMMAND thoth-synthetic-ab-pilot-tests live_phase_split $<TARGET_FILE:thoth-engine>)
+add_test(NAME synthetic-ab-egar-r3-acquisition
+    COMMAND thoth-synthetic-ab-pilot-tests egar_r3_acquisition $<TARGET_FILE:thoth-engine>)
 set_tests_properties(
     synthetic-ab-identity_match
     synthetic-ab-identity_digest
@@ -381,6 +413,10 @@ set_tests_properties(
     synthetic-ab-library_missing
     synthetic-ab-live_identity
     synthetic-ab-arm_order_schedule
+    synthetic-ab-egar_r3_loader_hashes
+    synthetic-ab-egar_r3_loader_assignments
+    synthetic-ab-egar_r3_loader_missing_manifest
+    synthetic-ab-egar_r3_loader_invalid_seed
     synthetic-ab-library-resolve
     PROPERTIES
         LABELS "pr;unit"
@@ -392,14 +428,37 @@ set_tests_properties(synthetic-ab-pilot PROPERTIES
     TIMEOUT 180
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
-set_tests_properties(synthetic-ab-arm-order-b-first synthetic-ab-arm-order-incomplete PROPERTIES
-    LABELS "pr;unit"
-    TIMEOUT 180
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+set_tests_properties(
+    synthetic-ab-arm-order-b-first
+    synthetic-ab-arm-order-incomplete
+    synthetic-ab-acquisition-only
+    synthetic-ab-evaluation-from-frozen
+    synthetic-ab-frozen-tamper
+    synthetic-ab-identity-mismatch-from-frozen
+    synthetic-ab-empty-template-tamper
+    synthetic-ab-frozen-count-mismatch
+    synthetic-ab-image-digest-require-unavailable
+    synthetic-ab-frozen-count-inspection-readonly
+    PROPERTIES
+        LABELS "pr;unit"
+        TIMEOUT 180
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 set_tests_properties(synthetic-ab-live-pair PROPERTIES
     LABELS "live"
     TIMEOUT 2400
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(synthetic-ab-live-phase-split PROPERTIES
+    LABELS "live"
+    TIMEOUT 3600
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+# Operator Live acquisition for EGAR-LX R3. Evaluation is intentionally not a CTest
+# target: it requires an explicit acquisition manifest path and arm_order_seed.
+set_tests_properties(synthetic-ab-egar-r3-acquisition PROPERTIES
+    LABELS "live"
+    TIMEOUT 28800
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
