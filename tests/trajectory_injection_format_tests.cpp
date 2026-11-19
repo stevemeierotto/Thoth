@@ -2,7 +2,8 @@
  * Copyright (c) 2026 Steve Meierotto
  *
  * Thoth — trajectory injection formatting regression.
- * Header-only formatter plus the existing combined 512-character cap.
+ * Legacy goal/score layout, prior-synthesis excerpt, unboosted gate, and
+ * combined past-experience cap (kMaxTrajectoryChars).
  *
  * Licensed under the MIT License (see LICENSE in project root)
  */
@@ -12,7 +13,9 @@
 #include "executive_controller.h"
 #include "goal_text_utils.h"
 #include "index_manager.h"
+#include "json.hpp"
 #include "memory.h"
+#include "plan_reuse_config.h"
 #include "planner_injection_config.h"
 #include "prompt_factory.h"
 #include "rag.h"
@@ -98,6 +101,19 @@ std::string applyCombinedBudget(const std::string& trajectoryBlock, const std::s
     return Thoth::capInjectionText(past, Thoth::PlannerInjection::kMaxTrajectoryChars);
 }
 
+std::string sampleTrajectoryJson(const std::string& response) {
+    nlohmann::json root;
+    root["steps"] = nlohmann::json::array({
+        {{"step_id", "retrieve-context"}, {"type", 1}, {"result", {{"status", "success"}}}},
+        {{"step_id", "synthesize"},
+         {"type", 2},
+         {"result",
+          {{"status", "success"},
+           {"data", {{"response", response}, {"prompt_chars", 100}}}}}}
+    });
+    return root.dump();
+}
+
 void testValidExtraction() {
     const std::string evidence = "The journal stops before login prompts.";
     const std::string goal = std::string(kInstruction) + evidence;
@@ -168,15 +184,16 @@ void testMissingAndEmptyMarker() {
 }
 
 void testScoreRetentionAndLongCase() {
-    check("trajectory budget stays 512", Thoth::PlannerInjection::kMaxTrajectoryChars == 512);
+    check("trajectory budget is 1536", Thoth::PlannerInjection::kMaxTrajectoryChars == 1536);
+    check("prior synthesis budget is 768", Thoth::PlannerInjection::kMaxPriorSynthesisChars == 768);
 
     const std::string evidenceStart = "CASE-TOKEN-START journal stops before login prompts";
     std::string evidence = evidenceStart;
-    evidence.append(2000, 'x');
+    evidence.append(4000, 'x');
     evidence += "CASE-TOKEN-END";
     const std::string goal = std::string(kInstruction) + evidence;
-    check("shared instruction exceeds the injection budget",
-          std::string(kInstruction).size() > Thoth::PlannerInjection::kMaxTrajectoryChars);
+    check("shared instruction is shorter than the injection budget",
+          std::string(kInstruction).size() < Thoth::PlannerInjection::kMaxTrajectoryChars);
 
     const float score = 0.85f;
     const std::string formatted = Thoth::formatTrajectoryInjection(goal, score);
@@ -190,7 +207,7 @@ void testScoreRetentionAndLongCase() {
     const std::string kept = keptPrefix(capped);
     check("long case uses the existing truncation marker",
           capped.size() == kept.size() + std::string("\n...(truncated)...").size());
-    check("kept trajectory prefix is the 512-character budget",
+    check("kept trajectory prefix matches kMaxTrajectoryChars",
           kept.size() == Thoth::PlannerInjection::kMaxTrajectoryChars);
     check("truncated block retains the score",
           kept.find("  Success: " + scoreText(score)) != std::string::npos);
@@ -205,23 +222,23 @@ void testScoreRetentionAndLongCase() {
 void testCombinedBudget() {
     const std::string evidenceStart = "CASE-TOKEN-START journal stops before login prompts";
     std::string evidence = evidenceStart;
-    evidence.append(2000, 'y');
+    evidence.append(4000, 'y');
     const std::string goal = std::string(kInstruction) + evidence;
     const float score = 0.85f;
     const std::string formatted = Thoth::formatTrajectoryInjection(goal, score);
 
     const std::string reuse =
         "[RELEVANT PAST APPROACHES — REUSE-ONLY-TOKEN]\n" + std::string(kInstruction) +
-        std::string(1500, 'z') + "CASE-TAIL-BEYOND-BUDGET";
+        std::string(2500, 'z') + "CASE-TAIL-BEYOND-BUDGET";
     const std::string capped = applyCombinedBudget(formatted, reuse);
     const std::string kept = keptPrefix(capped);
-    check("combined cap keeps 512 characters",
+    check("combined cap keeps kMaxTrajectoryChars characters",
           kept.size() == Thoth::PlannerInjection::kMaxTrajectoryChars);
     check("combined cap retains the trajectory score",
           kept.find(scoreText(score)) != std::string::npos);
     check("combined cap retains the case start",
           kept.find(evidenceStart) != std::string::npos);
-    check("combined cap drops the appended reuse block",
+    check("combined cap drops the appended reuse block when case dominates",
           capped.find("REUSE-ONLY-TOKEN") == std::string::npos);
     check("combined cap drops the instruction inside reuse",
           capped.find("Investigate the following Linux problem") == std::string::npos);
@@ -231,11 +248,90 @@ void testCombinedBudget() {
     const std::string shortCombined = applyCombinedBudget(shortBlock, reuse);
     const std::string shortKept = keptPrefix(shortCombined);
     check("short goal without a marker survives the combined cap",
-          shortKept.size() == Thoth::PlannerInjection::kMaxTrajectoryChars
-              && shortKept.find("- Goal: " + shortGoal) != std::string::npos
+          shortKept.find("- Goal: " + shortGoal) != std::string::npos
               && shortKept.find(scoreText(0.8f)) != std::string::npos);
+    check("short goal combined block keeps outline space for reuse head",
+          shortCombined.find("REUSE-ONLY-TOKEN") != std::string::npos);
     check("combined cap drops the reuse tail after a short goal",
           shortCombined.find("CASE-TAIL-BEYOND-BUDGET") == std::string::npos);
+}
+
+void testPriorSynthesisExtractionAndLabels() {
+    const std::string goal = "Diagnose VPN DNS overwrite";
+    const std::string diagnosis =
+        "VPN profiles often rewrite resolv.conf; check NetworkManager and systemd-resolved.";
+    const std::string json = sampleTrajectoryJson(diagnosis);
+
+    const std::string excerpt =
+        Thoth::extractPriorSynthesisExcerpt(json, Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("extract returns the stored synthesis response", excerpt == diagnosis);
+
+    const std::string enriched = Thoth::formatTrajectoryInjection(
+        goal, 1.0f, json, true, Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("enriched block includes prior synthesis label",
+          enriched.find("Prior synthesis (unverified experience, excerpt): " + diagnosis)
+              != std::string::npos);
+    check("enriched block labels mechanical success",
+          enriched.find("Mechanical success: 1") != std::string::npos
+              && enriched.find("not diagnostic verification") != std::string::npos);
+    check("enriched block states verified outcome is not recorded",
+          enriched.find("Verified diagnostic outcome: not recorded") != std::string::npos);
+    check("enriched block does not use legacy Success line",
+          enriched.find("  Success: ") == std::string::npos);
+
+    std::string longResponse(Thoth::PlannerInjection::kMaxPriorSynthesisChars + 200, 'A');
+    longResponse.replace(0, 12, "SYNTH-START-");
+    longResponse.replace(longResponse.size() - 10, 10, "SYNTH-END");
+    const std::string cappedExcerpt = Thoth::extractPriorSynthesisExcerpt(
+        sampleTrajectoryJson(longResponse), Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("long synthesis is truncated with marker",
+          cappedExcerpt.find("SYNTH-START-") != std::string::npos
+              && cappedExcerpt.find("\n...(truncated)...") != std::string::npos
+              && cappedExcerpt.find("SYNTH-END") == std::string::npos);
+    check("truncated synthesis kept prefix matches kMaxPriorSynthesisChars",
+          keptPrefix(cappedExcerpt).size() == Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+}
+
+void testRelevanceGateAndMalformedFallback() {
+    const std::string goal = "Ship the widget relay";
+    const float score = 0.8f;
+    const std::string json = sampleTrajectoryJson("should not appear when gated off");
+
+    const std::string gatedOff = Thoth::formatTrajectoryInjection(
+        goal, score, json, false, Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("gate false preserves legacy formatting", gatedOff == legacyFormat(goal, score));
+    check("gate false omits prior synthesis",
+          gatedOff.find("Prior synthesis") == std::string::npos);
+
+    check("unboosted floor constant remains 0.55",
+          Thoth::PlannerTrajectory::kMinSimilarityFloor == 0.55f);
+    const bool includeAbove =
+        0.60f >= Thoth::PlannerTrajectory::kMinSimilarityFloor;
+    const bool includeBelow =
+        0.50f >= Thoth::PlannerTrajectory::kMinSimilarityFloor;
+    check("heuristic includes excerpt at or above unboosted floor", includeAbove);
+    check("heuristic excludes excerpt below unboosted floor", !includeBelow);
+
+    const std::string missing = Thoth::formatTrajectoryInjection(
+        goal, score, "", true, Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("missing trajectory json falls back to legacy", missing == legacyFormat(goal, score));
+
+    const std::string malformed = Thoth::formatTrajectoryInjection(
+        goal, score, "{not-json", true, Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("malformed trajectory json falls back to legacy",
+          malformed == legacyFormat(goal, score));
+
+    const std::string noLlm = Thoth::formatTrajectoryInjection(
+        goal,
+        score,
+        R"({"steps":[{"step_id":"retrieve-context","type":1,"result":{"status":"success"}}]})",
+        true,
+        Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("trajectory without LLM response falls back to legacy",
+          noLlm == legacyFormat(goal, score));
+
+    check("empty extract on malformed json",
+          Thoth::extractPriorSynthesisExcerpt("{", 64).empty());
 }
 
 class UnusedPlanner : public IPlanner {
@@ -244,7 +340,7 @@ public:
     Plan revise_plan(const Plan&, const nlohmann::json&) override { return {}; }
 };
 
-/** The live related-goal payload: 219-byte trajectory block and 434-byte past-plan block. */
+/** Workflow outline injection still present; enriched synthesis can reach the planner prompt. */
 void testObservedPayloadOrder() {
     const std::string goal =
         "Diagnose this synthetic service failure using only the supplied evidence.\n"
@@ -258,8 +354,16 @@ void testObservedPayloadOrder() {
     check("observed outline is the two-step summary",
           outline == "RETRIEVAL(retrieve-context) → LLM(synthesize)");
 
-    const std::string trajectory = Thoth::formatTrajectoryInjection(goal, 1.0f);
-    check("observed trajectory block is 219 bytes", trajectory.size() == 219);
+    const std::string diagnosis =
+        "The absence of its configuration file explains the start failure; restore the unit drop-in.";
+    const std::string trajectory = Thoth::formatTrajectoryInjection(
+        goal,
+        1.0f,
+        sampleTrajectoryJson(diagnosis),
+        true,
+        Thoth::PlannerInjection::kMaxPriorSynthesisChars);
+    check("enriched trajectory carries prior synthesis",
+          trajectory.find(diagnosis) != std::string::npos);
 
     const fs::path workspace = fs::temp_directory_path() / "thoth-trajectory-payload-order";
     fs::remove_all(workspace);
@@ -290,8 +394,7 @@ void testObservedPayloadOrder() {
         const std::string built = Thoth::ExecutiveControllerP0TestAccess::reuseContext(
             controller, {record});
         const auto split = Thoth::splitPlanReuseInjection(std::string("evaluation goal\n") + built);
-        check("observed past-plan block is 434 bytes", split.second.size() == 434);
-        check("outline precedes the repeated goal",
+        check("past-plan workflow outline is unchanged",
               split.second.find("  Outline: " + outline) != std::string::npos
                   && split.second.find("  Outline: " + outline) < split.second.find("  Goal:"));
 
@@ -299,21 +402,25 @@ void testObservedPayloadOrder() {
         PromptFactory prompts(*memory, *rag);
         Thoth::PlannerPromptMetrics metrics;
         const std::string prompt = prompts.buildPlanPrompt("evaluation goal", "", past, &metrics);
-        const std::string marker = "\n...(truncated)...";
-        const auto markerPos = prompt.find(marker);
-        const auto outlinePos = prompt.find("  Outline: " + outline);
-        check("planner prompt keeps the outline ahead of the truncation marker",
-              outlinePos != std::string::npos && markerPos != std::string::npos && outlinePos < markerPos);
-        check("combined cap still keeps 512 characters",
-              markerPos != std::string::npos
-                  && prompt.find("[PAST EXPERIENCE — RELEVANT TRAJECTORY]") != std::string::npos
-                  && markerPos - prompt.find("[PAST EXPERIENCE — RELEVANT TRAJECTORY]")
-                      == Thoth::PlannerInjection::kMaxTrajectoryChars);
-        check("experience budget drop stays separate from the 512-character cap",
+        check("planner prompt keeps Rules and Schema core sections",
+              prompt.find("Rules:\n") == 0 && prompt.find("\n\nSchema:\n") != std::string::npos);
+        check("planner prompt keeps the workflow outline",
+              prompt.find("  Outline: " + outline) != std::string::npos);
+        check("planner prompt receives the prior synthesis excerpt",
+              prompt.find(diagnosis) != std::string::npos);
+        check("experience budget drop stays separate from the section cap",
               !metrics.experience_dropped);
-        check("planner prompt does not receive the written diagnosis",
-              prompt.find("absence of its configuration file") == std::string::npos);
-        check("trajectory budget stays 512", Thoth::PlannerInjection::kMaxTrajectoryChars == 512);
+        check("trajectory section cap remains configured at 1536",
+              Thoth::PlannerInjection::kMaxTrajectoryChars == 1536);
+
+        // Assembly budget: core + 1536 experience must fit under kMinPlanPromptBudget.
+        const std::size_t coreBytes = metrics.rules_bytes + metrics.schema_bytes + metrics.goal_bytes;
+        check("core prompt bytes leave room for 1536 experience under min budget",
+              coreBytes + Thoth::PlannerInjection::kMaxTrajectoryChars
+                  < Thoth::PlannerInjection::kMinPlanPromptBudget);
+        check("assembled prompt does not drop experience under min budget",
+              !metrics.experience_dropped
+                  && metrics.total_bytes > metrics.rules_bytes + metrics.schema_bytes);
     }
 
     if (hadWorkspace) {
@@ -331,6 +438,8 @@ int main() {
     testMissingAndEmptyMarker();
     testScoreRetentionAndLongCase();
     testCombinedBudget();
+    testPriorSynthesisExtractionAndLabels();
+    testRelevanceGateAndMalformedFallback();
     testObservedPayloadOrder();
     if (failures != 0) {
         std::cerr << failures << " trajectory injection formatting checks failed\n";
