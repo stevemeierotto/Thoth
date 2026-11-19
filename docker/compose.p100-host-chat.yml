@@ -1,0 +1,31 @@
+# P100 host-chat overlay — default DEV chat is thoth-qwen2.5-7b-p100 on thoth-net.
+#
+# Usage (from repo root):
+#   COMPOSE_FILE=docker-compose.yml:docker/compose.p100-host-chat.yml \
+#     docker compose up -d
+# Or set COMPOSE_FILE in the gitignored repo-root .env (see docker/embed.env.example).
+#
+# Prerequisites:
+#   - Container thoth-qwen2.5-7b-p100 is running and attached to the Compose
+#     project network (usually thoth_thoth-net). See docker/README.md
+#     "P100 network attachment".
+#   - Host GUI keeps using 127.0.0.1:8082 (localhost publish unchanged).
+#
+# CPU chat (llama-server on host :8080) is opt-in:
+#   docker compose --profile cpu-chat up -d llama-server
+#
+# Do not combine this overlay with compose.ci.yml unless CI intentionally
+# targets a live P100 endpoint.
+
+services:
+  llama-server:
+    profiles: ["cpu-chat"]
+    restart: "no"
+
+  thoth-engine:
+    depends_on: !override
+      llama-embed-server:
+        condition: service_healthy
+    environment:
+      THOTH_INFERENCE_BASE_URL: http://thoth-qwen2.5-7b-p100:8080
+      # THOTH_EMBED_BASE_URL remains http://llama-embed-server:8081 from base file

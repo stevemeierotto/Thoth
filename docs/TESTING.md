@@ -98,8 +98,8 @@ Do not use an all-LLM mock plan to test reflection unless you also mock failure 
 
 2. **Ensure the inference backend is reachable** when running full/integration tests:
    ```bash
-   # Default: llama_cpp (Compose llama-server :8080 + llama-embed-server :8081)
-   curl -sf http://127.0.0.1:8080/health
+   # Default: llama_cpp (host P100 chat :8082 + llama-embed-server :8081)
+   curl -sf http://127.0.0.1:8082/health
    # Or explicit Ollama: THOTH_INFERENCE_BACKEND=ollama and ollama list
    ```
 

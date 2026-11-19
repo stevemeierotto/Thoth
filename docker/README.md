@@ -185,16 +185,34 @@ A later DEV rebuild moves the `thoth-engine:local` tag. It does not move that di
 | `THOTH_WORKSPACE_PATH` | `/workspace` |
 | `THOTH_LOGS_PATH` | `/logs` |
 | `THOTH_PROJECT_ROOT` | `/workspace` (deterministic deploy override; optional when walk terminates) |
-| `THOTH_INFERENCE_BASE_URL` | `http://llama-server:8080` |
-| `THOTH_EMBED_BASE_URL` | `http://llama-embed-server:8081` |
+| `THOTH_INFERENCE_BASE_URL` | Host: `http://127.0.0.1:8082`; with [`compose.p100-host-chat.yml`](compose.p100-host-chat.yml): `http://thoth-qwen2.5-7b-p100:8080` |
+| `THOTH_EMBED_BASE_URL` | `http://llama-embed-server:8081` (Compose) / `http://127.0.0.1:8081` (host) |
 | `THOTH_INFERENCE_BACKEND` | `llama_cpp` |
 | `THOTH_EMBED_STRICT` | `0` (set `1` after embed_probe stable — disables silent TF-IDF fallback) |
 | `THOTH_ENGINE_BIND` | `0.0.0.0` |
 | `THOTH_ENGINE_PORT` | `8090` |
 
-The host GUI does not join `thoth-net`. Compose publishes llama.cpp on `127.0.0.1:8080` (chat) and `127.0.0.1:8081` (embeddings) so a normal launch, with no inference environment overrides, reaches those servers. The engine container keeps the Docker DNS URLs in the table above.
+The host GUI does not join `thoth-net`. Host-native chat defaults to the P100 Qwen server on `127.0.0.1:8082`; embeddings stay on `127.0.0.1:8081`. CPU llama.cpp on `127.0.0.1:8080` is optional (`--profile cpu-chat` when using the P100 overlay). With [`compose.p100-host-chat.yml`](compose.p100-host-chat.yml), the engine container reaches P100 by **Compose network DNS** (`thoth-qwen2.5-7b-p100:8080`), not via the host loopback publish.
 
 Example operator env: [`docker/embed.env.example`](embed.env.example) (inference + embedding) and [`docker/alp.env.example`](alp.env.example) (ALP flags).
+
+### P100 network attachment
+
+`thoth-qwen2.5-7b-p100` is a standalone container. Its host publish stays **`127.0.0.1:8082→8080`** (loopback only). Compose `thoth-engine` cannot use that loopback publish from `thoth-net`; attach the container to the Compose project network instead:
+
+```bash
+# Discover the project network (usually thoth_thoth-net)
+docker network ls | grep thoth
+
+# Attach (idempotent if already connected)
+docker network connect thoth_thoth-net thoth-qwen2.5-7b-p100
+
+# Verify DNS from the Compose network
+docker run --rm --network thoth_thoth-net curlimages/curl:8.5.0 \
+  -sf http://thoth-qwen2.5-7b-p100:8080/health
+```
+
+**After recreating** `thoth-qwen2.5-7b-p100`, re-run `docker network connect …` (recreate drops extra networks). Host `-p 127.0.0.1:8082:8080` is unchanged. Prefer documenting the connect in any restore script that recreates the P100 container.
 
 ## Troubleshooting embeddings
 

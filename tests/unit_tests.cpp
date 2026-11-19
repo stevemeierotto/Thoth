@@ -343,7 +343,7 @@ static bool testInferenceEndpointResolution() {
         ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
 
         const auto endpoints = Thoth::resolveInferenceEndpoints();
-        if (endpoints.base_url != "http://127.0.0.1:8080") {
+        if (endpoints.base_url != "http://127.0.0.1:8082") {
             std::cerr << "testInferenceEndpointResolution: default base_url mismatch: "
                       << endpoints.base_url << "\n";
             ok = false;
@@ -362,7 +362,7 @@ static bool testInferenceEndpointResolution() {
         ScopedEnvVar host("OLLAMA_HOST", "custom-host:11434");
 
         const auto endpoints = Thoth::resolveInferenceEndpoints();
-        if (endpoints.base_url != "http://127.0.0.1:8080"
+        if (endpoints.base_url != "http://127.0.0.1:8082"
             || endpoints.embed_base_url != "http://127.0.0.1:8081") {
             std::cerr << "testInferenceEndpointResolution: llama_cpp ignored OLLAMA_HOST failed: "
                       << endpoints.base_url << " embed " << endpoints.embed_base_url << "\n";
@@ -1064,7 +1064,7 @@ static bool testRuntimeBootstrapIdempotent() {
     ScopedEnvVar unsetEmbed("THOTH_EMBED_BASE_URL", nullptr);
     ScopedEnvVar unsetHost("OLLAMA_HOST", nullptr);
     const auto endpoints = Thoth::resolveInferenceEndpoints();
-    return endpoints.base_url == "http://127.0.0.1:8080"
+    return endpoints.base_url == "http://127.0.0.1:8082"
         && endpoints.embed_base_url == "http://127.0.0.1:8081";
 }
 
